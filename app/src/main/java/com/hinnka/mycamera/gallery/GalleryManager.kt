@@ -1112,7 +1112,8 @@ object GalleryManager {
                 rawExposureCompensation = metadata.rawExposureCompensation ?: 0f,
                 rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
-                sharpeningValue = 0.4f
+                sharpeningValue = 0.4f,
+                rawDcpId = metadata.rawDcpId
             ) ?: return@withContext
             var bitmap = rawResult.sdrBitmap
 
@@ -1660,7 +1661,8 @@ object GalleryManager {
                     rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
                     sharpeningValue = 0.4f,
                     denoiseValue = 0.2f,
-                    chromaDenoiseValue = 0.2f
+                    chromaDenoiseValue = 0.2f,
+                    rawDcpId = metadata.rawDcpId
                 )
                 // GPU 已消费 stackedRgbBuffer，立即释放引用（超分时约 288 MB）
                 // fusedBayerBuffer 仍由 finalStackResult 持有，用于后续 DNG 保存
@@ -2556,6 +2558,7 @@ object GalleryManager {
                         rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                         sharpeningValue = 0.4f,
                         denoiseValue = updatedMetadata.rawDenoiseValue,
+                        rawDcpId = updatedMetadata.rawDcpId,
                         onMetadata = { raw ->
                             updatedMetadata = updatedMetadata.merge(raw)
                         }
@@ -2669,6 +2672,7 @@ object GalleryManager {
                     rawWhitePointCorrection = updatedMetadata?.rawWhitePointCorrection ?: 0f,
                     sharpeningValue = 0.4f,
                     denoiseValue = (updatedMetadata ?: MediaMetadata()).rawDenoiseValue,
+                    rawDcpId = updatedMetadata?.rawDcpId,
                     onMetadata = { raw ->
                         updatedMetadata = updatedMetadata?.merge(raw) ?: MediaMetadata().merge(raw)
                     }

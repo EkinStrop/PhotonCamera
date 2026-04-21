@@ -202,6 +202,10 @@
     <string name="settings_baseline_jpg_description">选择普通 JPG 创意 LUT 之前先应用的基准 LUT 与基准配方。</string>
     <string name="settings_baseline_raw_title">RAW 基准色彩校正</string>
     <string name="settings_baseline_raw_description">选择用于 RAW 渲染、导出和重处理链路的基准 LUT 与基准配方。</string>
+    <string name="raw_dcp_title">RAW DCP</string>
+    <string name="raw_dcp_import">导入 DCP</string>
+    <string name="raw_dcp_import_success">已导入 DCP：%1$s</string>
+    <string name="raw_dcp_import_failed">导入 DCP 失败</string>
     <string name="settings_baseline_phantom_title">幻影模式基准色彩校正</string>
     <string name="settings_baseline_phantom_description">选择幻影模式创意 LUT 之前先应用的基准 LUT 与基准配方。</string>
     <string name="settings_baseline_dialog_description">为当前目标选择一个基准 LUT。它会在普通创意 LUT 之前应用。</string>

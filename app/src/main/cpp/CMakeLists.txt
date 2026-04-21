@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.22.1)
 project("native-tool")
 
 set(LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
+set(ADOBE_DCP_TOOL_DIR /Users/zhoubinjia/Projects/AdobeDCPTool)
+set(ADOBE_DNG_SOURCE_DIR ${ADOBE_DCP_TOOL_DIR}/composeApp/src/jvmMain/cpp/dng_sdk/source)
+set(ADOBE_XMP_STUB_DIR ${ADOBE_DCP_TOOL_DIR}/composeApp/src/jvmMain/cpp/XMPStub/include)
 
 # 4. 添加头文件路径
 include_directories(${LIB_PATH}/include)
@@ -9,6 +12,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/LibRaw)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libjpeg-turbo/src)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../rawtherapee-5.12/rtengine)
+include_directories(${ADOBE_DNG_SOURCE_DIR})
+include_directories(${ADOBE_XMP_STUB_DIR})
 
 file(GLOB JXL_LIBS "${LIB_PATH}/lib/${ANDROID_ABI}/*.a")
 
@@ -72,6 +77,8 @@ include_directories("${CMAKE_CURRENT_BINARY_DIR}/generated_shaders")
 # LibRaw sources
 file(GLOB_RECURSE LIBRAW_SOURCES LibRaw/src/*.cpp LibRaw/src/*.c)
 list(FILTER LIBRAW_SOURCES EXCLUDE REGEX ".*_ph\\.cpp$")
+file(GLOB ADOBE_DNG_SOURCES "${ADOBE_DNG_SOURCE_DIR}/*.cpp")
+list(FILTER ADOBE_DNG_SOURCES EXCLUDE REGEX ".*/dng_validate\\.cpp$")
 
 # 6. 将你的 native 库链接到 libyuv
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O3 -ffast-math")
@@ -89,13 +96,29 @@ add_library(my-native-lib SHARED
     vulkan_utils.cpp
     vulkan_stacker.cpp
     vulkan_raw_stacker.cpp
+    dcp_parser.cpp
     ${LIBRAW_SOURCES}
+    ${ADOBE_DNG_SOURCES}
     ${GENERATED_SHADER_HEADERS}
 )
 add_dependencies(my-native-lib compile_shaders)
 
 # 启用优化和 OpenMP
-target_compile_definitions(my-native-lib PRIVATE VK_USE_PLATFORM_ANDROID_KHR LIBRAW_USE_OPENMP)
+target_compile_definitions(
+    my-native-lib
+    PRIVATE
+    VK_USE_PLATFORM_ANDROID_KHR
+    LIBRAW_USE_OPENMP
+    qAndroid=1
+    qDNGUseStdInt=1
+    qDNGReportErrors=1
+    qDNGXMPFiles=0
+    qDNGXMPDocOps=0
+    qDNGUseLibJPEG=0
+    qDNGValidate=0
+    qDNGValidateTarget=0
+    qDNGThreadSafe=0
+)
 target_compile_options(my-native-lib PRIVATE -O3 -ffast-math -w ${OpenMP_CXX_FLAGS})
 
 target_link_libraries(
@@ -107,4 +130,5 @@ target_link_libraries(
     jnigraphics
     android
     vulkan
+    z
 )

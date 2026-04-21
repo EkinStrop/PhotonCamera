@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,11 +53,13 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.ui.camera.LutEditBottomSheet
 import com.hinnka.mycamera.ui.camera.RecipeScope
 import com.hinnka.mycamera.ui.components.*
+import com.hinnka.mycamera.ui.components.RawEditPanel
 import com.hinnka.mycamera.ui.theme.AccentOrange
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
@@ -79,6 +84,7 @@ private data class PreviewRenderSignature(
     val editRawExposureCompensation: Float,
     val editRawBlackPointCorrection: Float,
     val editRawWhitePointCorrection: Float,
+    val editRawDcpId: String?,
     val editComputationalAperture: Float?,
     val editFocusX: Float?,
     val editFocusY: Float?,
@@ -138,6 +144,8 @@ fun PhotoEditScreen(
     val editRawExposureCompensation by viewModel.editRawExposureCompensation.collectAsState()
     val editRawBlackPointCorrection by viewModel.editRawBlackPointCorrection.collectAsState()
     val editRawWhitePointCorrection by viewModel.editRawWhitePointCorrection.collectAsState()
+    val editRawDcpId by viewModel.editRawDcpId.collectAsState()
+    val availableDcps = viewModel.availableDcps
     
     val editComputationalAperture by viewModel.editComputationalAperture.collectAsState()
     val editFocusX by viewModel.editFocusPointX.collectAsState()
@@ -154,6 +162,7 @@ fun PhotoEditScreen(
     var editTab by remember { mutableIntStateOf(0) } // 0: 滤镜/边框, 1: 细节处理, 2: RAW, 3: 裁剪
     var showControls by remember { mutableStateOf(true) }
     var isZoomed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val refreshKey = currentPhoto?.id?.let { viewModel.photoRefreshKeys[it] } ?: 0L
     var appliedPreviewSignature by remember(currentPhoto?.id) { mutableStateOf<PreviewRenderSignature?>(null) }
     var appliedPreviewMaxEdge by remember(currentPhoto?.id) { mutableIntStateOf(0) }
@@ -179,6 +188,7 @@ fun PhotoEditScreen(
             editRawExposureCompensation = editRawExposureCompensation,
             editRawBlackPointCorrection = editRawBlackPointCorrection,
             editRawWhitePointCorrection = editRawWhitePointCorrection,
+            editRawDcpId = editRawDcpId,
             editComputationalAperture = editComputationalAperture,
             editFocusX = editFocusX,
             editFocusY = editFocusY,
@@ -204,6 +214,22 @@ fun PhotoEditScreen(
         currentPhoto ?: return@LaunchedEffect
         editFrameCustomProperties = currentPhoto.metadata?.customProperties
             ?: viewModel.getEditCustomProperties(currentPhoto.id)
+    }
+
+    val rawDcpLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val photo = currentPhoto ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val imported = viewModel.importRawDcp(uri)
+            if (imported != null) {
+                viewModel.saveRawDcpSelection(photo, imported.id)
+                Toast.makeText(context, context.getString(R.string.raw_dcp_import_success, imported.getName()), Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, context.getString(R.string.raw_dcp_import_failed), Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // 快速预览：conflate 保证渲染不被中断，参数变化只跳过中间帧，始终处理最新值
@@ -779,10 +805,18 @@ fun PhotoEditScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                         } else if (editTab == 2) {
                             RawEditPanel(
+                                selectedDcpId = editRawDcpId,
+                                availableDcps = availableDcps,
                                 rawNlmNoiseFactor = editRawNlmNoiseFactor,
                                 rawExposureCompensation = editRawExposureCompensation,
                                 rawBlackPointCorrection = editRawBlackPointCorrection,
                                 rawWhitePointCorrection = editRawWhitePointCorrection,
+                                onSelectDcp = { dcpId ->
+                                    viewModel.saveRawDcpSelection(currentPhoto, dcpId)
+                                },
+                                onImportDcp = {
+                                    rawDcpLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                },
                                 onRawNlmNoiseFactorChange = {
                                     viewModel.saveRawDenoiseValue(currentPhoto, it)
                                 },
@@ -1053,72 +1087,6 @@ private fun ZoomableEditImage(
     }
 }
 
-@Composable
-private fun RawEditPanel(
-    rawNlmNoiseFactor: Float,
-    rawExposureCompensation: Float,
-    rawBlackPointCorrection: Float,
-    rawWhitePointCorrection: Float,
-    onRawNlmNoiseFactorChange: (Float) -> Unit,
-    onRawExposureCompensationChange: (Float) -> Unit,
-    onRawBlackPointCorrectionChange: (Float) -> Unit,
-    onRawWhitePointCorrectionChange: (Float) -> Unit,
-    onAdjustmentStart: () -> Unit,
-    onAdjustmentEnd: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_nlm_noise_factor),
-            value = rawNlmNoiseFactor,
-            valueRange = 0f..1f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawNlmNoiseFactorChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_exposure_compensation),
-            value = rawExposureCompensation,
-            valueRange = -2f..2f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawExposureCompensationChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_black_point_correction),
-            value = rawBlackPointCorrection,
-            valueRange = -0.25f..0.25f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawBlackPointCorrectionChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_white_point_correction),
-            value = rawWhitePointCorrection,
-            valueRange = -0.5f..0.5f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawWhitePointCorrectionChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-    }
-}
 
 @Composable
 private fun <T> SegmentedControl(

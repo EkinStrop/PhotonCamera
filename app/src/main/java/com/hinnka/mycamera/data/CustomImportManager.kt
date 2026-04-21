@@ -11,6 +11,7 @@ import com.hinnka.mycamera.frame.FrameTemplateParser
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.lut.XmpLutParser
 import com.hinnka.mycamera.raw.ColorSpace
+import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.utils.PLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,10 +34,12 @@ class CustomImportManager(private val context: Context) {
 
         // 自定义边框目录
         private const val CUSTOM_FRAME_DIR = "custom_frames"
+        private const val CUSTOM_DCP_DIR = "custom_dcps"
 
         // 配置文件
         private const val CUSTOM_LUT_CONFIG = "custom_luts.json"
         private const val CUSTOM_FRAME_CONFIG = "custom_frames.json"
+        private const val CUSTOM_DCP_CONFIG = "custom_dcps.json"
         private const val CATEGORY_OVERRIDES_CONFIG = "category_overrides.json"
 
         // 自定义字体目录
@@ -83,6 +86,9 @@ class CustomImportManager(private val context: Context) {
 
     private val customFrameDir: File
         get() = File(context.filesDir, CUSTOM_FRAME_DIR).apply { mkdirs() }
+
+    private val customDcpDir: File
+        get() = File(context.filesDir, CUSTOM_DCP_DIR).apply { mkdirs() }
 
     private val customFontDir: File
         get() = File(context.filesDir, CUSTOM_FONT_DIR).apply { mkdirs() }
@@ -234,6 +240,29 @@ class CustomImportManager(private val context: Context) {
             frameId
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to import frame", e)
+            null
+        }
+    }
+
+    fun importDcp(uri: Uri, displayName: String? = null): String? {
+        return try {
+            val fileName = getFileName(uri) ?: "profile_${System.currentTimeMillis()}.dcp"
+            val dcpId = "custom_dcp_${UUID.randomUUID()}"
+            val normalizedFileName = "$dcpId.dcp"
+            val dcpFile = File(customDcpDir, normalizedFileName)
+
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                FileOutputStream(dcpFile).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            } ?: return null
+
+            val name = displayName ?: fileName.substringBeforeLast('.')
+            saveDcpToConfig(dcpId, name, normalizedFileName)
+            PLog.d(TAG, "DCP imported successfully: $dcpId ($name)")
+            dcpId
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to import DCP", e)
             null
         }
     }
@@ -484,6 +513,42 @@ class CustomImportManager(private val context: Context) {
         }
     }
 
+    fun getCustomDcps(): List<DcpInfo> {
+        return try {
+            val configFile = File(context.filesDir, CUSTOM_DCP_CONFIG)
+            if (!configFile.exists()) return emptyList()
+
+            val jsonArray = JSONArray(configFile.readText())
+            buildList {
+                for (index in 0 until jsonArray.length()) {
+                    val dcpObject = jsonArray.getJSONObject(index)
+                    val id = dcpObject.getString("id")
+                    val nameObject = dcpObject.getJSONObject("name")
+                    val fileName = dcpObject.getString("fileName")
+                    val file = File(customDcpDir, fileName)
+                    if (!file.exists()) continue
+
+                    val nameMap = mutableMapOf<String, String>()
+                    nameObject.keys().forEach { lang ->
+                        nameMap[lang] = nameObject.getString(lang)
+                    }
+
+                    add(
+                        DcpInfo(
+                            id = id,
+                            nameMap = nameMap,
+                            filePath = file.absolutePath,
+                            isBuiltIn = false
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to load custom DCPs", e)
+            emptyList()
+        }
+    }
+
     /**
      * 更新自定义 LUT 名称
      */
@@ -728,6 +793,22 @@ class CustomImportManager(private val context: Context) {
         }
 
         jsonArray.put(lutObj)
+        configFile.writeText(jsonArray.toString())
+    }
+
+    private fun saveDcpToConfig(dcpId: String, name: String, fileName: String) {
+        val configFile = File(context.filesDir, CUSTOM_DCP_CONFIG)
+        val jsonArray = if (configFile.exists()) JSONArray(configFile.readText()) else JSONArray()
+        jsonArray.put(
+            JSONObject().apply {
+                put("id", dcpId)
+                put("name", JSONObject().apply {
+                    put("en", name)
+                    put("zh", name)
+                })
+                put("fileName", fileName)
+            }
+        )
         configFile.writeText(jsonArray.toString())
     }
 

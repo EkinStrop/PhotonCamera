@@ -223,6 +223,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val phantomBaselineLutId: StateFlow<String?> = userPreferencesRepository.userPreferences
         .map { it.phantomBaselineLutId }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val rawDcpId: StateFlow<String?> = userPreferencesRepository.userPreferences
+        .map { it.rawDcpId }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val rawNlmNoiseFactor: StateFlow<Float> = userPreferencesRepository.userPreferences
+        .map { it.rawNlmNoiseFactor }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
+    val rawExposureCompensation: StateFlow<Float> = userPreferencesRepository.userPreferences
+        .map { it.rawExposureCompensation }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
+    val rawBlackPointCorrection: StateFlow<Float> = userPreferencesRepository.userPreferences
+        .map { it.rawBlackPointCorrection }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
+    val rawWhitePointCorrection: StateFlow<Float> = userPreferencesRepository.userPreferences
+        .map { it.rawWhitePointCorrection }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
+    var availableDcps: List<com.hinnka.mycamera.raw.DcpInfo> by mutableStateOf(emptyList())
+        private set
     val phantomLutId: StateFlow<String?> = userPreferencesRepository.userPreferences
         .map { it.phantomLutId }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -520,6 +537,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            contentRepository.availableDcps.collect { dcps ->
+                availableDcps = dcps.sortedBy { it.getName() }
+            }
+        }
+
+        viewModelScope.launch {
             contentRepository.availableFrames.combine(
                 userPreferencesRepository.userPreferences.map { it.frameOrder }
             ) { frames, order ->
@@ -660,6 +683,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return emptyList()
     }
 
+    fun setRawDcpId(dcpId: String?) {
+        viewModelScope.launch { userPreferencesRepository.saveRawDcpId(dcpId) }
+    }
+    fun setRawNlmNoiseFactor(value: Float) {
+        viewModelScope.launch { userPreferencesRepository.saveRawNlmNoiseFactor(value) }
+    }
+    fun setRawExposureCompensation(value: Float) {
+        viewModelScope.launch { userPreferencesRepository.saveRawExposureCompensation(value) }
+    }
+    fun setRawBlackPointCorrection(value: Float) {
+        viewModelScope.launch { userPreferencesRepository.saveRawBlackPointCorrection(value) }
+    }
+    fun setRawWhitePointCorrection(value: Float) {
+        viewModelScope.launch { userPreferencesRepository.saveRawWhitePointCorrection(value) }
+    }
+    fun importRawDcp(uri: android.net.Uri, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val success = contentRepository.getCustomImportManager().importDcp(uri) != null
+            onComplete(success)
+        }
+    }
+
     /**
      * 打开相机（Camera2 接口）
      */
@@ -775,6 +820,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             sharpening = sharpeningValue,
             noiseReduction = noiseReductionValue,
             chromaNoiseReduction = chromaNoiseReductionValue,
+            rawDcpId = userPrefs?.rawDcpId,
+            rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
+            rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
+            rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
+            rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
             width = width,
             height = height,
             ratio = aspectRatio,
@@ -2439,6 +2489,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 sharpening = sharpeningValue,
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
+                rawDcpId = userPrefs?.rawDcpId,
+                rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
+                rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
+                rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
+                rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 width = image.width,
                 height = image.height,
                 ratio = aspectRatio,
@@ -2541,6 +2596,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 sharpening = sharpeningValue,
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
+                rawDcpId = userPrefs?.rawDcpId,
+                rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
+                rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
+                rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
+                rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 width = bitmap.width,
                 height = bitmap.height,
                 ratio = mapVideoAspectRatioToPhotoAspectRatio(currentState.videoConfig.aspectRatio),
@@ -2673,6 +2733,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 sharpening = sharpeningValue,
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
+                rawDcpId = userPrefs?.rawDcpId,
+                rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
+                rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
+                rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
+                rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 width = (images[0].width.toFloat() * superResScale).roundToInt(),
                 height = (images[0].height.toFloat() * superResScale).roundToInt(),
                 ratio = aspectRatio,
@@ -2812,6 +2877,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             sharpening = sharpeningValue,
             noiseReduction = noiseReductionValue,
             chromaNoiseReduction = chromaNoiseReductionValue,
+            rawDcpId = userPrefs?.rawDcpId,
+            rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
+            rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
+            rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
+            rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
             width = image.width,
             height = image.height,
             ratio = aspectRatio,

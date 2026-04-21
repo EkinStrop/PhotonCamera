@@ -105,13 +105,14 @@ import com.hinnka.mycamera.ui.components.LogViewerDialog
 import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.SliderSettingItem
 import com.hinnka.mycamera.ui.components.LutSelector
+import com.hinnka.mycamera.ui.components.RawEditPanel
 import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import kotlin.math.roundToInt
 
 enum class SettingsTab {
-    GENERAL, IMAGING, PHANTOM, ABOUT
+    GENERAL, IMAGING, RAW, PHANTOM, ABOUT
 }
 
 /**
@@ -173,6 +174,12 @@ fun SettingsScreen(
     val jpgBaselineLutId by viewModel.jpgBaselineLutId.collectAsState()
     val rawBaselineLutId by viewModel.rawBaselineLutId.collectAsState()
     val phantomBaselineLutId by viewModel.phantomBaselineLutId.collectAsState()
+    val rawDcpId by viewModel.rawDcpId.collectAsState()
+    val rawNlmNoiseFactor by viewModel.rawNlmNoiseFactor.collectAsState()
+    val rawExposureCompensation by viewModel.rawExposureCompensation.collectAsState()
+    val rawBlackPointCorrection by viewModel.rawBlackPointCorrection.collectAsState()
+    val rawWhitePointCorrection by viewModel.rawWhitePointCorrection.collectAsState()
+    val availableDcps = viewModel.availableDcps
     val availableLuts = viewModel.availableLutList
     val previewThumbnail = viewModel.previewThumbnail
 
@@ -207,6 +214,20 @@ fun SettingsScreen(
                     android.widget.Toast.makeText(context, R.string.restore_success, android.widget.Toast.LENGTH_LONG).show()
                 } else {
                     android.widget.Toast.makeText(context, R.string.restore_failed, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val importDcpLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            viewModel.importRawDcp(it) { success ->
+                if (success) {
+                    android.widget.Toast.makeText(context, R.string.import_success, android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(context, R.string.import_failed, android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -399,6 +420,7 @@ fun SettingsScreen(
             mutableStateListOf<Pair<SettingsTab, String>>().apply {
                 add(SettingsTab.GENERAL to general)
                 add(SettingsTab.IMAGING to imaging)
+                add(SettingsTab.RAW to "RAW")
                 if (DeviceUtil.canShowPhantom) {
                     add(SettingsTab.PHANTOM to phantom)
                 }
@@ -690,17 +712,7 @@ fun SettingsScreen(
                             onClick = { baselinePickerTarget = BaselineColorCorrectionTarget.JPG }
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
 
-                        BaselineColorCorrectionSettingItem(
-                            title = stringResource(R.string.settings_baseline_raw_title),
-                            description = stringResource(R.string.settings_baseline_raw_description),
-                            selectedLut = availableLuts.find { it.id == rawBaselineLutId },
-                            onClick = { baselinePickerTarget = BaselineColorCorrectionTarget.RAW }
-                        )
 
                         if (DeviceUtil.canShowPhantom) {
                             HorizontalDivider(
@@ -1016,6 +1028,38 @@ fun SettingsScreen(
                             ),
                             currentLevel = cameraOrientationOffset,
                             onLevelSelected = { viewModel.setCameraOrientationOffset(currentCameraId, it) }
+                        )
+                    }
+                }
+
+                SettingsTab.RAW -> {
+                    SettingsSection(title = stringResource(R.string.settings_section_baseline_color_correction)) {
+                        BaselineColorCorrectionSettingItem(
+                            title = stringResource(R.string.settings_baseline_raw_title),
+                            description = stringResource(R.string.settings_baseline_raw_description),
+                            selectedLut = availableLuts.find { it.id == rawBaselineLutId },
+                            onClick = { baselinePickerTarget = BaselineColorCorrectionTarget.RAW }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SettingsSection(title = "RAW") {
+                        RawEditPanel(
+                            selectedDcpId = rawDcpId,
+                            availableDcps = availableDcps,
+                            rawNlmNoiseFactor = rawNlmNoiseFactor,
+                            rawExposureCompensation = rawExposureCompensation,
+                            rawBlackPointCorrection = rawBlackPointCorrection,
+                            rawWhitePointCorrection = rawWhitePointCorrection,
+                            onSelectDcp = { viewModel.setRawDcpId(it) },
+                            onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
+                            onRawNlmNoiseFactorChange = { viewModel.setRawNlmNoiseFactor(it) },
+                            onRawExposureCompensationChange = { viewModel.setRawExposureCompensation(it) },
+                            onRawBlackPointCorrectionChange = { viewModel.setRawBlackPointCorrection(it) },
+                            onRawWhitePointCorrectionChange = { viewModel.setRawWhitePointCorrection(it) },
+                            onAdjustmentStart = { },
+                            onAdjustmentEnd = { }
                         )
                     }
                 }

@@ -10,6 +10,8 @@ import com.hinnka.mycamera.lut.LutImageProcessor
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.lut.LutManager
 import com.hinnka.mycamera.processor.DepthBokehProcessor
+import com.hinnka.mycamera.raw.DcpInfo
+import com.hinnka.mycamera.raw.DcpManager
 import com.hinnka.mycamera.utils.StartupTrace
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +44,7 @@ class ContentRepository private constructor(context: Context) {
         StartupTrace.measure("ContentRepository.$name") { block() }
 
     val lutManager = startupInit("LutManager()") { LutManager(appContext) }
+    val dcpManager = startupInit("DcpManager()") { DcpManager(appContext) }
     val frameManager = startupInit("FrameManager()") { FrameManager(appContext) }
     private val customImportManager = startupInit("CustomImportManager()") { CustomImportManager(appContext) }
 
@@ -53,6 +56,9 @@ class ContentRepository private constructor(context: Context) {
 
     private val _availableFrames = MutableStateFlow<List<FrameInfo>>(emptyList())
     val availableFrames: StateFlow<List<FrameInfo>> = _availableFrames.asStateFlow()
+
+    private val _availableDcps = MutableStateFlow<List<DcpInfo>>(emptyList())
+    val availableDcps: StateFlow<List<DcpInfo>> = _availableDcps.asStateFlow()
 
     // 边框渲染器
     val frameRenderer = startupInit("FrameRenderer()") { FrameRenderer(appContext) }
@@ -93,9 +99,12 @@ class ContentRepository private constructor(context: Context) {
         _availableFrames.value = StartupTrace.measure("ContentRepository.getAvailableFrames") {
             frameManager.getAvailableFrames()
         }
+        _availableDcps.value = StartupTrace.measure("ContentRepository.getAvailableDcps") {
+            dcpManager.getAvailableDcps()
+        }
         StartupTrace.mark(
             "ContentRepository.initialize populated",
-            "luts=${_availableLuts.value.size}, frames=${_availableFrames.value.size}"
+            "luts=${_availableLuts.value.size}, frames=${_availableFrames.value.size}, dcps=${_availableDcps.value.size}"
         )
     }
 
@@ -108,6 +117,8 @@ class ContentRepository private constructor(context: Context) {
      * 获取可用边框列表（用于一次性获取）
      */
     fun getAvailableFrames(): List<FrameInfo> = _availableFrames.value
+
+    fun getAvailableDcps(): List<DcpInfo> = _availableDcps.value
 
     /**
      * 获取自定义导入管理器
@@ -123,5 +134,6 @@ class ContentRepository private constructor(context: Context) {
         frameManager.initialize()
         _availableLuts.value = lutManager.getAvailableLuts()
         _availableFrames.value = frameManager.getAvailableFrames()
+        _availableDcps.value = dcpManager.getAvailableDcps()
     }
 }

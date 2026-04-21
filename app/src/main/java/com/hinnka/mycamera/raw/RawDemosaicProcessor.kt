@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.media.Image
 import android.opengl.*
+import android.util.Log
+import com.hinnka.mycamera.data.ContentRepository
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.utils.BitmapUtils
 import com.hinnka.mycamera.utils.PLog
@@ -178,6 +180,11 @@ class RawDemosaicProcessor {
     private var outputTextureId = 0
 
     private var curveTextureId = 0
+    private var dcpToneCurveTextureId = 0
+    private var dcpHueSatTextureId = 0
+    private var dcpLookTableTextureId = 0
+    private var dummyDcp3DTextureId = 0
+    private var dummyDcpToneCurveTextureId = 0
 
     // (Chroma) & NLM 降噪资源
     private var gfPass0Program = 0
@@ -248,6 +255,8 @@ class RawDemosaicProcessor {
         rawWhitePointCorrection: Float = 0f,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
+        rawDcpId: String? = null,
+        dcpRenderPlan: DcpRenderPlan? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): Bitmap? = withContext(glDispatcher) {
         val dngFile = File(dngFilePath)
@@ -268,6 +277,8 @@ class RawDemosaicProcessor {
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
+                rawDcpId = rawDcpId,
+                dcpRenderPlan = dcpRenderPlan,
                 dngFile = dngFile,
                 onMetadata = onMetadata
             )?.sdrBitmap
@@ -296,6 +307,8 @@ class RawDemosaicProcessor {
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
+        rawDcpId: String? = null,
+        dcpRenderPlan: DcpRenderPlan? = null,
     ): Bitmap? = withContext(glDispatcher) {
         try {
             if (!isInitialized) {
@@ -320,7 +333,9 @@ class RawDemosaicProcessor {
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
-                chromaDenoiseValue = chromaDenoiseValue
+                chromaDenoiseValue = chromaDenoiseValue,
+                rawDcpId = rawDcpId,
+                dcpRenderPlan = dcpRenderPlan
             )?.sdrBitmap
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to process RAW buffer", e)
@@ -340,6 +355,8 @@ class RawDemosaicProcessor {
         rawWhitePointCorrection: Float = 0f,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
+        rawDcpId: String? = null,
+        dcpRenderPlan: DcpRenderPlan? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): RawHdrRenderResult? = withContext(glDispatcher) {
         val dngFile = File(dngFilePath)
@@ -360,6 +377,8 @@ class RawDemosaicProcessor {
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
+                rawDcpId = rawDcpId,
+                dcpRenderPlan = dcpRenderPlan,
                 dngFile = dngFile,
                 onMetadata = onMetadata,
                 includeHdrReference = true
@@ -390,6 +409,8 @@ class RawDemosaicProcessor {
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
+        rawDcpId: String? = null,
+        dcpRenderPlan: DcpRenderPlan? = null,
         dngFile: File? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null,
         includeHdrReference: Boolean = false
@@ -431,6 +452,22 @@ class RawDemosaicProcessor {
         if (actualRawData == null || actualMetadata == null) {
             PLog.e(TAG, "Missing source data or metadata")
             return@withContext null
+        }
+
+        val resolvedDcpRenderPlan = dcpRenderPlan ?: rawDcpId?.let { dcpId ->
+            val dcpInfo = ContentRepository.getInstance(context).getAvailableDcps().firstOrNull { it.id == dcpId }
+            if (dcpInfo == null) {
+                PLog.w(TAG, "RAW DCP not found: $dcpId")
+                null
+            } else {
+                DcpProfileParser.resolveRenderPlan(context, dcpInfo, actualMetadata).also { plan ->
+                    if (plan == null) {
+                        PLog.w(TAG, "Failed to resolve RAW DCP render plan: $dcpId")
+                    } else {
+                        PLog.d(TAG, "Resolved RAW DCP plan: ${plan.profileName}")
+                    }
+                }
+            }
         }
 
         PLog.d(TAG, "Processing RAW image: ${actualWidth}x${actualHeight}")
@@ -521,7 +558,8 @@ class RawDemosaicProcessor {
                 metadata = actualMetadata,
                 rawExposureCompensation = rawExposureCompensation,
                 rawBlackPointCorrection = rawBlackPointCorrection,
-                rawWhitePointCorrection = rawWhitePointCorrection
+                rawWhitePointCorrection = rawWhitePointCorrection,
+                dcpRenderPlan = resolvedDcpRenderPlan
             )
             // rawTextureId 已被 linearPass 消费，提前释放 GPU 显存
             if (rawTextureId != 0) {
@@ -601,7 +639,7 @@ class RawDemosaicProcessor {
             // 5. 第二步：Combined Pass (HDR Linear -> LDR sRGB + LUT)
             setupCombinedFramebuffer(actualWidth, actualHeight)
             val combinedStart = System.currentTimeMillis()
-            renderCombinedPass(actualMetadata, inputTextureId = outputTexture)
+            renderCombinedPass(actualMetadata, inputTextureId = outputTexture, dcpRenderPlan = resolvedDcpRenderPlan)
             PLog.d(TAG, "Combined Pass took: ${System.currentTimeMillis() - combinedStart}ms")
             // outputTexture (gfTexId[1]) 已被 combinedPass 消费，提前释放
             if (gfTexId[1] != 0) {
@@ -781,6 +819,9 @@ class RawDemosaicProcessor {
             GLES30.glAttachShader(linearProgram, vShader)
             GLES30.glAttachShader(linearProgram, fShaderLinear)
             GLES30.glLinkProgram(linearProgram)
+            if (!logProgramLinkResult(linearProgram, "linearProgram")) {
+                linearProgram = 0
+            }
 
             GLES30.glDeleteShader(fShaderLinear)
         }
@@ -792,6 +833,9 @@ class RawDemosaicProcessor {
             GLES30.glAttachShader(combinedProgram, vShader)
             GLES30.glAttachShader(combinedProgram, fShaderCombined)
             GLES30.glLinkProgram(combinedProgram)
+            if (!logProgramLinkResult(combinedProgram, "combinedProgram")) {
+                combinedProgram = 0
+            }
 
             GLES30.glDeleteShader(fShaderCombined)
         }
@@ -802,6 +846,9 @@ class RawDemosaicProcessor {
             GLES30.glAttachShader(hdrReferenceProgram, vShader)
             GLES30.glAttachShader(hdrReferenceProgram, fShaderHdrReference)
             GLES30.glLinkProgram(hdrReferenceProgram)
+            if (!logProgramLinkResult(hdrReferenceProgram, "hdrReferenceProgram")) {
+                hdrReferenceProgram = 0
+            }
 
             GLES30.glDeleteShader(fShaderHdrReference)
         }
@@ -813,6 +860,9 @@ class RawDemosaicProcessor {
             GLES30.glAttachShader(sharpenProgram, vShader)
             GLES30.glAttachShader(sharpenProgram, fShaderSharpen)
             GLES30.glLinkProgram(sharpenProgram)
+            if (!logProgramLinkResult(sharpenProgram, "sharpenProgram")) {
+                sharpenProgram = 0
+            }
 
             GLES30.glDeleteShader(fShaderSharpen)
         }
@@ -827,6 +877,9 @@ class RawDemosaicProcessor {
             GLES30.glAttachShader(passthroughProgram, vShader)
             GLES30.glAttachShader(passthroughProgram, fShaderPass)
             GLES30.glLinkProgram(passthroughProgram)
+            if (!logProgramLinkResult(passthroughProgram, "passthroughProgram")) {
+                passthroughProgram = 0
+            }
 
             GLES30.glDeleteShader(fShaderPass)
         }
@@ -885,6 +938,10 @@ class RawDemosaicProcessor {
             GLES30.glAttachShader(program, vShader)
             GLES30.glAttachShader(program, fShader)
             GLES30.glLinkProgram(program)
+            if (!logProgramLinkResult(program, name)) {
+                GLES30.glDeleteShader(fShader)
+                return 0
+            }
             GLES30.glDeleteShader(fShader)
             return program
         }
@@ -1486,22 +1543,250 @@ class RawDemosaicProcessor {
         )
     }
 
+    private fun uploadDcpToneCurveTexture(curveLut: FloatArray) {
+        if (dcpToneCurveTextureId == 0) {
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            dcpToneCurveTextureId = textures[0]
+        }
+
+        val buffer = ByteBuffer.allocateDirect(curveLut.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        buffer.put(curveLut)
+        buffer.position(0)
+
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, dcpToneCurveTextureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R16F,
+            curveLut.size, 1, 0, GLES30.GL_RED, GLES30.GL_FLOAT, buffer
+        )
+        checkGlError("uploadDcpToneCurveTexture")
+    }
+
+    private fun ensureDummyDcp3DTexture(): Int {
+        if (dummyDcp3DTextureId != 0) return dummyDcp3DTextureId
+        val textures = IntArray(1)
+        GLES30.glGenTextures(1, textures, 0)
+        dummyDcp3DTextureId = textures[0]
+        val buffer = ByteBuffer.allocateDirect(4 * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        buffer.put(floatArrayOf(0f, 1f, 1f, 1f))
+        buffer.position(0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, dummyDcp3DTextureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_R, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexImage3D(
+            GLES30.GL_TEXTURE_3D,
+            0,
+            GLES30.GL_RGBA16F,
+            1,
+            1,
+            1,
+            0,
+            GLES30.GL_RGBA,
+            GLES30.GL_FLOAT,
+            buffer
+        )
+        checkGlError("ensureDummyDcp3DTexture")
+        return dummyDcp3DTextureId
+    }
+
+    private fun ensureDummyDcpToneCurveTexture(): Int {
+        if (dummyDcpToneCurveTextureId != 0) return dummyDcpToneCurveTextureId
+        val textures = IntArray(1)
+        GLES30.glGenTextures(1, textures, 0)
+        dummyDcpToneCurveTextureId = textures[0]
+        val buffer = ByteBuffer.allocateDirect(4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        buffer.put(floatArrayOf(0f))
+        buffer.position(0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, dummyDcpToneCurveTextureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D,
+            0,
+            GLES30.GL_R16F,
+            1,
+            1,
+            0,
+            GLES30.GL_RED,
+            GLES30.GL_FLOAT,
+            buffer
+        )
+        checkGlError("ensureDummyDcpToneCurveTexture")
+        return dummyDcpToneCurveTextureId
+    }
+
+    private fun uploadDcp3DTexture(textureIdProvider: () -> Int, assignTextureId: (Int) -> Unit, table: DcpHueSatMap): Int {
+        var textureId = textureIdProvider()
+        if (textureId == 0) {
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            textureId = textures[0]
+            assignTextureId(textureId)
+        }
+
+        val rgbaValues = FloatArray(table.hueDivisions * table.satDivisions * table.valueDivisions * 4)
+        var srcIndex = 0
+        var dstIndex = 0
+        while (srcIndex < table.values.size && dstIndex < rgbaValues.size) {
+            rgbaValues[dstIndex++] = table.values[srcIndex++]
+            rgbaValues[dstIndex++] = table.values[srcIndex++]
+            rgbaValues[dstIndex++] = table.values[srcIndex++]
+            rgbaValues[dstIndex++] = 1.0f
+        }
+
+        val buffer = ByteBuffer.allocateDirect(rgbaValues.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        buffer.put(rgbaValues)
+        buffer.position(0)
+
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, textureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_R, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexImage3D(
+            GLES30.GL_TEXTURE_3D,
+            0,
+            GLES30.GL_RGBA16F,
+            table.satDivisions,
+            table.hueDivisions,
+            table.valueDivisions,
+            0,
+            GLES30.GL_RGBA,
+            GLES30.GL_FLOAT,
+            buffer
+        )
+        checkGlError("uploadDcp3DTexture")
+        return textureId
+    }
+
+    private fun bindDcpCombinedResources(dcpRenderPlan: DcpRenderPlan?) {
+        val hueSatMap = dcpRenderPlan?.hueSatMap?.takeIf { it.isValid }
+        val lookTable = dcpRenderPlan?.lookTable?.takeIf { it.isValid }
+        val toneCurveLut = dcpRenderPlan?.toneCurveLut
+
+        PLog.d(TAG, "bindDcpCombinedResources: hueSatMap=${hueSatMap?.values?.size}")
+        PLog.d(TAG, "bindDcpCombinedResources: lookTable=${lookTable?.values?.size}")
+        PLog.d(TAG, "bindDcpCombinedResources: toneCurveLut=${toneCurveLut?.size}")
+
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatTexture"), 2)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableTexture"), 3)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveTexture"), 4)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEnabled"), if (hueSatMap != null) 1 else 0)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEnabled"), if (lookTable != null) 1 else 0)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveEnabled"), if (toneCurveLut != null) 1 else 0)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveSize"), toneCurveLut?.size?.toFloat() ?: 0f)
+
+        if (hueSatMap != null) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+            val textureId = uploadDcp3DTexture({ dcpHueSatTextureId }, { dcpHueSatTextureId = it }, hueSatMap)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, textureId)
+            GLES30.glUniform3i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatDivisions"),
+                hueSatMap.hueDivisions,
+                hueSatMap.satDivisions,
+                hueSatMap.valueDivisions
+            )
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEncoding"),
+                hueSatMap.encoding
+            )
+        } else {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, ensureDummyDcp3DTexture())
+            GLES30.glUniform3i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatDivisions"),
+                1,
+                1,
+                1
+            )
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEncoding"),
+                DcpHueSatMap.ENCODING_LINEAR
+            )
+        }
+
+        if (lookTable != null) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
+            val textureId = uploadDcp3DTexture({ dcpLookTableTextureId }, { dcpLookTableTextureId = it }, lookTable)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, textureId)
+            GLES30.glUniform3i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableDivisions"),
+                lookTable.hueDivisions,
+                lookTable.satDivisions,
+                lookTable.valueDivisions
+            )
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEncoding"),
+                lookTable.encoding
+            )
+        } else {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, ensureDummyDcp3DTexture())
+            GLES30.glUniform3i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableDivisions"),
+                1,
+                1,
+                1
+            )
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEncoding"),
+                DcpHueSatMap.ENCODING_LINEAR
+            )
+        }
+
+        if (toneCurveLut != null) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
+            uploadDcpToneCurveTexture(toneCurveLut)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, dcpToneCurveTextureId)
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveSize"),
+                toneCurveLut.size.toFloat()
+            )
+        } else {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, ensureDummyDcpToneCurveTexture())
+        }
+        checkGlError("bindDcpCombinedResources")
+    }
+
 
     /**
      * Combined Processing Pass: ToneMap + LUT + Sharpening
      */
     private fun renderCombinedPass(
         metadata: RawMetadata,
-        inputTextureId: Int = demosaicTextureId
+        inputTextureId: Int = demosaicTextureId,
+        dcpRenderPlan: DcpRenderPlan? = null
     ) {
         val curveLut = ACR3Curve.samples()
         val outputTransform = computeWorkingToOutputTransform(ColorSpace.ProPhoto, ColorSpace.SRGB)
 
         GLES30.glUseProgram(combinedProgram)
+        checkGlError("renderCombinedPass glUseProgram")
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, combinedFramebufferId)
+        checkGlError("renderCombinedPass glBindFramebuffer")
 
         GLES30.glViewport(0, 0, metadata.width, metadata.height)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        checkGlError("renderCombinedPass clear")
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTextureId)
@@ -1519,6 +1804,9 @@ class RawDemosaicProcessor {
             GLES30.glGetUniformLocation(combinedProgram, "uCurveEnabled"),
             1
         )
+        checkGlError("renderCombinedPass base uniforms")
+
+        bindDcpCombinedResources(dcpRenderPlan)
 
         GLES30.glUniformMatrix3fv(
             GLES30.glGetUniformLocation(combinedProgram, "uOutputTransform"),
@@ -1531,8 +1819,26 @@ class RawDemosaicProcessor {
             GLES30.glGetUniformLocation(combinedProgram, "uTexMatrix"),
             1, false, identityMatrix, 0
         )
+        checkGlError("renderCombinedPass matrices")
         drawQuad(combinedProgram)
         checkGlError("renderCombinedPass")
+    }
+
+    private fun logProgramLinkResult(program: Int, name: String): Boolean {
+        if (program == 0) {
+            PLog.e(TAG, "$name creation failed")
+            return false
+        }
+        val linked = IntArray(1)
+        GLES30.glGetProgramiv(program, GLES30.GL_LINK_STATUS, linked, 0)
+        if (linked[0] == 0) {
+            PLog.e(TAG, "$name link failed: ${GLES30.glGetProgramInfoLog(program)}")
+            GLES30.glDeleteProgram(program)
+            return false
+        } else {
+            PLog.d(TAG, "$name link ok")
+            return true
+        }
     }
 
     private fun computeWorkingToOutputTransform(
@@ -1703,7 +2009,8 @@ class RawDemosaicProcessor {
         metadata: RawMetadata,
         rawExposureCompensation: Float,
         rawBlackPointCorrection: Float,
-        rawWhitePointCorrection: Float
+        rawWhitePointCorrection: Float,
+        dcpRenderPlan: DcpRenderPlan? = null
     ) {
         GLES30.glUseProgram(linearProgram)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, demosaicFramebufferId)
@@ -1716,7 +2023,7 @@ class RawDemosaicProcessor {
             GLES30.glGetUniformLocation(linearProgram, "uImageSize"),
             metadata.width.toFloat(), metadata.height.toFloat()
         )
-        val transposedCCM = transposeMatrix3x3(metadata.colorCorrectionMatrix)
+        val transposedCCM = transposeMatrix3x3(dcpRenderPlan?.colorCorrectionMatrix ?: metadata.colorCorrectionMatrix)
 
         GLES30.glUniformMatrix3fv(
             GLES30.glGetUniformLocation(linearProgram, "uColorCorrectionMatrix"),
@@ -1729,11 +2036,12 @@ class RawDemosaicProcessor {
             1, false, identity, 0
         )
         val normalizationGain = ExposureNormalization.compute(metadata)
+        val dcpBaselineExposureOffset = dcpRenderPlan?.baselineExposureOffset ?: 0f
         PLog.d(
             TAG,
-            "compute: normalizationGain=$normalizationGain baseline=${metadata.baselineExposure}"
+            "compute: normalizationGain=$normalizationGain baseline=${metadata.baselineExposure} dcpBaselineOffset=$dcpBaselineExposureOffset"
         )
-        val exposureGain = normalizationGain * 2.0f.pow(rawExposureCompensation)
+        val exposureGain = normalizationGain * 2.0f.pow(rawExposureCompensation + dcpBaselineExposureOffset)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(linearProgram, "uExposureGain"), exposureGain)
         val (blackLevel, whiteLevel) = resolveLinearInputLevels(
             metadata = metadata,
@@ -2001,6 +2309,11 @@ class RawDemosaicProcessor {
         if (sharpenTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(sharpenTextureId), 0)
         if (sharpenFramebufferId != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(sharpenFramebufferId), 0)
         if (curveTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(curveTextureId), 0)
+        if (dcpToneCurveTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(dcpToneCurveTextureId), 0)
+        if (dcpHueSatTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(dcpHueSatTextureId), 0)
+        if (dcpLookTableTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(dcpLookTableTextureId), 0)
+        if (dummyDcp3DTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(dummyDcp3DTextureId), 0)
+        if (dummyDcpToneCurveTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(dummyDcpToneCurveTextureId), 0)
         if (outputTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(outputTextureId), 0)
 
         if (outputFramebufferId != 0) GLES30.glDeleteFramebuffers(

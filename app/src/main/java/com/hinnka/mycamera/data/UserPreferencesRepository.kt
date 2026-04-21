@@ -55,6 +55,11 @@ data class UserPreferences(
     val jpgBaselineLutId: String? = null,
     val rawBaselineLutId: String? = null,
     val phantomBaselineLutId: String? = null,
+    val rawDcpId: String? = null,
+    val rawNlmNoiseFactor: Float = 0f,
+    val rawExposureCompensation: Float = 0f,
+    val rawBlackPointCorrection: Float = 0f,
+    val rawWhitePointCorrection: Float = 0f,
     val frameId: String? = null,
     val showHistogram: Boolean = true,
     val showGrid: Boolean = false,  // 网格线显示
@@ -138,6 +143,11 @@ class UserPreferencesRepository(private val context: Context) {
         private val PHANTOM_LUT_ID_KEY = stringPreferencesKey("phantom_lut_id")
         private val JPG_BASELINE_LUT_ID_KEY = stringPreferencesKey("jpg_baseline_lut_id")
         private val RAW_BASELINE_LUT_ID_KEY = stringPreferencesKey("raw_baseline_lut_id")
+        private val RAW_DCP_ID_KEY = stringPreferencesKey("raw_dcp_id")
+        private val RAW_NLM_NOISE_FACTOR_KEY = floatPreferencesKey("raw_nlm_noise_factor")
+        private val RAW_EXPOSURE_COMPENSATION_KEY = floatPreferencesKey("raw_exposure_compensation")
+        private val RAW_BLACK_POINT_CORRECTION_KEY = floatPreferencesKey("raw_black_point_correction")
+        private val RAW_WHITE_POINT_CORRECTION_KEY = floatPreferencesKey("raw_white_point_correction")
         private val PHANTOM_BASELINE_LUT_ID_KEY = stringPreferencesKey("phantom_baseline_lut_id")
         private val FRAME_ID_KEY = stringPreferencesKey("frame_id")
         private val SHOW_HISTOGRAM = booleanPreferencesKey("show_histogram")
@@ -230,6 +240,11 @@ class UserPreferencesRepository(private val context: Context) {
                 phantomLutId = preferences[PHANTOM_LUT_ID_KEY],
                 jpgBaselineLutId = preferences[JPG_BASELINE_LUT_ID_KEY],
                 rawBaselineLutId = preferences[RAW_BASELINE_LUT_ID_KEY],
+                rawDcpId = preferences[RAW_DCP_ID_KEY],
+                rawNlmNoiseFactor = preferences[RAW_NLM_NOISE_FACTOR_KEY] ?: 0f,
+                rawExposureCompensation = preferences[RAW_EXPOSURE_COMPENSATION_KEY] ?: 0f,
+                rawBlackPointCorrection = preferences[RAW_BLACK_POINT_CORRECTION_KEY] ?: 0f,
+                rawWhitePointCorrection = preferences[RAW_WHITE_POINT_CORRECTION_KEY] ?: 0f,
                 phantomBaselineLutId = preferences[PHANTOM_BASELINE_LUT_ID_KEY],
                 frameId = preferences[FRAME_ID_KEY],
                 showHistogram = preferences[SHOW_HISTOGRAM] ?: true,
@@ -434,6 +449,40 @@ class UserPreferencesRepository(private val context: Context) {
             } else {
                 preferences.remove(key)
             }
+        }
+    }
+
+    suspend fun saveRawDcpId(dcpId: String?) {
+        context.dataStore.edit { preferences ->
+            if (dcpId != null) {
+                preferences[RAW_DCP_ID_KEY] = dcpId
+            } else {
+                preferences.remove(RAW_DCP_ID_KEY)
+            }
+        }
+    }
+
+    suspend fun saveRawNlmNoiseFactor(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_NLM_NOISE_FACTOR_KEY] = value
+        }
+    }
+
+    suspend fun saveRawExposureCompensation(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_EXPOSURE_COMPENSATION_KEY] = value
+        }
+    }
+
+    suspend fun saveRawBlackPointCorrection(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_BLACK_POINT_CORRECTION_KEY] = value
+        }
+    }
+
+    suspend fun saveRawWhitePointCorrection(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_WHITE_POINT_CORRECTION_KEY] = value
         }
     }
 

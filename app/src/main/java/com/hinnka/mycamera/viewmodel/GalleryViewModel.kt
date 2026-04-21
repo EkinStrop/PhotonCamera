@@ -27,6 +27,7 @@ import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.lut.PhotoTransformation
 import com.hinnka.mycamera.model.ColorRecipeParams
+import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.RawProcessingPreferences
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupTrace
@@ -244,6 +245,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var availableLuts: List<LutInfo> by mutableStateOf(emptyList())
         private set
 
+    var availableDcps: List<DcpInfo> by mutableStateOf(emptyList())
+        private set
+
     // 边框编辑状态
     var editFrameId = MutableStateFlow<String?>(null)
         private set
@@ -266,6 +270,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     var editRawBlackPointCorrection = MutableStateFlow(0f)
         private set
     var editRawWhitePointCorrection = MutableStateFlow(0f)
+        private set
+    var editRawDcpId = MutableStateFlow<String?>(null)
         private set
 
     // Computational Bokeh editing state
@@ -399,6 +405,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
             }.collect { sortedFrames ->
                 availableFrames = sortedFrames
+            }
+        }
+
+        viewModelScope.launch {
+            contentRepository.availableDcps.collect { dcps ->
+                availableDcps = dcps.sortedBy { it.getName() }
             }
         }
         StartupTrace.mark("GalleryViewModel.init end")
@@ -727,6 +739,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editRawExposureCompensation.value = m.rawExposureCompensation ?: 0f
             editRawBlackPointCorrection.value = m.rawBlackPointCorrection ?: 0f
             editRawWhitePointCorrection.value = m.rawWhitePointCorrection ?: 0f
+            editRawDcpId.value = m.rawDcpId
             restoreCropEditState(photo, m)
 
             // 加载 LUT 配置
@@ -1255,6 +1268,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editRawExposureCompensation.value = metadata.rawExposureCompensation ?: 0f
             editRawBlackPointCorrection.value = metadata.rawBlackPointCorrection ?: 0f
             editRawWhitePointCorrection.value = metadata.rawWhitePointCorrection ?: 0f
+            editRawDcpId.value = metadata.rawDcpId
             
             editComputationalAperture.value = metadata.computationalAperture
             editFocusPointX.value = metadata.focusPointX
@@ -1271,6 +1285,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editRawExposureCompensation.value = 0f
             editRawBlackPointCorrection.value = 0f
             editRawWhitePointCorrection.value = 0f
+            editRawDcpId.value = null
             editComputationalAperture.value = null
             editFocusPointX.value = null
             editFocusPointY.value = null
@@ -1302,6 +1317,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         editRawExposureCompensation.value = 0f
         editRawBlackPointCorrection.value = 0f
         editRawWhitePointCorrection.value = 0f
+        editRawDcpId.value = null
     }
 
     /**
@@ -1401,6 +1417,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 rawExposureCompensation = editRawExposureCompensation.value,
                 rawBlackPointCorrection = editRawBlackPointCorrection.value,
                 rawWhitePointCorrection = editRawWhitePointCorrection.value,
+                rawDcpId = editRawDcpId.value,
             )
             val context = getApplication<Application>()
             metadata?.let {
@@ -1427,6 +1444,21 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun saveRawWhitePointCorrectionValue(mediaData: MediaData, value: Float) {
         editRawWhitePointCorrection.value = value
         persistRawEditMetadata(mediaData)
+    }
+
+    fun saveRawDcpSelection(mediaData: MediaData, dcpId: String?) {
+        editRawDcpId.value = dcpId
+        persistRawEditMetadata(mediaData)
+    }
+
+    suspend fun importRawDcp(uri: Uri): DcpInfo? {
+        val importedId = withContext(Dispatchers.IO) {
+            contentRepository.getCustomImportManager().importDcp(uri)
+        } ?: return null
+        contentRepository.refreshCustomContent()
+        return contentRepository.getAvailableDcps().firstOrNull { it.id == importedId }?.also {
+            editRawDcpId.value = it.id
+        }
     }
 
     /**
@@ -1569,6 +1601,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         rawExposureCompensation = editRawExposureCompensation.value,
                         rawBlackPointCorrection = editRawBlackPointCorrection.value,
                         rawWhitePointCorrection = editRawWhitePointCorrection.value,
+                        rawDcpId = editRawDcpId.value,
                         computationalAperture = editComputationalAperture.value,
                         focusPointX = editFocusPointX.value,
                         focusPointY = editFocusPointY.value,
@@ -1797,6 +1830,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     rawExposureCompensation = editRawExposureCompensation.value,
                     rawBlackPointCorrection = editRawBlackPointCorrection.value,
                     rawWhitePointCorrection = editRawWhitePointCorrection.value,
+                    rawDcpId = editRawDcpId.value,
                     computationalAperture = editComputationalAperture.value,
                     focusPointX = editFocusPointX.value,
                     focusPointY = editFocusPointY.value,
