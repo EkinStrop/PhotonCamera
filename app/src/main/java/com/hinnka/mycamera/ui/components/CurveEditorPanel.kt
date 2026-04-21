@@ -279,7 +279,7 @@ private fun DrawScope.drawCurveCanvas(
     val h = canvasSize.height
 
     // 背景
-    drawRect(Color(0xFF1A1A1A))
+    drawRect(Color(0x661A1A1A))
 
     // 网格线（4×4）
     val gridColor = Color.White.copy(alpha = 0.08f)
