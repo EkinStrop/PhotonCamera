@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -114,32 +115,35 @@ fun RawDcpSelector(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.1f))
             .clickable { showSheet = true }
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = stringResource(R.string.raw_dcp_title),
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = 12.sp
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Normal
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = selectedName,
-                color = Color.White,
+                color = Color.White.copy(alpha = 0.6f),
                 fontSize = 13.sp,
+                lineHeight = 18.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
+
+        Spacer(modifier = Modifier.width(16.dp))
+
         Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.5f)
+            tint = Color.White.copy(alpha = 0.6f)
         )
     }
 

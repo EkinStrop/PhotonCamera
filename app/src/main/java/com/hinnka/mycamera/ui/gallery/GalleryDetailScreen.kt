@@ -89,6 +89,7 @@ fun GalleryDetailScreen(
     var isZoomed by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
+    var isExportingDng by remember { mutableStateOf(false) }
     val isSharing by viewModel.isSharing.collectAsState()
 
     val currentColorSpace = remember { mutableStateOf<ColorSpace?>(null) }
@@ -196,6 +197,9 @@ fun GalleryDetailScreen(
     }
 
     val currentPhoto = photos.getOrNull(pagerState.currentPage)
+    val isCurrentRawPhoto = currentPhoto?.let {
+        it.isImage && (viewModel.selectedTab == GalleryTab.PHOTON || it.relatedPhoto != null) && viewModel.isRaw(it.id)
+    } == true
     var displayPhotoSize by remember(currentPhoto?.id) { mutableLongStateOf(currentPhoto?.size ?: 0L) }
 
     LaunchedEffect(currentPhoto?.id, currentPhoto?.size, currentPhoto?.uri, currentPhoto?.sourceUri) {
@@ -407,6 +411,44 @@ fun GalleryDetailScreen(
                                     imageVector = Icons.Default.Output,
                                     contentDescription = stringResource(R.string.export),
                                     tint = AccentOrange
+                                )
+                            }
+                        }
+                    }
+
+                    if (isCurrentRawPhoto) {
+                        IconButton(
+                            onClick = {
+                                currentPhoto.let {
+                                    isExportingDng = true
+                                    viewModel.exportDng(it) { success ->
+                                        isExportingDng = false
+                                        if (success) {
+                                            Toast.makeText(context, R.string.export_dng_success, Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, R.string.export_dng_failed, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isSaving && !isExportingDng,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .background(Color.White.copy(alpha = 0.1f), CircleShape)
+                                .autoRotate()
+                        ) {
+                            if (isExportingDng) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text(
+                                    text = "DNG",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }

@@ -1958,6 +1958,35 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun exportDng(
+        photo: MediaData,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        if (photo.isVideo) {
+            onComplete(false)
+            return
+        }
+        viewModelScope.launch {
+            var photoId = photo.id
+            if (selectedTab == GalleryTab.SYSTEM) {
+                photoId = photo.relatedPhoto?.id ?: photoId
+            }
+            val context = getApplication<Application>()
+            val dngFile = GalleryManager.getDngFile(context, photoId)
+            val metadata = GalleryManager.loadMetadata(context, photoId) ?: photo.metadata ?: MediaMetadata()
+            val success = if (dngFile.exists() && dngFile.length() > 0L) {
+                GalleryManager.exportDng(context, photoId, dngFile, metadata)
+                true
+            } else {
+                false
+            }
+            if (success) {
+                loadPhotos()
+            }
+            onComplete(success)
+        }
+    }
+
     /**
      * 批量导出选中的照片
      */
@@ -1981,7 +2010,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         if (selectedTab == GalleryTab.SYSTEM) {
                             photoId = photo.relatedPhoto?.id ?: return@forEachIndexed
                         }
-                        
                         val metadata = GalleryManager.loadMetadata(context, photoId) ?: photo.metadata ?: MediaMetadata()
                         GalleryManager.exportPhoto(
                             context, photoId, null, contentRepository.photoProcessor, metadata,

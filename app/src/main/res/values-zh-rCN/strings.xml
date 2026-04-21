@@ -89,6 +89,9 @@
     <string name="export_success">照片导出成功</string>
     <string name="export_all_success">全部照片导出成功</string>
     <string name="export_failed">照片导出失败</string>
+    <string name="export_dng">导出 DNG</string>
+    <string name="export_dng_success">DNG 导出成功</string>
+    <string name="export_dng_failed">DNG 导出失败</string>
     <string name="export_all_confirm">导出所有连拍照片吗？</string>
     <string name="edit">编辑</string>
     <string name="refresh_failed">刷新预览失败</string>
@@ -623,6 +626,8 @@
     <string name="settings_raw_exposure_compensation">RAW 曝光补偿</string>
     <string name="settings_raw_black_point_correction">RAW 黑点校正</string>
     <string name="settings_raw_white_point_correction">RAW 白点校正</string>
+    <string name="settings_export_dng_with_raw_export">导出 RAW 时同时导出 DNG</string>
+    <string name="settings_export_dng_with_raw_export_description">导出 RAW 照片时，同时将对应的原始 DNG 文件导出到系统相册。</string>
     <string name="ghost_mode">幻影模式</string>
     <string name="close_ghost_mode">关闭幻影模式</string>
     <string name="ghost_mode_dialog_title">开启幻影模式</string>

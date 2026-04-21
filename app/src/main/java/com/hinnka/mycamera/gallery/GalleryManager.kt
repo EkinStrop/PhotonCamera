@@ -1053,7 +1053,8 @@ object GalleryManager {
         chromaNoiseReductionValue: Float,
         photoQuality: Int = 95,
         exposureBias: Float? = null,
-        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF
+        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF,
+        exportDngWithRawExport: Boolean = true
     ) = withContext(Dispatchers.IO) {
         try {
             val photoDir = getPhotoDir(context, photoId, true)
@@ -1098,7 +1099,7 @@ object GalleryManager {
                 tempDngFile.copyTo(dngFile, overwrite = true)
                 tempDngFile.delete()
             }
-            if (shouldAutoSave) {
+            if (shouldAutoSave && exportDngWithRawExport) {
                 exportDng(context, photoId, dngFile, metadata)
             }
 
@@ -1206,7 +1207,8 @@ object GalleryManager {
         chromaNoiseReductionValue: Float,
         photoQuality: Int = 95,
         exposureBias: Float? = null,
-        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF
+        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF,
+        exportDngWithRawExport: Boolean = true
     ) {
         // 根据图像格式处理
         when (val format = image.format) {
@@ -1243,7 +1245,8 @@ object GalleryManager {
                     chromaNoiseReductionValue,
                     photoQuality,
                     exposureBias,
-                    droMode
+                    droMode,
+                    exportDngWithRawExport
                 )
             }
 
@@ -1570,7 +1573,8 @@ object GalleryManager {
         useSuperResolution: Boolean = false,
         superResolutionScale: Float = 1.0f,
         useGpuAcceleration: Boolean = true,
-        exposureBias: Float? = null
+        exposureBias: Float? = null,
+        exportDngWithRawExport: Boolean = true
     ) = withContext(Dispatchers.IO) {
         try {
             val photoDir = getPhotoDir(context, photoId, true)
@@ -1690,7 +1694,8 @@ object GalleryManager {
                     rotation = rotation,
                     thumbnail = result,
                     metadata = metadata,
-                    shouldAutoSave = shouldAutoSave
+                    shouldAutoSave = shouldAutoSave,
+                    exportDngWithRawExport = exportDngWithRawExport
                 )
                 if (!dngWritten) {
                     try {
@@ -1744,6 +1749,7 @@ object GalleryManager {
         thumbnail: Bitmap?,
         metadata: MediaMetadata,
         shouldAutoSave: Boolean,
+        exportDngWithRawExport: Boolean,
     ): Boolean {
         val tempDngFile = File(dngFile.parentFile, "temp_stacked.dng")
         val dngWritten = try {
@@ -1794,7 +1800,7 @@ object GalleryManager {
             return false
         }
 
-        if (shouldAutoSave) {
+        if (shouldAutoSave && exportDngWithRawExport) {
             exportDng(context, photoId, dngFile, metadata)
         }
 
@@ -1823,7 +1829,8 @@ object GalleryManager {
         superResolutionScale: Float = 1.0f,
         useGpuAcceleration: Boolean = true,
         exposureBias: Float? = null,
-        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF
+        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF,
+        exportDngWithRawExport: Boolean = true
     ) = withContext(Dispatchers.IO) {
         when (val format = images[0].format) {
             ImageFormat.YUV_420_888, ImageFormat.YCBCR_P010, ImageFormat.NV21 -> {
@@ -1863,7 +1870,8 @@ object GalleryManager {
                     useSuperResolution,
                     superResolutionScale,
                     useGpuAcceleration,
-                    exposureBias
+                    exposureBias,
+                    exportDngWithRawExport
                 )
             }
 

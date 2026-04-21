@@ -238,6 +238,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val rawWhitePointCorrection: StateFlow<Float> = userPreferencesRepository.userPreferences
         .map { it.rawWhitePointCorrection }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
+    val exportDngWithRawExport: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.exportDngWithRawExport }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     var availableDcps: List<com.hinnka.mycamera.raw.DcpInfo> by mutableStateOf(emptyList())
         private set
     val phantomLutId: StateFlow<String?> = userPreferencesRepository.userPreferences
@@ -2019,6 +2022,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         reopenCamera()
     }
 
+    fun setExportDngWithRawExport(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveExportDngWithRawExport(enabled)
+        }
+    }
+
     // ==================== 新增设置项方法 ====================
 
     /**
@@ -2563,6 +2572,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     photoQualityValue,
                     exposureBias = state.value.exposureBias,
                     droMode = droModeForProcessing,
+                    exportDngWithRawExport = exportDngWithRawExport.value,
                 )
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
@@ -2812,7 +2822,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     superResolutionScale = superResScale,
                     useGpuAcceleration = useGpuAcceleration.value,
                     exposureBias = state.value.exposureBias,
-                    droMode = droModeForProcessing
+                    droMode = droModeForProcessing,
+                    exportDngWithRawExport = exportDngWithRawExport.value
                 )
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")

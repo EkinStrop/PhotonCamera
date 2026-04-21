@@ -60,6 +60,7 @@ data class UserPreferences(
     val rawExposureCompensation: Float = 0f,
     val rawBlackPointCorrection: Float = 0f,
     val rawWhitePointCorrection: Float = 0f,
+    val exportDngWithRawExport: Boolean = true,
     val frameId: String? = null,
     val showHistogram: Boolean = true,
     val showGrid: Boolean = false,  // 网格线显示
@@ -148,6 +149,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val RAW_EXPOSURE_COMPENSATION_KEY = floatPreferencesKey("raw_exposure_compensation")
         private val RAW_BLACK_POINT_CORRECTION_KEY = floatPreferencesKey("raw_black_point_correction")
         private val RAW_WHITE_POINT_CORRECTION_KEY = floatPreferencesKey("raw_white_point_correction")
+        private val EXPORT_DNG_WITH_RAW_EXPORT_KEY = booleanPreferencesKey("export_dng_with_raw_export")
         private val PHANTOM_BASELINE_LUT_ID_KEY = stringPreferencesKey("phantom_baseline_lut_id")
         private val FRAME_ID_KEY = stringPreferencesKey("frame_id")
         private val SHOW_HISTOGRAM = booleanPreferencesKey("show_histogram")
@@ -245,6 +247,7 @@ class UserPreferencesRepository(private val context: Context) {
                 rawExposureCompensation = preferences[RAW_EXPOSURE_COMPENSATION_KEY] ?: 0f,
                 rawBlackPointCorrection = preferences[RAW_BLACK_POINT_CORRECTION_KEY] ?: 0f,
                 rawWhitePointCorrection = preferences[RAW_WHITE_POINT_CORRECTION_KEY] ?: 0f,
+                exportDngWithRawExport = preferences[EXPORT_DNG_WITH_RAW_EXPORT_KEY] ?: true,
                 phantomBaselineLutId = preferences[PHANTOM_BASELINE_LUT_ID_KEY],
                 frameId = preferences[FRAME_ID_KEY],
                 showHistogram = preferences[SHOW_HISTOGRAM] ?: true,
@@ -587,6 +590,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveUseRaw(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[USE_RAW] = enabled
+        }
+    }
+
+    suspend fun saveExportDngWithRawExport(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[EXPORT_DNG_WITH_RAW_EXPORT_KEY] = enabled
         }
     }
 

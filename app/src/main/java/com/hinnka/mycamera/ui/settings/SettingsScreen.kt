@@ -138,6 +138,7 @@ fun SettingsScreen(
     val nrLevel by viewModel.nrLevel.collectAsState(initial = 5)
     val edgeLevel by viewModel.edgeLevel.collectAsState(initial = 1)
     val useRaw by viewModel.useRaw.collectAsState(initial = false)
+    val exportDngWithRawExport by viewModel.exportDngWithRawExport.collectAsState(initial = true)
     val useSuperResolution by viewModel.useMFSR.collectAsState(initial = false)
     // 软件处理参数
     val sharpening by viewModel.sharpening.collectAsState(initial = 0f)
@@ -1033,35 +1034,46 @@ fun SettingsScreen(
                 }
 
                 SettingsTab.RAW -> {
-                    SettingsSection(title = stringResource(R.string.settings_section_baseline_color_correction)) {
-                        BaselineColorCorrectionSettingItem(
-                            title = stringResource(R.string.settings_baseline_raw_title),
-                            description = stringResource(R.string.settings_baseline_raw_description),
-                            selectedLut = availableLuts.find { it.id == rawBaselineLutId },
-                            onClick = { baselinePickerTarget = BaselineColorCorrectionTarget.RAW }
-                        )
-                    }
+                    BaselineColorCorrectionSettingItem(
+                        title = stringResource(R.string.settings_baseline_raw_title),
+                        description = stringResource(R.string.settings_baseline_raw_description),
+                        selectedLut = availableLuts.find { it.id == rawBaselineLutId },
+                        onClick = { baselinePickerTarget = BaselineColorCorrectionTarget.RAW }
+                    )
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = Color.White.copy(alpha = 0.1f)
+                    )
 
-                    SettingsSection(title = "RAW") {
-                        RawEditPanel(
-                            selectedDcpId = rawDcpId,
-                            availableDcps = availableDcps,
-                            rawNlmNoiseFactor = rawNlmNoiseFactor,
-                            rawExposureCompensation = rawExposureCompensation,
-                            rawBlackPointCorrection = rawBlackPointCorrection,
-                            rawWhitePointCorrection = rawWhitePointCorrection,
-                            onSelectDcp = { viewModel.setRawDcpId(it) },
-                            onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
-                            onRawNlmNoiseFactorChange = { viewModel.setRawNlmNoiseFactor(it) },
-                            onRawExposureCompensationChange = { viewModel.setRawExposureCompensation(it) },
-                            onRawBlackPointCorrectionChange = { viewModel.setRawBlackPointCorrection(it) },
-                            onRawWhitePointCorrectionChange = { viewModel.setRawWhitePointCorrection(it) },
-                            onAdjustmentStart = { },
-                            onAdjustmentEnd = { }
-                        )
-                    }
+                    SwitchSettingItem(
+                        title = stringResource(R.string.settings_export_dng_with_raw_export),
+                        description = stringResource(R.string.settings_export_dng_with_raw_export_description),
+                        checked = exportDngWithRawExport,
+                        onCheckedChange = { viewModel.setExportDngWithRawExport(it) }
+                    )
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = Color.White.copy(alpha = 0.1f)
+                    )
+
+                    RawEditPanel(
+                        selectedDcpId = rawDcpId,
+                        availableDcps = availableDcps,
+                        rawNlmNoiseFactor = rawNlmNoiseFactor,
+                        rawExposureCompensation = rawExposureCompensation,
+                        rawBlackPointCorrection = rawBlackPointCorrection,
+                        rawWhitePointCorrection = rawWhitePointCorrection,
+                        onSelectDcp = { viewModel.setRawDcpId(it) },
+                        onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
+                        onRawNlmNoiseFactorChange = { viewModel.setRawNlmNoiseFactor(it) },
+                        onRawExposureCompensationChange = { viewModel.setRawExposureCompensation(it) },
+                        onRawBlackPointCorrectionChange = { viewModel.setRawBlackPointCorrection(it) },
+                        onRawWhitePointCorrectionChange = { viewModel.setRawWhitePointCorrection(it) },
+                        onAdjustmentStart = { },
+                        onAdjustmentEnd = { }
+                    )
                 }
 
                 SettingsTab.PHANTOM -> {
