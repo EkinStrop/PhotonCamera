@@ -50,6 +50,7 @@ import me.saket.telephoto.zoomable.coil.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
 import com.hinnka.mycamera.frame.TextType
+import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.ui.camera.LutEditBottomSheet
 import com.hinnka.mycamera.ui.camera.RecipeScope
@@ -60,6 +61,7 @@ import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
@@ -91,14 +93,13 @@ private data class PreviewRenderSignature(
     val editFocusY: Float?,
     val showOrigin: Boolean,
     val editTab: Int,
-    val isAdjusting: Boolean,
 )
 
 /**
  * 照片编辑界面
  */
 @SuppressLint("LocalContextGetResourceValueCall")
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun PhotoEditScreen(
     viewModel: GalleryViewModel,
@@ -120,7 +121,6 @@ fun PhotoEditScreen(
 
     var isSaving by remember { mutableStateOf(false) }
     var isLoadingPreview by remember { mutableStateOf(false) }
-    var isAdjusting by remember { mutableStateOf(false) }
     val lutScrollState = rememberLazyListState()
     val frameScrollState = rememberLazyListState()
     var showLutEditDialog by remember { mutableStateOf(false) }
@@ -171,6 +171,7 @@ fun PhotoEditScreen(
     val animatePaddingBottom by animateDpAsState(
         if (showControls) 160.dp else 0.dp
     )
+    var previewRenderRequestId by remember { mutableLongStateOf(0L) }
 
     fun currentPreviewSignature(): PreviewRenderSignature? {
         val photo = currentPhoto ?: return null
@@ -194,9 +195,29 @@ fun PhotoEditScreen(
             editFocusX = editFocusX,
             editFocusY = editFocusY,
             showOrigin = showOrigin,
-            editTab = editTab,
-            isAdjusting = isAdjusting
+            editTab = editTab
         )
+    }
+
+    suspend fun renderPreview(
+        photo: MediaData,
+        maxEdge: Int
+    ) {
+        val requestId = ++previewRenderRequestId
+        val bitmap = withContext(Dispatchers.IO) {
+            viewModel.getPreviewBitmap(
+                photo,
+                useGlobalEdit = true,
+                showOrigin = showOrigin,
+                ignoreCrop = editTab == 3,
+                recipeParamsOverride = previewRecipeParamsOverride,
+                maxEdge = maxEdge
+            )
+        }
+        if (requestId == previewRenderRequestId && bitmap != null) {
+            previewBitmap = bitmap
+            isLoadingPreview = false
+        }
     }
 
 
@@ -224,25 +245,28 @@ fun PhotoEditScreen(
     }
 
     LaunchedEffect(currentPhoto, refreshKey) {
-        if (currentPhoto == null) return@LaunchedEffect
+        val photo = currentPhoto ?: return@LaunchedEffect
         snapshotFlow {
             currentPreviewSignature()
-        }.collect { _ ->
-            val hires = withContext(Dispatchers.IO) {
-                viewModel.getPreviewBitmap(
-                    currentPhoto,
-                    useGlobalEdit = true,
-                    showOrigin = showOrigin,
-                    ignoreCrop = editTab == 3,
-                    recipeParamsOverride = previewRecipeParamsOverride,
-                    maxEdge = if (isAdjusting) 512 else 4096
-                )
-            }
-            if (hires != null) {
-                previewBitmap = hires
-                isLoadingPreview = false
-            }
         }
+            .filter { it != null }
+            .conflate()
+            .collect {
+                renderPreview(photo, maxEdge = 1440)
+            }
+    }
+
+    LaunchedEffect(currentPhoto, refreshKey) {
+        val photo = currentPhoto ?: return@LaunchedEffect
+        snapshotFlow {
+            currentPreviewSignature()
+        }
+            .filter { it != null }
+            .conflate()
+            .debounce(250)
+            .collectLatest {
+                renderPreview(photo, maxEdge = 4096)
+            }
     }
 
     LaunchedEffect(currentPhoto) {
@@ -811,12 +835,10 @@ fun PhotoEditScreen(
             lutId = editLutId!!,
             initialParams = previewRecipeParamsOverride ?: editPhotoRecipeParams ?: editLutRecipeParams,
             onParamsPreviewChange = {
-                isAdjusting = true
                 previewRecipeParamsOverride = it
             },
             onDismiss = {
                 previewRecipeParamsOverride = null
-                isAdjusting = false
                 showLutEditDialog = false
             },
             photoRecipeParams = editPhotoRecipeParams,
