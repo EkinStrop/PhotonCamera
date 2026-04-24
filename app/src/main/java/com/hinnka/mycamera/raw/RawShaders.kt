@@ -461,8 +461,9 @@ object RawShaders {
     /**
      * HDR Reference Shader
      *
-     * 对线性输入仅应用共享曝光归一化，不做 SDR tone mapping，
-     * 供后续 gainmap 计算使用。
+     * RAW 线性输入已经按传感器白点归一化，直接输出会让拍到白点的灯光仍然只有
+     * SDR reference white (= 1.0)，gainmap 没有高光余量可写。这里只扩展接近白点
+     * 的 RAW 高光到 scene-linear HDR headroom，不做 SDR tone mapping。
      */
     val HDR_REFERENCE_FRAGMENT_SHADER = """
         #version 300 es
@@ -472,9 +473,19 @@ object RawShaders {
         out vec4 fragColor;
 
         uniform sampler2D uInputTexture;
+        uniform float uHighlightStart;
+        uniform float uWhitePointSceneLuma;
+
+        float luminance(vec3 color) {
+            return max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
+        }
 
         void main() {
-            vec3 color = texture(uInputTexture, vTexCoord).rgb;
+            vec3 color = max(texture(uInputTexture, vTexCoord).rgb, vec3(0.0));
+            float luma = luminance(color);
+            float highlight = smoothstep(uHighlightStart, 1.0, luma);
+            float targetLuma = mix(luma, max(luma, uWhitePointSceneLuma), highlight);
+            color *= targetLuma / luma;
             fragColor = vec4(max(color, vec3(0.0)), 1.0);
         }
     """.trimIndent()

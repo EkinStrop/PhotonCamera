@@ -123,6 +123,8 @@ class RawDemosaicProcessor {
 
     companion object {
         private const val TAG = "RawDemosaicProcessor"
+        private const val RAW_HDR_HIGHLIGHT_START = 0.72f
+        private const val RAW_HDR_WHITE_POINT_SCENE_LUMA = 2.4f
 
         init {
             // 加载 JNI 库
@@ -620,7 +622,11 @@ class RawDemosaicProcessor {
                     bounds,
                     hdrReferenceTextureId
                 )
-                val hdrPixels = readPixels(finalWidth, finalHeight, workingColorSpace)
+                val hdrPixels = readPixels(
+                    finalWidth,
+                    finalHeight,
+                    android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.EXTENDED_SRGB)
+                )
                 // hdrReferenceTextureId 已被 outputPass 消费
                 if (hdrReferenceTextureId != 0) {
                     GLES30.glDeleteTextures(1, intArrayOf(hdrReferenceTextureId), 0)
@@ -1956,6 +1962,14 @@ class RawDemosaicProcessor {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTextureId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(hdrReferenceProgram, "uInputTexture"), 0)
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(hdrReferenceProgram, "uHighlightStart"),
+            RAW_HDR_HIGHLIGHT_START
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(hdrReferenceProgram, "uWhitePointSceneLuma"),
+            RAW_HDR_WHITE_POINT_SCENE_LUMA
+        )
 
         val identityMatrix = FloatArray(16)
         GlMatrix.setIdentityM(identityMatrix, 0)
