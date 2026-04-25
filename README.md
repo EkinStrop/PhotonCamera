@@ -53,3 +53,7 @@ Photon Camera 是一款专注于静态摄影的开源 Android 相机应用，旨
 如果你觉得这个项目对你有帮助，欢迎请作者打赏一杯咖啡！
 
 <img src="./doc/alipay_qr.webp" width="300" alt="Alipay QR Code">
+
+## 交流
+
+QQ群(光子相机): 569605452
