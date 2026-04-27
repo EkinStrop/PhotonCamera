@@ -86,6 +86,24 @@
       "isVip": false
     },
     {
+      "id": "ricoh_green",
+      "name": {
+        "en": "Green",
+        "zh": "电影绿"
+      },
+      "path": "ricoh_green.plut",
+      "isVip": false
+    },
+    {
+      "id": "ricoh_yellow",
+      "name": {
+        "en": "Yellow",
+        "zh": "电影黄"
+      },
+      "path": "ricoh_yellow.plut",
+      "isVip": false
+    },
+    {
       "id": "fl3",
       "name": {
         "en": "FL3",
