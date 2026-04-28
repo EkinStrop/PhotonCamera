@@ -2,16 +2,14 @@ cmake_minimum_required(VERSION 3.22.1)
 project("native-tool")
 
 set(LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
-set(ADOBE_DCP_TOOL_DIR /Users/zhoubinjia/Projects/AdobeDCPTool)
-set(ADOBE_DNG_SOURCE_DIR ${ADOBE_DCP_TOOL_DIR}/composeApp/src/jvmMain/cpp/dng_sdk/source)
-set(ADOBE_XMP_STUB_DIR ${ADOBE_DCP_TOOL_DIR}/composeApp/src/jvmMain/cpp/XMPStub/include)
+set(ADOBE_DNG_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dcp/dng_sdk/source)
+set(ADOBE_XMP_STUB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dcp/XMPStub/include)
 
 # 4. 添加头文件路径
 include_directories(${LIB_PATH}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/LibRaw)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libjpeg-turbo/src)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/libjpeg-turbo)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../rawtherapee-5.12/rtengine)
 include_directories(${ADOBE_DNG_SOURCE_DIR})
 include_directories(${ADOBE_XMP_STUB_DIR})
 
