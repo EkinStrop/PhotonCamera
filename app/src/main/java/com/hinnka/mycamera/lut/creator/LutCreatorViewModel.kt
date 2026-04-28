@@ -10,7 +10,6 @@ import com.hinnka.mycamera.utils.PLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -18,8 +17,6 @@ class LutCreatorViewModel(application: Application) : AndroidViewModel(applicati
 
     private val importManager = CustomImportManager(application)
     private val lutManager = LutManager(application)
-    private val userPrefsRepo =
-        com.hinnka.mycamera.data.ContentRepository.getInstance(application).userPreferencesRepository
 
     private val _uiState = MutableStateFlow<LutCreatorUiState>(LutCreatorUiState.Idle)
     val uiState: StateFlow<LutCreatorUiState> = _uiState
@@ -37,31 +34,9 @@ class LutCreatorViewModel(application: Application) : AndroidViewModel(applicati
                     return@launch
                 }
 
-                val userPrefs = userPrefsRepo.userPreferences.firstOrNull()
-                val isBuiltIn = userPrefs?.openAIApiKey.isNullOrBlank()
-                val apiKey = if (isBuiltIn) {
-                    OpenAIApiClient.BUILT_IN_API_KEY
-                } else {
-                    userPrefs.openAIApiKey.orEmpty()
-                }
-                val baseUrl = if (isBuiltIn) {
-                    OpenAIApiClient.BUILT_IN_API_URL
-                } else {
-                    userPrefs.openAIBaseUrl.orEmpty()
-                }
-                val model = if (isBuiltIn) {
-                    OpenAIApiClient.BUILT_IN_MODEL
-                } else {
-                    userPrefs.openAIModel?.ifBlank { OpenAIApiClient.BUILT_IN_MODEL }
-                        ?: OpenAIApiClient.BUILT_IN_MODEL
-                }
-
-                if (apiKey.isBlank()) {
-                    _uiState.value = LutCreatorUiState.Error("OpenAI API Key is not set in settings")
-                    return@launch
-                }
-
-                val client = createOpenAiClient(apiKey, baseUrl)
+                val context = getApplication<Application>()
+                val client = OpenAIApiClient()
+                client.initialize(context)
                 val preparedBitmap = AiImagePreprocessor.prepareForImageToImage(bitmap)
 
                 PLog.d(
@@ -71,8 +46,6 @@ class LutCreatorViewModel(application: Application) : AndroidViewModel(applicati
 
                 val recipe = client.generateLutRecipeFromImage(
                     bitmap = preparedBitmap,
-                    isBuiltIn = isBuiltIn,
-                    model = model,
                     customPrompt = customPrompt
                 ).getOrThrow()
 
@@ -96,17 +69,9 @@ class LutCreatorViewModel(application: Application) : AndroidViewModel(applicati
                     return@launch
                 }
 
-                val userPrefs = userPrefsRepo.userPreferences.firstOrNull()
-                val isBuiltIn = false
-                val apiKey = if (isBuiltIn) OpenAIApiClient.BUILT_IN_API_KEY else userPrefs?.openAIApiKey ?: ""
-                val baseUrl = if (isBuiltIn) OpenAIApiClient.BUILT_IN_API_URL else userPrefs?.openAIBaseUrl ?: ""
-
-                if (apiKey.isEmpty()) {
-                    _uiState.value = LutCreatorUiState.Error("OpenAI API Key is not set in settings")
-                    return@launch
-                }
-
-                val client = createOpenAiClient(apiKey, baseUrl)
+                val context = getApplication<Application>()
+                val client = OpenAIApiClient()
+                client.initialize(context)
 
                 PLog.d(
                     "LutCreatorViewModel",
@@ -116,7 +81,6 @@ class LutCreatorViewModel(application: Application) : AndroidViewModel(applicati
                 val preparedBitmap = AiImagePreprocessor.prepareForImageToImage(bitmap)
                 val sourceBitmap = client.generateOriginalImage(
                     bitmap = preparedBitmap,
-                    isBuiltIn,
                     model = OpenAIApiClient.BUILT_IN_IMAGE_MODEL,
                     customPrompt = customPrompt
                 ).getOrThrow()
@@ -130,14 +94,6 @@ class LutCreatorViewModel(application: Application) : AndroidViewModel(applicati
             } catch (e: Exception) {
                 _uiState.value = LutCreatorUiState.Error("Analysis failed: ${e.message}")
             }
-        }
-    }
-
-    private fun createOpenAiClient(apiKey: String, baseUrl: String): OpenAIApiClient {
-        return if (baseUrl.isBlank()) {
-            OpenAIApiClient(apiKey)
-        } else {
-            OpenAIApiClient(apiKey, baseUrl)
         }
     }
 

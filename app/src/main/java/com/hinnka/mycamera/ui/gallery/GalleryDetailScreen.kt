@@ -804,7 +804,7 @@ private fun AiScoreBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = Color(0xFF1E1E1E),
+        containerColor = Color(0x881E1E1E),
         dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.4f)) }
     ) {
         Column(

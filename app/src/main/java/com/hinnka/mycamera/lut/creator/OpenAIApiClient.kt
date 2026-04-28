@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.lut.creator
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.util.Base64
 import com.hinnka.mycamera.utils.PLog
@@ -16,20 +17,43 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 import androidx.core.graphics.scale
+import com.hinnka.mycamera.data.ContentRepository
+import com.hinnka.mycamera.utils.DeviceUtil
+import kotlinx.coroutines.flow.firstOrNull
 
-class OpenAIApiClient(
-    private val apiKey: String,
-    baseUrl: String = BUILT_IN_API_URL
-) {
+class OpenAIApiClient() {
+
+    private lateinit var apiBaseUrl: String
+    private lateinit var apiKey: String
+    private lateinit var model: String
+
+    suspend fun initialize(context: Context) {
+        val userPrefs = ContentRepository.getInstance(context).userPreferencesRepository.userPreferences.firstOrNull()
+        val isBuiltIn = userPrefs?.openAIApiKey.isNullOrBlank() && DeviceUtil.canShowPhantom
+        apiKey = if (isBuiltIn) {
+            BUILT_IN_API_KEY
+        } else {
+            userPrefs?.openAIApiKey ?: ""
+        }
+        apiBaseUrl = if (isBuiltIn) {
+            BUILT_IN_API_URL
+        } else {
+            userPrefs?.openAIBaseUrl?.ifBlank { BUILT_IN_API_URL } ?: BUILT_IN_API_URL
+        }.trimEnd('/')
+        model = if (isBuiltIn) {
+            BUILT_IN_MODEL
+        } else {
+            userPrefs?.openAIModel?.ifBlank { BUILT_IN_MODEL } ?: BUILT_IN_MODEL
+        }
+    }
 
     companion object {
         const val BUILT_IN_API_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+//        const val OPENAI_API_URL = "https://api.openai.com/v1"
         const val BUILT_IN_API_KEY = "tp-clodqe7tne37catuogvqv83fpfr3clbkun21meavj59ffwpl"
         const val BUILT_IN_IMAGE_MODEL = "mimo-v2.5"
         const val BUILT_IN_MODEL = "mimo-v2.5"
     }
-
-    private val apiBaseUrl = baseUrl.trimEnd('/')
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -73,7 +97,6 @@ class OpenAIApiClient(
 
     suspend fun generateOriginalImage(
         bitmap: Bitmap,
-        isBuiltIn: Boolean,
         model: String,
         customPrompt: String = ""
     ): Result<Bitmap> =
@@ -125,8 +148,6 @@ class OpenAIApiClient(
 
     suspend fun generateLutRecipeFromImage(
         bitmap: Bitmap,
-        isBuiltIn: Boolean,
-        model: String,
         customPrompt: String = ""
     ): Result<LutRecipe> =
         withContext(Dispatchers.IO) {
@@ -215,15 +236,15 @@ Return JSON only, without markdown, using this exact schema:
 
     suspend fun evaluateImageQuality(
         bitmap: Bitmap,
-        isBuiltIn: Boolean,
-        model: String,
         localeTag: String
     ): Result<AiPhotoEvaluation> =
         withContext(Dispatchers.IO) {
             try {
                 val base64Image = bitmapToBase64(bitmap)
                 val prompt = """
-你是专为摄影作品打分和点评的专业评论家。请只从构图、色彩、光影、主题表达四个维度评价这张照片，给出严格但有建设性的分数和点评，不虚伪不奉承，不泛泛而谈。
+你是挑剔且专业的顶级摄影评论家。请从构图、色彩、光影、主题表达四个维度对照片进行犀利且具有建设性的点评。拒绝任何客套、虚伪的赞美或泛泛而谈。
+
+请默认这是一张 60 分的平庸照片，你需要寻找理由为其加分或大幅扣分。
 
 四个维度定义:
 - 构图: 画面结构、主体位置、边缘处理、空间关系、视觉引导和平衡感。
@@ -231,16 +252,16 @@ Return JSON only, without markdown, using this exact schema:
 - 光影: 曝光、明暗关系、光线方向、层次、质感塑造和高光阴影控制。
 - 主题表达: 主体是否明确，画面情绪、叙事、意图和观看记忆点是否成立。
 
-评分指南:
-- 90-100: 达到专业摄影作品水准.
-- 80-89: 接近专业摄影作品水准.
-- 70-79: 不错的艺术创作.
-- 60-69: 日常可接受的随拍.
-- 40-59: 在某方面有一些欠缺.
-- 0-39: 失败作品.
+评分指南 (严禁分数膨胀):
+- 90-100: 殿堂级/顶级大师作品。(极罕见，需具备历史级审美价值)
+- 80-89: 极为优秀的专业商业/艺术作品。(技术完美，具有强烈的个人风格与情绪感染力)
+- 70-79: 优秀的摄影爱好者作品。(有明显闪光点，但仍存在一两处技术或表达上的妥协)
+- 60-69: 结构完整的日常记录, 具有一定的审美价值。(曝光准确，构图规矩，但极度平庸，缺乏艺术生命力，这是大部分照片的归宿)
+- 40-59: 存在明显的技术硬伤。(如：高光彻底溢出、构图杂乱无章、色彩脏乱、明显的后期处理过度痕迹)
+- 0-39: 废片。(缺乏基本的摄影常识和观看价值)
 
 The user's current system language is "$localeTag". The "summary" value MUST be written in that language.
-Return JSON only, without markdown, using this exact schema:
+Return JSON only, without markdown formatting, code blocks, or any conversational text, using this exact schema:
 {
   "overallScore": 0-100 integer,
   "compositionScore": 0-100 integer,

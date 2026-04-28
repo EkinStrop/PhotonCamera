@@ -315,9 +315,9 @@
     <string name="settings_filter_management_description">管理濾鏡、設定預設、排序</string>
     <string name="settings_frame_management">邊框管理</string>
     <string name="settings_frame_management_description">管理邊框、設定預設、排序</string>
-    <string name="settings_openai_api_key">Gemini API Key</string>
+    <string name="settings_openai_api_key">OpenAI API Key</string>
     <string name="settings_openai_api_key_desc">用於 AI 分析的 API 金鑰</string>
-    <string name="settings_openai_base_url">Gemini API 網域</string>
+    <string name="settings_openai_base_url">OpenAI API 網域</string>
     <string name="settings_openai_base_url_desc">允許設定相容大語言模型的自訂介面位址</string>
     <string name="settings_use_built_in_ai">使用內建體驗服務</string>
     <string name="settings_use_built_in_ai_desc">開啟後使用內建 AI 提取服務，無需設定 API Key。</string>

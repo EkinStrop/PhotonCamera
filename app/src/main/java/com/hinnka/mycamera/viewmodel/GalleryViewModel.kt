@@ -1781,28 +1781,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 return@withContext Result.success(it)
             }
 
-            val prefs = userPreferencesRepository.userPreferences.firstOrNull()
-            val isBuiltIn = prefs?.openAIApiKey.isNullOrBlank()
-            val apiKey = if (isBuiltIn) {
-                OpenAIApiClient.BUILT_IN_API_KEY
-            } else {
-                prefs.openAIApiKey
-            }
-            val baseUrl = if (isBuiltIn) {
-                OpenAIApiClient.BUILT_IN_API_URL
-            } else {
-                prefs.openAIBaseUrl.orEmpty()
-            }
-            val model = if (isBuiltIn) {
-                OpenAIApiClient.BUILT_IN_MODEL
-            } else {
-                prefs.openAIModel?.ifEmpty { OpenAIApiClient.BUILT_IN_MODEL } ?: OpenAIApiClient.BUILT_IN_MODEL
-            }
-
-            if (apiKey.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("AI API key is not configured"))
-            }
-
             val bitmap = getPreviewBitmap(
                 photo = photo,
                 showOrigin = false,
@@ -1810,11 +1788,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 maxEdge = 1024
             ) ?: return@withContext Result.failure(IllegalStateException("Unable to load photo preview"))
 
-            val client = OpenAIApiClient(apiKey)
+            val context = getApplication<Application>()
+            val client = OpenAIApiClient()
+            client.initialize(context)
             val result = client.evaluateImageQuality(
                 bitmap = bitmap,
-                isBuiltIn = isBuiltIn,
-                model = model,
                 localeTag = Locale.getDefault().toLanguageTag()
             )
             result.onSuccess { aiEvaluationCache[cacheKey] = it }

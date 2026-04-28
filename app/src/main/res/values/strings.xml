@@ -395,9 +395,9 @@
     <string name="settings_filter_management_description">Manage LUTs, set default, reorder</string>
     <string name="settings_frame_management">Frame Management</string>
     <string name="settings_frame_management_description">Manage frames, set default, reorder</string>
-    <string name="settings_openai_api_key">Gemini API Key</string>
+    <string name="settings_openai_api_key">OpenAI API Key</string>
     <string name="settings_openai_api_key_desc">API key required for AI</string>
-    <string name="settings_openai_base_url">Gemini Base URL</string>
+    <string name="settings_openai_base_url">OpenAI Base URL</string>
     <string name="settings_openai_base_url_desc">Set a custom API destination to support compatible language models</string>
     <string name="settings_use_built_in_ai">Use Built-in Experience Service</string>
     <string name="settings_use_built_in_ai_desc">Use the built-in AI extraction service without configuring your own API Key.</string>

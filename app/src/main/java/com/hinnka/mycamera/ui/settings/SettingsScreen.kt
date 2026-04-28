@@ -168,6 +168,7 @@ fun SettingsScreen(
     val widgetTheme by viewModel.widgetTheme.collectAsState()
     val saveLocation by viewModel.saveLocationEnabled.collectAsState(initial = false)
     val openAIApiKey by viewModel.openAIApiKey.collectAsState()
+    val openAIUrl by viewModel.openAIUrl.collectAsState()
     val openAIModel by viewModel.openAIModel.collectAsState()
     val availableOpenAIModels by viewModel.availableOpenAIModels.collectAsState()
     val isFetchingAIModels by viewModel.isFetchingAIModels.collectAsState()
@@ -701,6 +702,18 @@ fun SettingsScreen(
                             description = stringResource(R.string.settings_openai_api_key_desc),
                             value = openAIApiKey ?: "",
                             onValueChange = { viewModel.setOpenAIApiKey(it) }
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        TextInputSettingItem(
+                            title = stringResource(R.string.settings_openai_base_url),
+                            description = stringResource(R.string.settings_openai_base_url_desc),
+                            value = openAIUrl ?: OpenAIApiClient.BUILT_IN_API_URL,
+                            onValueChange = { viewModel.setOpenAIUrl(it) }
                         )
 
                         HorizontalDivider(

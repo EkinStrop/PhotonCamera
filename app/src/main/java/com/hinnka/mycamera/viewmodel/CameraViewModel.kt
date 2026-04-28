@@ -1691,7 +1691,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             try {
-                val client = OpenAIApiClient(apiKey)
+                val context = getApplication<Application>()
+                val client = OpenAIApiClient()
+                client.initialize(context)
                 val result = client.getAvailableModels()
                 result.onSuccess { models ->
                     _availableOpenAIModels.value = models
