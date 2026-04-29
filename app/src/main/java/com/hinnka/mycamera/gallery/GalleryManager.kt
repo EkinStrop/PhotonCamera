@@ -1124,6 +1124,7 @@ object GalleryManager {
                 rawExposureCompensation = metadata.rawExposureCompensation ?: 0f,
                 rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
+                rawAutoWhiteBalanceEstimate = metadata.rawAutoWhiteBalanceEstimate ?: false,
                 sharpeningValue = 0.4f,
                 rawDcpId = metadata.rawDcpId
             ) ?: return@withContext
@@ -1684,6 +1685,7 @@ object GalleryManager {
                     rawExposureCompensation = metadata.rawExposureCompensation ?: 0f,
                     rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
                     rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
+                    rawAutoWhiteBalanceEstimate = metadata.rawAutoWhiteBalanceEstimate ?: false,
                     sharpeningValue = 0.4f,
                     denoiseValue = 0.2f,
                     rawDcpId = metadata.rawDcpId
@@ -2549,6 +2551,7 @@ object GalleryManager {
                         rawExposureCompensation = updatedMetadata.rawExposureCompensation ?: 0f,
                         rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                         rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
+                        rawAutoWhiteBalanceEstimate = updatedMetadata.rawAutoWhiteBalanceEstimate ?: false,
                         sharpeningValue = 0.4f,
                         denoiseValue = updatedMetadata.rawDenoiseValue,
                         rawDcpId = updatedMetadata.rawDcpId,
@@ -2663,6 +2666,7 @@ object GalleryManager {
                     rawExposureCompensation = updatedMetadata?.rawExposureCompensation ?: 0f,
                     rawBlackPointCorrection = updatedMetadata?.rawBlackPointCorrection ?: 0f,
                     rawWhitePointCorrection = updatedMetadata?.rawWhitePointCorrection ?: 0f,
+                    rawAutoWhiteBalanceEstimate = updatedMetadata?.rawAutoWhiteBalanceEstimate ?: false,
                     sharpeningValue = 0.4f,
                     denoiseValue = (updatedMetadata ?: MediaMetadata()).rawDenoiseValue,
                     rawDcpId = updatedMetadata?.rawDcpId,

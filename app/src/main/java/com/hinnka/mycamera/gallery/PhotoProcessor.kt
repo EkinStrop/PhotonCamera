@@ -361,6 +361,7 @@ class PhotoProcessor(
             rawExposureCompensation = metadata.rawExposureCompensation ?: 0f,
             rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
+            rawAutoWhiteBalanceEstimate = metadata.rawAutoWhiteBalanceEstimate ?: false,
             sharpeningValue = 0.4f,
             denoiseValue = metadata.rawDenoiseValue,
             rawDcpId = metadata.rawDcpId
@@ -420,6 +421,7 @@ class PhotoProcessor(
             rawExposureCompensation = metadata.rawExposureCompensation ?: 0f,
             rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
+            rawAutoWhiteBalanceEstimate = metadata.rawAutoWhiteBalanceEstimate ?: false,
             denoiseValue = metadata.rawDenoiseValue,
             rawDcpId = metadata.rawDcpId
         )

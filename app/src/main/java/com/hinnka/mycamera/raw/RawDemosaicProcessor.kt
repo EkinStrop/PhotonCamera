@@ -118,7 +118,8 @@ class RawDemosaicProcessor {
         xr: Float, yr: Float,
         xg: Float, yg: Float,
         xb: Float, yb: Float,
-        xw: Float, yw: Float
+        xw: Float, yw: Float,
+        useRawAutoWhiteBalanceEstimate: Boolean
     ): DngRawData?
 
     companion object {
@@ -255,6 +256,7 @@ class RawDemosaicProcessor {
         rawExposureCompensation: Float = 0f,
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
+        rawAutoWhiteBalanceEstimate: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         rawDcpId: String? = null,
@@ -277,6 +279,7 @@ class RawDemosaicProcessor {
                 rawExposureCompensation = rawExposureCompensation,
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
+                rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 rawDcpId = rawDcpId,
@@ -306,6 +309,7 @@ class RawDemosaicProcessor {
         rawExposureCompensation: Float = 0f,
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
+        rawAutoWhiteBalanceEstimate: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
@@ -333,6 +337,7 @@ class RawDemosaicProcessor {
                 rawExposureCompensation = rawExposureCompensation,
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
+                rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 chromaDenoiseValue = chromaDenoiseValue,
@@ -355,6 +360,7 @@ class RawDemosaicProcessor {
         rawExposureCompensation: Float = 0f,
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
+        rawAutoWhiteBalanceEstimate: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         rawDcpId: String? = null,
@@ -377,6 +383,7 @@ class RawDemosaicProcessor {
                 rawExposureCompensation = rawExposureCompensation,
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
+                rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 rawDcpId = rawDcpId,
@@ -408,6 +415,7 @@ class RawDemosaicProcessor {
         rawExposureCompensation: Float = 0f,
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
+        rawAutoWhiteBalanceEstimate: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
@@ -431,7 +439,8 @@ class RawDemosaicProcessor {
                 ColorSpace.ProPhoto.xr, ColorSpace.ProPhoto.yr,
                 ColorSpace.ProPhoto.xg, ColorSpace.ProPhoto.yg,
                 ColorSpace.ProPhoto.xb, ColorSpace.ProPhoto.yb,
-                ColorSpace.ProPhoto.xw, ColorSpace.ProPhoto.yw
+                ColorSpace.ProPhoto.xw, ColorSpace.ProPhoto.yw,
+                rawAutoWhiteBalanceEstimate
             )
             if (dngRawData == null) {
                 return@withContext RawProcessor.processAndToBitmap(dngFile, aspectRatio, cropRegion, rotation)?.let {

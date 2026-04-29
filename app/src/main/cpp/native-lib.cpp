@@ -518,6 +518,101 @@ static bool applySupportedDngGainMaps(LibRaw &rawProcessor, const float blackLev
   return true;
 }
 
+static bool estimateRawAutoWhiteBalance(LibRaw &rawProcessor, const float blackLevels[4],
+                                        float outUserMul[4], int &sampleCount) {
+  sampleCount = 0;
+  if (!rawProcessor.imgdata.rawdata.raw_image || !rawProcessor.imgdata.idata.filters) {
+    return false;
+  }
+
+  const int rawWidth = rawProcessor.imgdata.sizes.raw_width;
+  const int rawHeight = rawProcessor.imgdata.sizes.raw_height;
+  const int rawPitch = rawProcessor.imgdata.sizes.raw_pitch > 0
+                           ? rawProcessor.imgdata.sizes.raw_pitch / static_cast<int>(sizeof(ushort))
+                           : rawWidth;
+  const int left = std::max(0, static_cast<int>(rawProcessor.imgdata.sizes.left_margin));
+  const int top = std::max(0, static_cast<int>(rawProcessor.imgdata.sizes.top_margin));
+  const int right = std::min(rawWidth - 1, left + static_cast<int>(rawProcessor.imgdata.sizes.width) - 1);
+  const int bottom = std::min(rawHeight - 1, top + static_cast<int>(rawProcessor.imgdata.sizes.height) - 1);
+  if (right <= left + 1 || bottom <= top + 1) {
+    return false;
+  }
+
+  float whiteLevel = static_cast<float>(rawProcessor.imgdata.color.dng_levels.dng_whitelevel[0]);
+  if (whiteLevel <= 0.0f) {
+    whiteLevel = static_cast<float>(rawProcessor.imgdata.color.maximum);
+  }
+  if (whiteLevel <= 0.0f) {
+    whiteLevel = 65535.0f;
+  }
+
+  double sums[4] = {0.0, 0.0, 0.0, 0.0};
+  auto *rawImage = rawProcessor.imgdata.rawdata.raw_image;
+  const int step = 4;
+  for (int y = top; y + 1 <= bottom; y += step) {
+    for (int x = left; x + 1 <= right; x += step) {
+      float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+      bool seen[4] = {false, false, false, false};
+      for (int dy = 0; dy < 2; ++dy) {
+        for (int dx = 0; dx < 2; ++dx) {
+          const int yy = y + dy;
+          const int xx = x + dx;
+          int c = rawProcessor.FC(yy, xx);
+          if (c < 0 || c > 3) {
+            continue;
+          }
+          const float black = blackLevels[c];
+          const float range = std::max(1.0f, whiteLevel - black);
+          const float raw = static_cast<float>(rawImage[yy * rawPitch + xx]);
+          v[c] = std::clamp((raw - black) / range, 0.0f, 1.0f);
+          seen[c] = true;
+        }
+      }
+
+      if (!seen[0] || !seen[1] || !seen[2]) {
+        continue;
+      }
+      if (!seen[3]) {
+        v[3] = v[1];
+      }
+
+      const float g = 0.5f * (v[1] + v[3]);
+      const float minValue = std::min(std::min(v[0], v[1]), std::min(v[2], v[3]));
+      const float maxValue = std::max(std::max(v[0], v[1]), std::max(v[2], v[3]));
+      const float luma = 0.25f * (v[0] + v[1] + v[2] + v[3]);
+      if (luma < 0.025f || luma > 0.82f || minValue < 0.004f || maxValue > 0.96f) {
+        continue;
+      }
+      if (maxValue / std::max(minValue, 0.004f) > 3.0f || g <= 0.0f) {
+        continue;
+      }
+
+      sums[0] += v[0];
+      sums[1] += v[1];
+      sums[2] += v[2];
+      sums[3] += v[3];
+      ++sampleCount;
+    }
+  }
+
+  if (sampleCount < 512 || sums[0] <= 0.0 || sums[1] <= 0.0 ||
+      sums[2] <= 0.0 || sums[3] <= 0.0) {
+    return false;
+  }
+
+  const float r = static_cast<float>(sums[0] / sampleCount);
+  const float gr = static_cast<float>(sums[1] / sampleCount);
+  const float b = static_cast<float>(sums[2] / sampleCount);
+  const float gb = static_cast<float>(sums[3] / sampleCount);
+  const float g = 0.5f * (gr + gb);
+  outUserMul[0] = std::clamp(g / std::max(r, 1e-4f), 0.5f, 4.0f);
+  outUserMul[1] = 1.0f;
+  outUserMul[2] = std::clamp(g / std::max(b, 1e-4f), 0.5f, 4.0f);
+  outUserMul[3] = std::clamp(g / std::max(gb, 1e-4f), 0.75f, 1.33f);
+  return std::isfinite(outUserMul[0]) && std::isfinite(outUserMul[2]) &&
+         std::isfinite(outUserMul[3]);
+}
+
 static float illuminantToTemp(int illuminant) {
   switch (illuminant) {
   case 1:
@@ -1753,7 +1848,8 @@ static void exif_callback(void *datap, int tag, int type, int len,
 JNIEXPORT jobject JNICALL
 Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
     JNIEnv *env, jobject /* this */, jstring filePath, jfloat xr, jfloat yr,
-    jfloat xg, jfloat yg, jfloat xb, jfloat yb, jfloat xw, jfloat yw) {
+    jfloat xg, jfloat yg, jfloat xb, jfloat yb, jfloat xw, jfloat yw,
+    jboolean useRawAutoWhiteBalanceEstimate) {
 
   const char *path = env->GetStringUTFChars(filePath, nullptr);
   if (path == nullptr) {
@@ -1831,6 +1927,35 @@ Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
   RawProcessor.imgdata.params.threshold = 0;
   RawProcessor.imgdata.params.med_passes = 0;
 
+  float selectedWb[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  for (int i = 0; i < 4; i++) {
+    const float val = RawProcessor.imgdata.color.cam_mul[i];
+    selectedWb[i] = val > 0.0f && std::isfinite(val) ? val : 1.0f;
+  }
+  float selectedBase = selectedWb[1] > 0.0f ? selectedWb[1] : 1.0f;
+  for (int i = 0; i < 4; i++) {
+    selectedWb[i] /= selectedBase;
+  }
+
+  if (useRawAutoWhiteBalanceEstimate == JNI_TRUE) {
+    float estimatedWb[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    int awbSamples = 0;
+    if (estimateRawAutoWhiteBalance(RawProcessor, dngBlackLevels, estimatedWb, awbSamples)) {
+      RawProcessor.imgdata.params.use_camera_wb = 0;
+      RawProcessor.imgdata.params.use_auto_wb = 0;
+      for (int i = 0; i < 4; ++i) {
+        RawProcessor.imgdata.params.user_mul[i] = estimatedWb[i];
+        selectedWb[i] = estimatedWb[i];
+      }
+      LOGI("raw awb estimate: enabled samples=%d wb=%f,%f,%f,%f", awbSamples,
+           selectedWb[0], selectedWb[1], selectedWb[2], selectedWb[3]);
+    } else {
+      LOGI("raw awb estimate: enabled but insufficient samples, using camera wb");
+    }
+  } else {
+    LOGI("raw awb estimate: disabled, using camera wb");
+  }
+
   ret = RawProcessor.dcraw_process();
   if (ret != LIBRAW_SUCCESS) {
     LOGE("processDngNative: Failed to process %s, ret=%d", path, ret);
@@ -1877,11 +2002,7 @@ Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
   float wb[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
   for (int i = 0; i < 4; i++)
-    wb[i] = RawProcessor.imgdata.color.cam_mul[i];
-  float base = wb[1];
-  for (int i = 0; i < 4; i++) {
-    wb[i] = wb[i] / base;
-  }
+    wb[i] = selectedWb[i];
   LOGI("wb: %f, %f, %f, %f", wb[0], wb[1], wb[2], wb[3]); // RGB0 or RGBG
   LOGI("cam_xyz: %f", RawProcessor.imgdata.color.cam_xyz[0][0]);
   LOGI("ccm: %f", RawProcessor.imgdata.color.ccm[0][0]);

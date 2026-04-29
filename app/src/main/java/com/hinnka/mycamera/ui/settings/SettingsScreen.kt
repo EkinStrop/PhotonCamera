@@ -196,6 +196,7 @@ fun SettingsScreen(
     val rawExposureCompensation by viewModel.rawExposureCompensation.collectAsState()
     val rawBlackPointCorrection by viewModel.rawBlackPointCorrection.collectAsState()
     val rawWhitePointCorrection by viewModel.rawWhitePointCorrection.collectAsState()
+    val rawAutoWhiteBalanceEstimate by viewModel.rawAutoWhiteBalanceEstimate.collectAsState()
     val availableDcps = viewModel.availableDcps
     val availableLuts = viewModel.availableLutList
     val previewThumbnail = viewModel.previewThumbnail
@@ -1142,6 +1143,18 @@ fun SettingsScreen(
                         description = stringResource(R.string.settings_export_dng_with_raw_export_description),
                         checked = exportDngWithRawExport,
                         onCheckedChange = { viewModel.setExportDngWithRawExport(it) }
+                    )
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = Color.White.copy(alpha = 0.1f)
+                    )
+
+                    SwitchSettingItem(
+                        title = stringResource(R.string.settings_raw_auto_white_balance_estimate),
+                        description = stringResource(R.string.settings_raw_auto_white_balance_estimate_description),
+                        checked = rawAutoWhiteBalanceEstimate,
+                        onCheckedChange = { viewModel.setRawAutoWhiteBalanceEstimate(it) }
                     )
 
                     HorizontalDivider(
