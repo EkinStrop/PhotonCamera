@@ -487,7 +487,10 @@ fun GalleryScreen(
                                 }
                             },
                             span = { entry ->
-                                if (entry is GalleryGridEntry.Header) {
+                                if (
+                                    entry is GalleryGridEntry.Header ||
+                                    (entry is GalleryGridEntry.Photo && entry.photo.shouldUseFullLineSpan())
+                                ) {
                                     StaggeredGridItemSpan.FullLine
                                 } else {
                                     StaggeredGridItemSpan.SingleLane
@@ -757,6 +760,13 @@ private fun GalleryFastScrollbar(
 
 private fun Int.takeIfKnown(): Int? =
     takeIf { it != Int.MAX_VALUE && it >= 0 }
+
+private fun MediaData.shouldUseFullLineSpan(): Boolean {
+    if (!isImage) return false
+    val width = (metadata?.width ?: width).takeIf { it > 0 } ?: return false
+    val height = (metadata?.height ?: height).takeIf { it > 0 } ?: return false
+    return width.toFloat() / height.toFloat() >= 2.2f
+}
 
 /**
  * 日期分组标题
