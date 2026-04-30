@@ -323,6 +323,30 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         updateBokehPhoto()
     }
 
+    private suspend fun updatePhotoMetadata(
+        photoId: String,
+        transform: (MediaMetadata) -> MediaMetadata
+    ): MediaMetadata? {
+        val context = getApplication<Application>()
+        val current = GalleryManager.loadMetadata(context, photoId)
+            ?: _photos.value.firstOrNull { it.id == photoId }?.metadata
+            ?: MediaMetadata()
+        val updated = transform(current)
+        if (!GalleryManager.saveMetadata(context, photoId, updated)) return null
+        withContext(Dispatchers.Main) {
+            if (currentPhotoMetadataId == photoId) {
+                currentMediaMetadata = updated
+            }
+            _photos.value = _photos.value.map { p ->
+                if (p.id == photoId) p.copy(metadata = updated) else p
+            }
+            if (_latestPhoto.value?.id == photoId) {
+                _latestPhoto.value = _latestPhoto.value?.copy(metadata = updated)
+            }
+        }
+        return updated
+    }
+
     private fun updateBokehPhoto() {
         bokehJob?.cancel()
         bokehJob = viewModelScope.launch(Dispatchers.IO) {
@@ -331,11 +355,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             val aperture = editComputationalAperture.value
             if (aperture == null || aperture <= 0) {
                 GalleryManager.getBokehFile(context, photoData.id).takeIf { it.exists() }?.delete()
+                GalleryManager.deleteDetailHdrFile(context, photoData.id)
                 return@launch
             }
             val focusPointX = editFocusPointX.value
             val focusPointY = editFocusPointY.value
-            val bitmap = GalleryManager.loadOriginalBitmap(context, photoData.id)
+            val metadata = GalleryManager.loadMetadata(context, photoData.id) ?: photoData.metadata ?: MediaMetadata()
+            val bitmap = if (metadata.hasAiDenoisedBase) {
+                GalleryManager.loadBitmap(context, Uri.fromFile(GalleryManager.getAiDenoiseFile(context, photoData.id)))
+            } else {
+                GalleryManager.loadOriginalBitmap(context, photoData.id)
+            }
                 ?: GalleryManager.loadBitmap(context, photoData.uri) ?: return@launch
             if (!isActive) return@launch
             val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
@@ -348,6 +378,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             )
             if (!isActive) return@launch
             GalleryManager.saveBokehPhoto(context, photoData.id, bokeh)
+            GalleryManager.deleteDetailHdrFile(context, photoData.id)
             photoRefreshKeys[photoData.id] = System.currentTimeMillis()
         }
     }
@@ -385,15 +416,32 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
                 
-                val photoDir = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "photos/${photo.id}")
-                val file = File(photoDir, "original.jpg")
+                val file = GalleryManager.getAiDenoiseFile(context, photo.id)
+                file.parentFile?.mkdirs()
                 FileOutputStream(file).use { outputStream ->
                     denoised.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)
                 }
                 
                 // Update metadata to mark that we have an AI denoised base
                 val metadata = currentMediaMetadata ?: photo.metadata ?: MediaMetadata()
-                val updatedMetadata = metadata.copy(hasAiDenoisedBase = true)
+                val aperture = metadata.computationalAperture ?: 0f
+                if (aperture > 0f) {
+                    val bokeh = contentRepository.depthBokehProcessor.applyHighQualityBokeh(
+                        context,
+                        photo.id,
+                        denoised,
+                        metadata.focusPointX,
+                        metadata.focusPointY,
+                        aperture
+                    )
+                    GalleryManager.saveBokehPhoto(context, photo.id, bokeh)
+                    if (bokeh !== denoised && !bokeh.isRecycled) {
+                        bokeh.recycle()
+                    }
+                }
+                val updatedMetadata = metadata.copy(
+                    hasAiDenoisedBase = true
+                )
                 GalleryManager.saveMetadata(context, photo.id, updatedMetadata)
                 currentMediaMetadata = updatedMetadata
                 
@@ -422,6 +470,50 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 withContext(Dispatchers.Main) { onComplete(true) }
             } catch (e: Exception) {
                 PLog.e(TAG, "Failed to apply DnCNN denoise", e)
+                withContext(Dispatchers.Main) { onComplete(false) }
+            }
+        }
+    }
+
+    fun resetDnCNNDenoise(photo: MediaData, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            try {
+                GalleryManager.getAiDenoiseFile(context, photo.id).takeIf { it.exists() }?.delete()
+                val updatedMetadata = updatePhotoMetadata(photo.id) {
+                    it.copy(hasAiDenoisedBase = false)
+                } ?: run {
+                    withContext(Dispatchers.Main) { onComplete(false) }
+                    return@launch
+                }
+
+                val aperture = updatedMetadata.computationalAperture ?: 0f
+                if (aperture > 0f) {
+                    val originalBitmap = GalleryManager.loadOriginalBitmap(context, photo.id)
+                    if (originalBitmap != null) {
+                        GalleryManager.generateBokehPhoto(context, photo.id, updatedMetadata, originalBitmap)
+                        if (!originalBitmap.isRecycled) originalBitmap.recycle()
+                    }
+                } else {
+                    GalleryManager.getBokehFile(context, photo.id).takeIf { it.exists() }?.delete()
+                }
+
+                GalleryManager.deleteDetailHdrFile(context, photo.id)
+                if (updatedMetadata.manualHdrEffectEnabled) {
+                    GalleryManager.queueDetailHdrCacheBuild(
+                        context = context,
+                        photoId = photo.id,
+                        metadata = updatedMetadata,
+                        sharpening = updatedMetadata.sharpening ?: 0f,
+                        noiseReduction = updatedMetadata.noiseReduction ?: 0f,
+                        chromaNoiseReduction = updatedMetadata.chromaNoiseReduction ?: 0f
+                    )
+                }
+                invalidatePreviewCache(photo.id)
+                photoRefreshKeys[photo.id] = System.currentTimeMillis()
+                withContext(Dispatchers.Main) { onComplete(true) }
+            } catch (e: Exception) {
+                PLog.e(TAG, "Failed to reset DnCNN denoise", e)
                 withContext(Dispatchers.Main) { onComplete(false) }
             }
         }
@@ -1847,15 +1939,24 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 // 2. 原始底图缓存（按 maxEdge 加载，快速预览走小尺寸，正式预览走高分辨率）
-                val currentBitmap = bitmap ?: if (selectedTab == GalleryTab.PHOTON) {
-                    GalleryManager.loadBitmap(context, photo.id, maxEdge)
+                val currentBitmap = bitmap ?: if (showOrigin) {
+                    GalleryManager.loadOriginalBitmap(context, photo.id, maxEdge)
+                        ?: if (selectedTab == GalleryTab.SYSTEM) GalleryManager.loadBitmap(context, photo.uri, maxEdge) else null
                 } else {
-                    GalleryManager.loadBitmap(context, photo.id, maxEdge)
-                        ?: GalleryManager.loadBitmap(context, photo.uri, maxEdge)
+                    val bokehFile = GalleryManager.getBokehFile(context, photo.id)
+                    when {
+                        bokehFile.exists() -> GalleryManager.loadBitmap(context, Uri.fromFile(bokehFile), maxEdge)
+                        finalMetadata.hasAiDenoisedBase -> GalleryManager.loadBitmap(
+                            context,
+                            Uri.fromFile(GalleryManager.getAiDenoiseFile(context, photo.id)),
+                            maxEdge
+                        )
+                        else -> GalleryManager.loadOriginalBitmap(context, photo.id, maxEdge)
+                    } ?: if (selectedTab == GalleryTab.SYSTEM) GalleryManager.loadBitmap(context, photo.uri, maxEdge) else null
                 } ?: return@withContext null
 
                 // 只在全分辨率路径下缓存原始底图（避免低分辨率污染 origin 缓存）
-                if (maxEdge >= 4096) {
+                if (showOrigin && maxEdge >= 4096) {
                     previewBitmapCache.put(previewCacheKey(photo, finalMetadata, true), currentBitmap)
                 }
 
@@ -2140,6 +2241,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     RawProcessingPreferences.DROMode.valueOf(droMode.value)
                 )
                 if (result != null) {
+                    GalleryManager.getAiDenoiseFile(context, photo.id).takeIf { it.exists() }?.delete()
+                    updatePhotoMetadata(photo.id) {
+                        it.copy(hasAiDenoisedBase = false)
+                    }
                     // 更新刷新密钥以强制 UI 重新加载
                     photoRefreshKeys[photo.id] = System.currentTimeMillis()
                     invalidatePreviewCache(photo.id)
@@ -2410,6 +2515,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         return metadata.hasEmbeddedGainmap ||
             metadata.dynamicRangeProfile == "HLG10" ||
             GalleryManager.getDngFile(getApplication(), photo.id).exists() ||
+            GalleryManager.getYuvFile(getApplication(), photo.id).exists() ||
             GalleryManager.getPhotoFile(getApplication(), photo.id).exists()
     }
 

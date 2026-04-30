@@ -195,11 +195,12 @@ class PhotoProcessor(
             }
         }
 
-        // If source was generated from DNG/YUV, and we have an AI denoised base, replace the sdrBase
+        // If source was generated from DNG/YUV, and we have an AI denoised base, replace the sdrBase.
+        // The AI base is persisted in ai_denoise.jpg so exports and HDR gainmaps never rerun the slow model.
         if (source != null && metadata.hasAiDenoisedBase) {
-            val photoFile = GalleryManager.getPhotoFile(context, photoId)
-            if (photoFile.exists()) {
-                val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+            val aiFile = GalleryManager.getAiDenoiseFile(context, photoId)
+            if (aiFile.exists()) {
+                val bitmap = BitmapFactory.decodeFile(aiFile.absolutePath)
                 if (bitmap != null) {
                     val finalSharpening = metadata.sharpening ?: (if (metadata.isImported) 0f else sharpening)
                     val finalNoiseReduction = metadata.noiseReduction ?: (if (metadata.isImported) 0f else noiseReduction)
@@ -227,9 +228,13 @@ class PhotoProcessor(
         }
 
 
-        val photoFile = GalleryManager.getPhotoFile(context, photoId)
-        if (photoFile.exists()) {
-            val bitmap = BitmapFactory.decodeFile(photoFile.absolutePath) ?: return null
+        val fallbackFile = if (metadata.hasAiDenoisedBase) {
+            GalleryManager.getAiDenoiseFile(context, photoId)
+        } else {
+            GalleryManager.getPhotoFile(context, photoId)
+        }
+        if (fallbackFile.exists()) {
+            val bitmap = BitmapFactory.decodeFile(fallbackFile.absolutePath) ?: return null
             val sdrBitmap = processBitmap(
                 context = context,
                 photoId = photoId,
@@ -348,8 +353,9 @@ class PhotoProcessor(
         val photoFile = GalleryManager.getPhotoFile(context, photoId)
 
         if (metadata.hasAiDenoisedBase) {
-            if (photoFile.exists()) {
-                val bitmap = GalleryManager.loadOriginalBitmap(context, photoId) ?: return null
+            val aiFile = GalleryManager.getAiDenoiseFile(context, photoId)
+            if (aiFile.exists()) {
+                val bitmap = GalleryManager.loadBitmap(context, android.net.Uri.fromFile(aiFile)) ?: return null
                 return processBitmap(
                     context,
                     photoId,

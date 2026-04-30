@@ -73,6 +73,7 @@ object GalleryManager {
     private const val VIDEO_FILE = "video.mp4"
     private const val DNG_FILE = "original.dng"
     private const val METADATA_FILE = "metadata.json"
+    private const val AI_DENOISE_FILE = "ai_denoise.jpg"
     private const val THUMBNAIL_FILE = "thumbnail.jpg"
     private const val BOKEH_FILE = "bokeh.jpg"
     private const val DETAIL_HDR_FILE = "detail_hdr.jpg"
@@ -182,6 +183,10 @@ object GalleryManager {
 
     fun getMetadataFile(context: Context, photoId: String): File {
         return File(getPhotoDir(context, photoId), METADATA_FILE)
+    }
+
+    fun getAiDenoiseFile(context: Context, photoId: String): File {
+        return File(getPhotoDir(context, photoId), AI_DENOISE_FILE)
     }
 
     fun getDepthFile(context: Context, photoId: String): File {
@@ -375,6 +380,7 @@ object GalleryManager {
 
     private fun canReuseEmbeddedGainmap(metadata: MediaMetadata): Boolean {
         return metadata.manualHdrEffectEnabled &&
+                !metadata.hasAiDenoisedBase &&
                 metadata.hasEmbeddedGainmap &&
                 HdrGainmapStrength.coerce(metadata.hdrEffectStrength) == HdrGainmapStrength.DEFAULT &&
                 metadata.lutId == null &&
@@ -571,7 +577,12 @@ object GalleryManager {
                 PLog.d(TAG, "gainmapProducer.build took ${gainmapElapsed}ms, enabled=${gainmapResult != null}")
 
                 // 读取照片
-                val processedBitmap = ultraHdrSource?.sdrBase ?: bitmap?.let {
+                val processedBitmap = (ultraHdrSource?.sdrBase ?: if (metadata.hasAiDenoisedBase) {
+                    photoProcessor.process(
+                        context, id, metadata,
+                        sharpeningValue, noiseReductionValue, chromaNoiseReductionValue
+                    )
+                } else bitmap?.let {
                     photoProcessor.processBitmap(
                         context, id, bitmap, metadata,
                         sharpeningValue, noiseReductionValue, chromaNoiseReductionValue,
@@ -580,7 +591,7 @@ object GalleryManager {
                 } ?: photoProcessor.process(
                     context, id, metadata,
                     sharpeningValue, noiseReductionValue, chromaNoiseReductionValue
-                ) ?: return@withContext false
+                )) ?: return@withContext false
 
                 PLog.d(
                     TAG,

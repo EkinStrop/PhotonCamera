@@ -748,14 +748,34 @@ fun PhotoEditScreen(
                         } else if (editTab == 1) {
                             Spacer(modifier = Modifier.height(16.dp))
                             var isDnCNNDenoising by remember { mutableStateOf(false) }
+                            var isDnCNNResetting by remember { mutableStateOf(false) }
                             var dnCNNProgress by remember { mutableFloatStateOf(0f) }
+                            val aiDenoiseMetadataEnabled =
+                                (viewModel.currentMediaMetadata ?: currentPhoto.metadata)?.hasAiDenoisedBase == true
+                            var isAiDenoiseEnabled by remember(currentPhoto.id) {
+                                mutableStateOf(aiDenoiseMetadataEnabled)
+                            }
+
+                            LaunchedEffect(
+                                currentPhoto.id,
+                                aiDenoiseMetadataEnabled,
+                                isDnCNNDenoising,
+                                isDnCNNResetting
+                            ) {
+                                if (!isDnCNNDenoising && !isDnCNNResetting) {
+                                    isAiDenoiseEnabled = aiDenoiseMetadataEnabled
+                                }
+                            }
 
                             SwitchSettingItem(
                                 title = stringResource(R.string.ai_denoise_title),
                                 description = if (isDnCNNDenoising) stringResource(R.string.ai_denoise_processing, dnCNNProgress * 100) else stringResource(R.string.ai_denoise_description),
-                                checked = isDnCNNDenoising,
+                                checked = isAiDenoiseEnabled || isDnCNNDenoising,
                                 onCheckedChange = { checked ->
-                                    if (checked && !isDnCNNDenoising) {
+                                    if (isDnCNNDenoising || isDnCNNResetting) {
+                                        return@SwitchSettingItem
+                                    }
+                                    if (checked && !isAiDenoiseEnabled) {
                                         isDnCNNDenoising = true
                                         dnCNNProgress = 0f
                                         viewModel.applyDnCNNDenoise(
@@ -764,8 +784,24 @@ fun PhotoEditScreen(
                                             onComplete = { success ->
                                                 isDnCNNDenoising = false
                                                 if (success) {
+                                                    isAiDenoiseEnabled = true
                                                     Toast.makeText(context, context.getString(R.string.ai_denoise_success), Toast.LENGTH_SHORT).show()
                                                 } else {
+                                                    isAiDenoiseEnabled = false
+                                                    Toast.makeText(context, context.getString(R.string.ai_denoise_failed), Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        )
+                                    } else if (!checked && isAiDenoiseEnabled) {
+                                        isDnCNNResetting = true
+                                        viewModel.resetDnCNNDenoise(
+                                            photo = currentPhoto,
+                                            onComplete = { success ->
+                                                isDnCNNResetting = false
+                                                if (success) {
+                                                    isAiDenoiseEnabled = false
+                                                } else {
+                                                    isAiDenoiseEnabled = true
                                                     Toast.makeText(context, context.getString(R.string.ai_denoise_failed), Toast.LENGTH_SHORT).show()
                                                 }
                                             }
