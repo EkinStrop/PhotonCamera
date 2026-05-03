@@ -29,7 +29,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -93,7 +92,8 @@ class VideoRecorder(
 
     private var requestedSize = android.util.Size(1080, 1920)
     private var requestedFps = 30
-    private var tempOutputFile: File? = null
+    private var outputDateTakenMs: Long = 0L
+    private var pendingVideoOutput: VideoMediaStoreWriter.PendingVideo? = null
     private var muxer: MediaMuxer? = null
     private var videoTrackIndex = -1
     private var audioTrackIndex = -1
@@ -148,7 +148,7 @@ class VideoRecorder(
         requestedCodecMime = codecMime
         requestedColorConfig = colorConfig
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
-        tempOutputFile = File(context.cacheDir, "video_${System.currentTimeMillis()}.mp4")
+        outputDateTakenMs = System.currentTimeMillis()
         finishCallback = onFinished
         resetMuxerState()
         frameSelectionStartTimestampUs = Long.MIN_VALUE
@@ -396,8 +396,12 @@ class VideoRecorder(
     }
 
     private fun createMuxer() {
-        val file = tempOutputFile ?: return
-        muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
+        val output = VideoMediaStoreWriter.createPendingVideo(
+            context = context,
+            dateTakenMs = outputDateTakenMs
+        ) ?: throw IllegalStateException("Failed to create video output")
+        pendingVideoOutput = output
+        muxer = MediaMuxer(output.descriptor.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
             setOrientationHint(requestedOrientationHintDegrees)
         }
     }
@@ -765,7 +769,8 @@ class VideoRecorder(
     }
 
     private suspend fun finalizeOutput(): Uri? {
-        val file = tempOutputFile ?: return null
+        val output = pendingVideoOutput ?: return null
+        var muxerStopSucceeded = false
         synchronized(muxerLock) {
             if (!muxerStarted && videoFormat != null) {
                 maybeStartMuxerLocked()
@@ -783,6 +788,7 @@ class VideoRecorder(
             try {
                 if (muxerStarted) {
                     muxer?.stop()
+                    muxerStopSucceeded = true
                 }
             } catch (e: Exception) {
                 PLog.w(TAG, "Failed to stop muxer cleanly: ${e.message}")
@@ -795,15 +801,21 @@ class VideoRecorder(
             }
         }
 
-        if (!file.exists() || file.length() <= 0L) {
+        try {
+            output.descriptor.close()
+        } catch (_: Exception) {
+        }
+        pendingVideoOutput = null
+
+        if (!muxerStopSucceeded) {
+            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
             return null
         }
 
-        val uri = VideoMediaStoreWriter.publishVideo(
-            context = context,
-            sourceFile = file
-        )
-        file.delete()
+        val uri = VideoMediaStoreWriter.publishPendingVideo(context, output.uri)
+        if (uri == null) {
+            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
+        }
         return uri
     }
 
@@ -857,8 +869,14 @@ class VideoRecorder(
         finishCallback = null
         lastSharedContext = EGL14.EGL_NO_CONTEXT
         lastSharedDisplay = EGL14.EGL_NO_DISPLAY
-        tempOutputFile?.delete()
-        tempOutputFile = null
+        pendingVideoOutput?.let { output ->
+            try {
+                output.descriptor.close()
+            } catch (_: Exception) {
+            }
+            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
+        }
+        pendingVideoOutput = null
     }
 
     private fun resetMuxerState() {

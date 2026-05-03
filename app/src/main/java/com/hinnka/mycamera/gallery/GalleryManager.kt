@@ -317,6 +317,8 @@ object GalleryManager {
                     hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)?.let {
                         it == "yes" || it == "true" || it == "1"
                     }
+                } catch (e: Exception) {
+                    PLog.w(TAG, "Video retriever metadata unavailable for $uri: ${e.message}")
                 } finally {
                     retriever.release()
                 }
@@ -2310,6 +2312,7 @@ object GalleryManager {
             return@withContext null
         }
         dir.setLastModified(info.dateTaken)
+        notifyPhotoLibraryChanged()
         photoId
     }
 
