@@ -1514,6 +1514,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setAwbTemperature(kelvin)
     }
 
+    fun setMeteringMode(mode: com.hinnka.mycamera.camera.MeteringMode) {
+        cameraController.setMeteringMode(mode)
+    }
+
     // ==================== 计费相关方法 ====================
 
     /**
@@ -1910,6 +1914,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun handleMeteringUpdate(totalWeight: Double, weightedSumLuminance: Double) {
         cameraController.calculateAutoMetering(totalWeight, weightedSumLuminance)
+    }
+
+    fun handleHighlightPointUpdate(x: Float, y: Float) {
+        cameraController.updateHighlightPoint(x, y)
     }
 
     fun handleDepthMapUpdate(bitmap: android.graphics.Bitmap) {

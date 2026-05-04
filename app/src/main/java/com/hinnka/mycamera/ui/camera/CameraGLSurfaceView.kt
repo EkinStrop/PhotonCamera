@@ -8,6 +8,7 @@ import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.view.Surface
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
+import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.LutRenderer
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -36,6 +37,7 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
+    var onHighlightPointUpdated: ((Float, Float) -> Unit)? = null
     var onDepthInputAvailable: ((Bitmap) -> Unit)? = null
 
     var onSurfaceReady: ((Surface) -> Unit)? = null
@@ -75,6 +77,10 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
         renderer.onMeteringUpdated = { totalWeight, weightedSumLuminance ->
             onMeteringUpdated?.invoke(totalWeight, weightedSumLuminance)
+        }
+
+        renderer.onHighlightPointUpdated = { hx, hy ->
+            onHighlightPointUpdated?.invoke(hx, hy)
         }
 
         renderer.onDepthInputAvailable = { bitmap ->
@@ -128,6 +134,10 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     fun setFocusPoint(point: PointF?) {
         renderer.focusPoint = point
+    }
+
+    fun setMeteringMode(mode: MeteringMode) {
+        renderer.meteringMode = mode
     }
 
     fun setMeteringEnabled(enabled: Boolean) {

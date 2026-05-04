@@ -52,6 +52,16 @@ enum class LensType {
 }
 
 /**
+ * 测光模式
+ */
+enum class MeteringMode {
+    SPOT,              // 点测光 - 对焦点附近小区域
+    CENTER_WEIGHTED,   // 中央重点 - 中等区域，中心加权
+    AVERAGE,           // 平均测光 - 全画面均匀
+    HIGHLIGHT_PRIORITY // 高光优先 - 亮部加权，防止过曝
+}
+
+/**
  * 相机信息数据类
  */
 data class CameraInfo(
@@ -136,6 +146,9 @@ data class CameraState(
 
     val awbMode: Int = 1, // 自动白平衡模式
     val awbTemperature: Int = 5000, // 色温 (K)
+
+    // 测光模式
+    val meteringMode: MeteringMode = MeteringMode.CENTER_WEIGHTED,
 
     val isVirtualApertureEnabled: Boolean = false,
     val physicalAperture: Float = 2.0f, // 物理光圈值

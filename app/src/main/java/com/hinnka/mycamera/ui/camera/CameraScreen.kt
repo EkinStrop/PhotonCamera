@@ -706,6 +706,7 @@ fun CameraScreen(
                         focusPoint = state.focusPoint,
                         isFocusing = state.isFocusing,
                         focusSuccess = state.focusSuccess,
+                        meteringMode = state.meteringMode,
                         onSurfaceTextureReady = { surfaceTexture ->
                             viewModel.openCamera(surfaceTexture)
                             cameraOpened = true
@@ -725,6 +726,7 @@ fun CameraScreen(
                         },
                         onHistogramUpdated = { viewModel.handleHistogramUpdate(it) },
                         onMeteringUpdated = { w, l -> viewModel.handleMeteringUpdate(w, l) },
+                        onHighlightPointUpdated = { hx, hy -> viewModel.handleHighlightPointUpdate(hx, hy) },
                         onDepthInputAvailable = { viewModel.handleDepthMapUpdate(it) },
                         onGLSurfaceViewReady = {
                             viewModel.glSurfaceView = it
@@ -1088,9 +1090,8 @@ fun CameraScreen(
             useRaw = useRaw && state.isRawSupported,
             onRawToggle = { viewModel.toggleRaw() },
             isRawSupported = state.isRawSupported,
-            nrLevel = state.nrLevel,
-            availableNrLevels = state.availableNrModes,
-            onNRLevelChange = { viewModel.setNRLevel(it) },
+            meteringMode = state.meteringMode,
+            onMeteringModeChange = { viewModel.setMeteringMode(it) },
             onFilterManageClick = {
                 activePanel = ActivePanel.NONE
                 onFilterManagementClick()

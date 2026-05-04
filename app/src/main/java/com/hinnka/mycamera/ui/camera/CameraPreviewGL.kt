@@ -18,6 +18,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
+import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.ui.components.FocusIndicator
@@ -44,11 +45,13 @@ fun CameraPreviewGL(
     focusPoint: Pair<Float, Float>?,
     isFocusing: Boolean,
     focusSuccess: Boolean?,
+    meteringMode: MeteringMode = MeteringMode.CENTER_WEIGHTED,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: () -> Unit,
     onTap: (Float, Float, Int, Int) -> Unit,
     onHistogramUpdated: ((IntArray) -> Unit)? = null,
     onMeteringUpdated: ((Double, Double) -> Unit)? = null,
+    onHighlightPointUpdated: ((Float, Float) -> Unit)? = null,
     onDepthInputAvailable: ((android.graphics.Bitmap) -> Unit)? = null,
     livePhotoRecorder: LivePhotoRecorder? = null,
     videoRecorder: VideoRecorder? = null,
@@ -161,6 +164,7 @@ fun CameraPreviewGL(
 
                         glSurfaceView.onHistogramUpdated = { onHistogramUpdated?.invoke(it) }
                         glSurfaceView.onMeteringUpdated = { w, l -> onMeteringUpdated?.invoke(w, l) }
+                        glSurfaceView.onHighlightPointUpdated = { hx, hy -> onHighlightPointUpdated?.invoke(hx, hy) }
                         glSurfaceView.onDepthInputAvailable = { onDepthInputAvailable?.invoke(it) }
 
                         viewWidth = glSurfaceView.width
@@ -205,6 +209,7 @@ fun CameraPreviewGL(
                                 it.second / viewHeight
                             )
                         })
+                        glSurfaceView.setMeteringMode(meteringMode)
                         glSurfaceView.setLivePhotoRecorder(livePhotoRecorder)
                         glSurfaceView.setVideoRecorder(videoRecorder)
                         glSurfaceView.setVideoLogProfile(videoLogProfile)

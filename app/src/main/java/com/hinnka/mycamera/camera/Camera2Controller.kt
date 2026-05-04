@@ -83,6 +83,10 @@ class Camera2Controller(private val context: Context) {
         private const val STATE_WAITING_NON_PRECAPTURE =
             3 // Waiting for the exposure state to be something other than precapture.
         private const val STATE_PICTURE_TAKEN = 4 // Picture is already taken.
+
+        // 场景变化检测阈值
+        private const val SCENE_CHANGE_EXPOSURE_RATIO = 3.0 // 曝光乘积变化超过 3x (~1.6 EV) 判定为场景变化
+        private const val SCENE_CHANGE_CONFIRM_FRAMES = 3   // 连续 N 帧检测到变化才确认
     }
 
     private val cameraManager: CameraManager by lazy {
@@ -191,6 +195,21 @@ class Camera2Controller(private val context: Context) {
     // 保留最近的一个结果作为后备
     @Volatile
     private var lastCaptureResult: TotalCaptureResult? = null
+
+    // 场景变化检测：用于替代固定延迟恢复连续对焦
+    private var isFocusLockedWaitingForSceneChange = false
+    private var focusLockedReferenceIso: Int = 0
+    private var focusLockedReferenceExposureNs: Long = 0L
+    private var sceneChangeFrameCount = 0
+
+    // 高光优先测光：最亮区域坐标（归一化 0-1）及平滑状态
+    @Volatile
+    private var highlightPointX: Float = 0.5f
+    @Volatile
+    private var highlightPointY: Float = 0.5f
+    private var highlightPointSmoothedX: Float = 0.5f
+    private var highlightPointSmoothedY: Float = 0.5f
+    private var highlightPointInitialized = false
 
     // 图片拍摄回调（携带 CaptureInfo, CameraCharacteristics 和 CaptureResult 用于 RAW 处理）
     var onImageCaptured: ((SafeImage, CaptureInfo, CameraCharacteristics?, CaptureResult?) -> Unit)? = null
@@ -311,11 +330,37 @@ class Camera2Controller(private val context: Context) {
                     CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> {
                         // 对焦成功并锁定
                         _state.value = _state.value.copy(focusSuccess = true)
+                        // 记录当前曝光值作为场景变化检测的参考基准
+                        recordFocusLockExposure(result)
                     }
 
                     CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> {
                         // 对焦失败但已锁定
                         _state.value = _state.value.copy(focusSuccess = false)
+                        recordFocusLockExposure(result)
+                    }
+                }
+            }
+
+            // 场景变化检测：对焦锁定后持续监测曝光变化
+            if (isFocusLockedWaitingForSceneChange) {
+                val currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0
+                val currentExposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L
+                if (focusLockedReferenceIso > 0 && focusLockedReferenceExposureNs > 0 &&
+                    currentIso > 0 && currentExposure > 0L
+                ) {
+                    val refProduct = focusLockedReferenceIso.toDouble() * focusLockedReferenceExposureNs.toDouble()
+                    val curProduct = currentIso.toDouble() * currentExposure.toDouble()
+                    if (refProduct > 0) {
+                        val ratio = if (curProduct > refProduct) curProduct / refProduct else refProduct / curProduct
+                        if (ratio > SCENE_CHANGE_EXPOSURE_RATIO) {
+                            sceneChangeFrameCount++
+                            if (sceneChangeFrameCount >= SCENE_CHANGE_CONFIRM_FRAMES) {
+                                restoreContinuousAf()
+                            }
+                        } else {
+                            sceneChangeFrameCount = 0
+                        }
                     }
                 }
             }
@@ -1161,6 +1206,9 @@ class Camera2Controller(private val context: Context) {
         captureSession = session
 
         try {
+            // 根据测光模式设置默认 AE 区域
+            applyMeteringRegions()
+
             // 开始预览
             // 关键修复: 不再动态添加 surface，因为已经在创建 builder 时添加了
             previewRequestBuilder?.let { builder ->
@@ -2165,6 +2213,111 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
+     * 设置测光模式
+     */
+    fun setMeteringMode(mode: MeteringMode) {
+        _state.value = _state.value.copy(meteringMode = mode)
+        applyMeteringRegions()
+        updatePreview()
+        PLog.d(TAG, "测光模式: $mode")
+    }
+
+    /**
+     * 更新高光区域坐标（由 GL 测光回调调用）
+     * 使用 EMA 平滑防止 AE 频繁跳动
+     */
+    fun updateHighlightPoint(x: Float, y: Float) {
+        highlightPointX = x
+        highlightPointY = y
+        if (!highlightPointInitialized) {
+            highlightPointSmoothedX = x
+            highlightPointSmoothedY = y
+            highlightPointInitialized = true
+        } else {
+            val alpha = 0.3
+            highlightPointSmoothedX = (alpha * x + (1 - alpha) * highlightPointSmoothedX).toFloat()
+            highlightPointSmoothedY = (alpha * y + (1 - alpha) * highlightPointSmoothedY).toFloat()
+        }
+        if (_state.value.meteringMode == MeteringMode.HIGHLIGHT_PRIORITY) {
+            applyMeteringRegions()
+        }
+    }
+
+    /**
+     * 根据当前测光模式设置默认 AE 区域
+     *
+     * 点测光和中央重点模式在画面中心（或对焦点）设置加权区域；
+     * 平均测光模式清除 AE 区域，使用硬件默认全画面测光。
+     */
+    private fun applyMeteringRegions() {
+        if (maxAeRegions <= 0) return
+        val builder = previewRequestBuilder ?: return
+        val mode = _state.value.meteringMode
+
+        if (mode == MeteringMode.AVERAGE) {
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
+            return
+        }
+
+        try {
+            val characteristics = cachedCharacteristics ?: return
+            val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+            val sensorOrientation = getSensorOrientation()
+            val lensFacing = getLensFacing()
+
+            // 选择测光坐标：高光优先使用最亮区域，其他模式使用对焦点或画面中心
+            val normX: Float
+            val normY: Float
+            if (mode == MeteringMode.HIGHLIGHT_PRIORITY && highlightPointInitialized) {
+                normX = highlightPointSmoothedX
+                normY = highlightPointSmoothedY
+            } else {
+                val focus = _state.value.focusPoint
+                normX = focus?.first ?: 0.5f
+                normY = focus?.second ?: 0.5f
+            }
+
+            val (sensorX, sensorY) = when (sensorOrientation) {
+                0 -> Pair(normX, normY)
+                90 -> Pair(normY, 1 - normX)
+                180 -> Pair(1 - normX, 1 - normY)
+                270 -> Pair(1 - normY, normX)
+                else -> Pair(normX, normY)
+            }
+            val (finalX, finalY) = if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+                Pair(1 - sensorX, sensorY)
+            } else {
+                Pair(sensorX, sensorY)
+            }
+
+            val centerX = (finalX * activeRect.width()).toInt()
+            val centerY = (finalY * activeRect.height()).toInt()
+            val regionSizeFraction = when (mode) {
+                MeteringMode.SPOT -> 0.03f
+                MeteringMode.CENTER_WEIGHTED -> 0.1f
+                MeteringMode.HIGHLIGHT_PRIORITY -> 0.15f
+            }
+            val regionSize = (activeRect.width() * regionSizeFraction).toInt()
+
+            val rect = android.graphics.Rect(
+                (centerX - regionSize).coerceAtLeast(0),
+                (centerY - regionSize).coerceAtLeast(0),
+                (centerX + regionSize).coerceAtMost(activeRect.width()),
+                (centerY + regionSize).coerceAtMost(activeRect.height())
+            )
+            builder.set(
+                CaptureRequest.CONTROL_AE_REGIONS,
+                arrayOf(android.hardware.camera2.params.MeteringRectangle(
+                    rect,
+                    android.hardware.camera2.params.MeteringRectangle.METERING_WEIGHT_MAX
+                ))
+            )
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to apply metering regions", e)
+        }
+    }
+
+    /**
      * 将色温转换为最接近的预设 AWB 模式
      *
      * 预设模式对应的近似色温:
@@ -2386,12 +2539,42 @@ class Camera2Controller(private val context: Context) {
 
 // ==================== 对焦控制 ====================
 
+    private fun recordFocusLockExposure(result: CaptureResult) {
+        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: return
+        val exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: return
+        focusLockedReferenceIso = iso
+        focusLockedReferenceExposureNs = exposure
+        isFocusLockedWaitingForSceneChange = true
+        sceneChangeFrameCount = 0
+    }
+
+    private fun restoreContinuousAf() {
+        isFocusLockedWaitingForSceneChange = false
+        sceneChangeFrameCount = 0
+        focusLockedReferenceIso = 0
+        focusLockedReferenceExposureNs = 0L
+
+        previewRequestBuilder?.apply {
+            set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+            val afMode = resolveAutoFocusMode(_state.value.captureMode)
+            set(CaptureRequest.CONTROL_AF_MODE, afMode)
+            _state.value = _state.value.copy(currentAfMode = afMode)
+            applyMeteringRegions()
+            updatePreview()
+        }
+        _state.value = _state.value.copy(isFocusing = false, focusSuccess = null)
+    }
+
     /**
      * 点击对焦
      */
     fun focusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
         val cameraId = _state.value.currentCameraId
         if (cameraId.isEmpty()) return
+
+        // 重置场景变化检测状态（新的对焦覆盖旧的）
+        isFocusLockedWaitingForSceneChange = false
+        sceneChangeFrameCount = 0
 
         try {
             val characteristics = cachedCharacteristics ?: cameraManager.getCameraCharacteristics(cameraId)
@@ -2430,7 +2613,13 @@ class Camera2Controller(private val context: Context) {
             // 映射到传感器坐标
             val focusX = (finalX * activeRect.width()).toInt()
             val focusY = (finalY * activeRect.height()).toInt()
-            val focusSize = (activeRect.width() * 0.1f).toInt()  // 对焦区域大小为传感器宽度的10%
+            val focusSizeFraction = when (_state.value.meteringMode) {
+                MeteringMode.SPOT -> 0.03f           // 点测光: 3% 传感器宽度
+                MeteringMode.CENTER_WEIGHTED -> 0.1f  // 中央重点: 10% 传感器宽度
+                MeteringMode.AVERAGE -> 0.1f          // 平均测光: AF 区域不变，仅跳过 AE 区域
+                MeteringMode.HIGHLIGHT_PRIORITY -> 0.15f // 高光优先: 15% 传感器宽度
+            }
+            val focusSize = (activeRect.width() * focusSizeFraction).toInt()
 
             val focusRect = android.graphics.Rect(
                 (focusX - focusSize).coerceAtLeast(0),
@@ -2444,13 +2633,14 @@ class Camera2Controller(private val context: Context) {
                 android.hardware.camera2.params.MeteringRectangle.METERING_WEIGHT_MAX
             )
 
-            PLog.d(TAG, "Focus: UI($normX, $normY) -> Sensor($finalX, $finalY) -> Rect($focusX, $focusY)")
+            PLog.d(TAG, "Focus: UI($normX, $normY) -> Sensor($finalX, $finalY) -> Rect($focusX, $focusY), metering=${_state.value.meteringMode}")
 
             previewRequestBuilder?.apply {
                 if (maxAfRegions > 0) {
                     set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(meteringRectangle))
                 }
-                if (maxAeRegions > 0) {
+                // 平均测光模式下不设置 AE 区域，让硬件使用全画面默认测光
+                if (maxAeRegions > 0 && _state.value.meteringMode != MeteringMode.AVERAGE) {
                     set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(meteringRectangle))
                 }
                 val afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
@@ -2460,17 +2650,7 @@ class Camera2Controller(private val context: Context) {
                 updatePreview()
             }
 
-            // 延迟恢复连续对焦
-            cameraHandler?.postDelayed({
-                previewRequestBuilder?.apply {
-                    set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
-                    val afMode = resolveAutoFocusMode(_state.value.captureMode)
-                    set(CaptureRequest.CONTROL_AF_MODE, afMode)
-                    _state.value = _state.value.copy(currentAfMode = afMode)
-                    updatePreview()
-                }
-                _state.value = _state.value.copy(isFocusing = false, focusSuccess = null)
-            }, 3000)
+            // 对焦后通过场景变化检测自动恢复连续对焦（不再使用固定延迟）
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to focus", e)

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
+import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
@@ -59,9 +60,8 @@ fun CameraTopSheet(
     useRaw: Boolean,
     onRawToggle: (Boolean) -> Unit,
     isRawSupported: Boolean,
-    nrLevel: Int,
-    availableNrLevels: IntArray,
-    onNRLevelChange: (Int) -> Unit,
+    meteringMode: MeteringMode,
+    onMeteringModeChange: (MeteringMode) -> Unit,
     onFilterManageClick: () -> Unit,
     onFrameManageClick: () -> Unit,
     phantomMode: Boolean,
@@ -177,25 +177,23 @@ fun CameraTopSheet(
                         modifier = Modifier.weight(1f)
                     )
 
-                    val nrLevelNames = availableNrLevels.map {
-                        when (it) {
-                            5 -> stringResource(R.string.settings_nr_level_auto)
-                            0 -> stringResource(R.string.settings_nr_level_off)
-                            1 -> stringResource(R.string.settings_nr_level_fast)
-                            2 -> stringResource(R.string.settings_nr_level_high_quality)
-                            3 -> stringResource(R.string.settings_nr_level_zsl)
-                            4 -> stringResource(R.string.settings_nr_level_minimal)
-                            else -> "Unknown"
-                        }
+                    val meteringLabel = when (meteringMode) {
+                        MeteringMode.SPOT -> stringResource(R.string.metering_spot)
+                        MeteringMode.CENTER_WEIGHTED -> stringResource(R.string.metering_center_weighted)
+                        MeteringMode.AVERAGE -> stringResource(R.string.metering_average)
+                        MeteringMode.HIGHLIGHT_PRIORITY -> stringResource(R.string.metering_highlight_priority)
                     }
                     QuickSettingValue(
-                        title = stringResource(R.string.settings_nr_level),
-                        value = nrLevelNames.getOrElse(availableNrLevels.indexOf(nrLevel)) { "Unknown" },
+                        title = stringResource(R.string.metering_mode),
+                        value = meteringLabel,
                         onClick = {
-                            val nextIndex =
-                                (availableNrLevels.indexOf(nrLevel) + 1) % availableNrLevels.size
-                            val nextLevel = availableNrLevels[nextIndex]
-                            onNRLevelChange(nextLevel)
+                            val next = when (meteringMode) {
+                                MeteringMode.SPOT -> MeteringMode.CENTER_WEIGHTED
+                                MeteringMode.CENTER_WEIGHTED -> MeteringMode.AVERAGE
+                                MeteringMode.AVERAGE -> MeteringMode.HIGHLIGHT_PRIORITY
+                                MeteringMode.HIGHLIGHT_PRIORITY -> MeteringMode.SPOT
+                            }
+                            onMeteringModeChange(next)
                         },
                         modifier = Modifier.weight(1f)
                     )

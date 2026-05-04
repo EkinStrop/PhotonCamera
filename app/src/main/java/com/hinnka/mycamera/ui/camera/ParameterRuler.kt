@@ -451,6 +451,7 @@ private fun getScaleValues(parameter: CameraParameter, minValue: Float, maxValue
             }
             list
         }
+
     }
 }
 
@@ -494,5 +495,6 @@ private fun formatParameterValue(parameter: CameraParameter, value: Float): Stri
                 else String.format("%dcm", (meters * 100).toInt())
             }
         }
+
     }
 }

@@ -805,4 +805,14 @@
     <string name="ai_denoise_success">AI 降噪成功</string>
     <string name="ai_denoise_failed">AI 降噪失败</string>
     <string name="ai_denoise_strength">AI 降噪强度</string>
+
+    <!-- 测光模式 -->
+    <string name="metering_mode">测光</string>
+    <string name="metering_spot">点测光</string>
+    <string name="metering_center_weighted">中央重点</string>
+    <string name="metering_average">平均测光</string>
+    <string name="metering_highlight_priority">高光优先</string>
+    <string name="center_weight">中央重点</string>
+    <string name="avg">平均</string>
+    <string name="spot">点测光</string>
 </resources>

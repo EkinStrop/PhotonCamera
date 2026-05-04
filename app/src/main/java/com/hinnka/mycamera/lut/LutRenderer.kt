@@ -8,6 +8,7 @@ import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.raw.ColorSpace
 import com.hinnka.mycamera.color.TransferCurve
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
+import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoRecorder
@@ -331,6 +332,9 @@ class LutRenderer : GLSurfaceView.Renderer {
     var focusPoint: PointF? = null
 
     @Volatile
+    var meteringMode: MeteringMode = MeteringMode.CENTER_WEIGHTED
+
+    @Volatile
     var aperture: Float = 0f
     private val cropRect = floatArrayOf(0f, 0f, 1f, 1f)
 
@@ -426,6 +430,7 @@ class LutRenderer : GLSurfaceView.Renderer {
     var onPreviewFrameCaptured: ((Bitmap) -> Unit)? = null
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
+    var onHighlightPointUpdated: ((Float, Float) -> Unit)? = null
 
     // Live Photo 录制器
     var livePhotoRecorder: LivePhotoRecorder? = null
@@ -2283,8 +2288,15 @@ class LutRenderer : GLSurfaceView.Renderer {
         var totalWeight = 0.0
 
         val focus = focusPoint
-        val weightCenter = 4.0
-        val weightEdge = 1.0
+        val mode = meteringMode
+
+        // 根据测光模式设置权重参数
+        val (weightCenter, weightEdge, radiusSq) = when (mode) {
+            MeteringMode.SPOT -> Triple(8.0, 0.0, (METERING_SIZE * METERING_SIZE) / 64.0)   // 半径 METERING_SIZE/8
+            MeteringMode.CENTER_WEIGHTED -> Triple(4.0, 1.0, (METERING_SIZE * METERING_SIZE) / 16.0) // 半径 METERING_SIZE/4
+            MeteringMode.AVERAGE -> Triple(1.0, 1.0, 0.0)  // 所有像素等权
+            MeteringMode.HIGHLIGHT_PRIORITY -> Triple(2.0, 1.0, (METERING_SIZE * METERING_SIZE) / 8.0) // 大区域，亮部加权在下方处理
+        }
 
         for (y in 0 until METERING_SIZE) {
             for (x in 0 until METERING_SIZE) {
@@ -2298,16 +2310,28 @@ class LutRenderer : GLSurfaceView.Renderer {
                 histogram[luma]++
 
                 // 权重计算
-                var weight = weightEdge
-                if (focus != null) {
+                val spatialWeight = if (mode == MeteringMode.AVERAGE) {
+                    weightEdge
+                } else if (focus != null) {
                     val fx = focus.x * METERING_SIZE
                     val fy = (1.0f - focus.y) * METERING_SIZE
-
                     val dx = x.toDouble() - fx.toDouble()
                     val dy = y.toDouble() - fy.toDouble()
-                    if (dx * dx + dy * dy < (METERING_SIZE * METERING_SIZE) / 16.0) {
-                        weight = weightCenter
-                    }
+                    if (dx * dx + dy * dy < radiusSq) weightCenter else weightEdge
+                } else {
+                    // 无对焦点时，点测光回退到中心
+                    val cx = METERING_SIZE / 2.0
+                    val cy = METERING_SIZE / 2.0
+                    val dx = x.toDouble() - cx
+                    val dy = y.toDouble() - cy
+                    if (dx * dx + dy * dy < radiusSq) weightCenter else weightEdge
+                }
+                // 高光优先：用亮度^2 加权，亮部像素对测光影响更大
+                val weight = if (mode == MeteringMode.HIGHLIGHT_PRIORITY) {
+                    val lumaNorm = luma / 255.0
+                    spatialWeight * (0.1 + 0.9 * lumaNorm * lumaNorm)
+                } else {
+                    spatialWeight
                 }
 
                 weightedSumLuminance += luma * weight
@@ -2317,6 +2341,34 @@ class LutRenderer : GLSurfaceView.Renderer {
 
         onHistogramUpdated?.invoke(histogram)
         onMeteringUpdated?.invoke(totalWeight, weightedSumLuminance)
+
+        // 高光优先模式：找到最亮区域坐标，供 AE 区域定位使用
+        if (mode == MeteringMode.HIGHLIGHT_PRIORITY) {
+            val highlightThreshold = 200
+            var sumX = 0.0
+            var sumY = 0.0
+            var count = 0
+            for (y in 0 until METERING_SIZE) {
+                for (x in 0 until METERING_SIZE) {
+                    val idx = (y * METERING_SIZE + x) * 4
+                    val r = meteringBytes[idx].toInt() and 0xFF
+                    val g = meteringBytes[idx + 1].toInt() and 0xFF
+                    val b = meteringBytes[idx + 2].toInt() and 0xFF
+                    val luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).toInt()
+                    if (luma >= highlightThreshold) {
+                        sumX += x
+                        sumY += y
+                        count++
+                    }
+                }
+            }
+            if (count >= 3) {
+                // 归一化到 0-1，注意 GL 坐标 Y 轴翻转
+                val hx = (sumX / count / METERING_SIZE).toFloat()
+                val hy = (1.0f - (sumY / count / METERING_SIZE).toFloat())
+                onHighlightPointUpdated?.invoke(hx, hy)
+            }
+        }
     }
 
     /**

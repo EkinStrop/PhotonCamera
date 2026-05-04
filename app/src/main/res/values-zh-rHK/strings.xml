@@ -590,4 +590,11 @@
     <string name="settings_raw_nlm_base_h">RAW NLM 基础强度</string>
     <string name="settings_raw_nlm_gain_factor">RAW NLM 增益响应</string>
     <string name="ai_service">AI服务</string>
+
+    <!-- 測光模式 -->
+    <string name="metering_mode">測光</string>
+    <string name="metering_spot">點測光</string>
+    <string name="metering_center_weighted">中央重點</string>
+    <string name="metering_average">平均測光</string>
+    <string name="metering_highlight_priority">高光優先</string>
 </resources>
