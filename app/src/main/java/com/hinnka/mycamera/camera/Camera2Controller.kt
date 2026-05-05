@@ -6,6 +6,7 @@ import android.graphics.ColorSpace
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
+import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.DynamicRangeProfiles
 import android.hardware.camera2.params.RggbChannelVector
@@ -2273,16 +2274,17 @@ class Camera2Controller(private val context: Context) {
     private fun applyMeteringRegions() {
         if (maxAeRegions <= 0) return
         val builder = previewRequestBuilder ?: return
+        val characteristics = cachedCharacteristics ?: return
+        val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
         val mode = _state.value.meteringMode
 
         if (mode == MeteringMode.AVERAGE) {
-            builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
+            val fullRegion = MeteringRectangle(activeRect, MeteringRectangle.METERING_WEIGHT_MAX)
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(fullRegion))
             return
         }
 
         try {
-            val characteristics = cachedCharacteristics ?: return
-            val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
             val sensorOrientation = getSensorOrientation()
             val lensFacing = getLensFacing()
 
@@ -2315,7 +2317,7 @@ class Camera2Controller(private val context: Context) {
             val centerY = (finalY * activeRect.height()).toInt()
             val regionSizeFraction = when (mode) {
                 MeteringMode.SPOT -> 0.03f
-                MeteringMode.CENTER_WEIGHTED -> 0.1f
+                MeteringMode.CENTER_WEIGHTED -> 0.2f
                 MeteringMode.HIGHLIGHT_PRIORITY -> 0.15f
             }
             val regionSize = (activeRect.width() * regionSizeFraction).toInt()
@@ -2328,9 +2330,9 @@ class Camera2Controller(private val context: Context) {
             )
             builder.set(
                 CaptureRequest.CONTROL_AE_REGIONS,
-                arrayOf(android.hardware.camera2.params.MeteringRectangle(
+                arrayOf(MeteringRectangle(
                     rect,
-                    android.hardware.camera2.params.MeteringRectangle.METERING_WEIGHT_MAX
+                    MeteringRectangle.METERING_WEIGHT_MAX
                 ))
             )
         } catch (e: Exception) {
@@ -2638,35 +2640,46 @@ class Camera2Controller(private val context: Context) {
             // 映射到传感器坐标
             val focusX = (finalX * activeRect.width()).toInt()
             val focusY = (finalY * activeRect.height()).toInt()
-            val focusSizeFraction = when (_state.value.meteringMode) {
-                MeteringMode.SPOT -> 0.03f           // 点测光: 3% 传感器宽度
-                MeteringMode.CENTER_WEIGHTED -> 0.1f  // 中央重点: 10% 传感器宽度
-                MeteringMode.AVERAGE -> 0.1f          // 平均测光: AF 区域不变，仅跳过 AE 区域
-                MeteringMode.HIGHLIGHT_PRIORITY -> 0.15f // 高光优先: 15% 传感器宽度
+
+            // 1. AF 区域：固定为 10% 传感器宽度，不随测光模式改变，确保对焦稳定性
+            val afSize = (activeRect.width() * 0.1f).toInt()
+            val afRect = android.graphics.Rect(
+                (focusX - afSize).coerceAtLeast(0),
+                (focusY - afSize).coerceAtLeast(0),
+                (focusX + afSize).coerceAtMost(activeRect.width()),
+                (focusY + afSize).coerceAtMost(activeRect.height())
+            )
+            val afRegion = MeteringRectangle(afRect, MeteringRectangle.METERING_WEIGHT_MAX)
+
+            // 2. AE 区域：根据测光模式决定
+            val aeRegion = if (_state.value.meteringMode == MeteringMode.AVERAGE) {
+                // 平均测光模式下，点击屏幕仅改变对焦点，测光区域强制保持全屏平均
+                MeteringRectangle(activeRect, MeteringRectangle.METERING_WEIGHT_MAX)
+            } else {
+                val aeSizeFraction = when (_state.value.meteringMode) {
+                    MeteringMode.SPOT -> 0.03f
+                    MeteringMode.CENTER_WEIGHTED -> 0.2f
+                    MeteringMode.HIGHLIGHT_PRIORITY -> 0.15f
+                    else -> 0.1f
+                }
+                val aeSize = (activeRect.width() * aeSizeFraction).toInt()
+                val aeRect = android.graphics.Rect(
+                    (focusX - aeSize).coerceAtLeast(0),
+                    (focusY - aeSize).coerceAtLeast(0),
+                    (focusX + aeSize).coerceAtMost(activeRect.width()),
+                    (focusY + aeSize).coerceAtMost(activeRect.height())
+                )
+                MeteringRectangle(aeRect, MeteringRectangle.METERING_WEIGHT_MAX)
             }
-            val focusSize = (activeRect.width() * focusSizeFraction).toInt()
 
-            val focusRect = android.graphics.Rect(
-                (focusX - focusSize).coerceAtLeast(0),
-                (focusY - focusSize).coerceAtLeast(0),
-                (focusX + focusSize).coerceAtMost(activeRect.width()),
-                (focusY + focusSize).coerceAtMost(activeRect.height())
-            )
-
-            val meteringRectangle = android.hardware.camera2.params.MeteringRectangle(
-                focusRect,
-                android.hardware.camera2.params.MeteringRectangle.METERING_WEIGHT_MAX
-            )
-
-            PLog.d(TAG, "Focus: UI($normX, $normY) -> Sensor($finalX, $finalY) -> Rect($focusX, $focusY), metering=${_state.value.meteringMode}")
+            PLog.d(TAG, "Focus: UI($normX, $normY) -> Sensor($finalX, $finalY), mode=${_state.value.meteringMode}")
 
             previewRequestBuilder?.apply {
                 if (maxAfRegions > 0) {
-                    set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(meteringRectangle))
+                    set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(afRegion))
                 }
-                // 平均测光模式下不设置 AE 区域，让硬件使用全画面默认测光
-                if (maxAeRegions > 0 && _state.value.meteringMode != MeteringMode.AVERAGE) {
-                    set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(meteringRectangle))
+                if (maxAeRegions > 0) {
+                    set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(aeRegion))
                 }
                 val afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
                 set(CaptureRequest.CONTROL_AF_MODE, afMode)

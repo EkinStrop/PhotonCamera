@@ -110,6 +110,7 @@ class LutRenderer : GLSurfaceView.Renderer {
     private var meteringFboId: Int = 0
     private var meteringTextureId: Int = 0
     private val METERING_SIZE = 32
+    private val lumaGrid = IntArray(METERING_SIZE * METERING_SIZE)
     private var captureFboId: Int = 0
     private var captureTextureId: Int = 0
     private var recordFboId: Int = 0
@@ -2292,8 +2293,8 @@ class LutRenderer : GLSurfaceView.Renderer {
 
         // 根据测光模式设置权重参数
         val (weightCenter, weightEdge, radiusSq) = when (mode) {
-            MeteringMode.SPOT -> Triple(8.0, 0.0, (METERING_SIZE * METERING_SIZE) / 64.0)   // 半径 METERING_SIZE/8
-            MeteringMode.CENTER_WEIGHTED -> Triple(4.0, 1.0, (METERING_SIZE * METERING_SIZE) / 16.0) // 半径 METERING_SIZE/4
+            MeteringMode.SPOT -> Triple(100.0, 0.0, (METERING_SIZE * METERING_SIZE) / 64.0)   // 绝对统治权重，半径 METERING_SIZE/8
+            MeteringMode.CENTER_WEIGHTED -> Triple(20.0, 1.0, (METERING_SIZE * METERING_SIZE) / 16.0) // 统治级权重，半径 METERING_SIZE/4
             MeteringMode.AVERAGE -> Triple(1.0, 1.0, 0.0)  // 所有像素等权
             MeteringMode.HIGHLIGHT_PRIORITY -> Triple(2.0, 1.0, (METERING_SIZE * METERING_SIZE) / 8.0) // 大区域，亮部加权在下方处理
         }
@@ -2308,6 +2309,7 @@ class LutRenderer : GLSurfaceView.Renderer {
                 // 计算亮度 (Rec.709)
                 val luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).toInt().coerceIn(0, 255)
                 histogram[luma]++
+                lumaGrid[y * METERING_SIZE + x] = luma
 
                 // 权重计算
                 val spatialWeight = if (mode == MeteringMode.AVERAGE) {
@@ -2342,30 +2344,64 @@ class LutRenderer : GLSurfaceView.Renderer {
         onHistogramUpdated?.invoke(histogram)
         onMeteringUpdated?.invoke(totalWeight, weightedSumLuminance)
 
-        // 高光优先模式：找到最亮区域坐标，供 AE 区域定位使用
+        // 高光优先模式：通过寻找最亮区域的“核”来精确定位高光
         if (mode == MeteringMode.HIGHLIGHT_PRIORITY) {
-            val highlightThreshold = 200
-            var sumX = 0.0
-            var sumY = 0.0
-            var count = 0
-            for (y in 0 until METERING_SIZE) {
-                for (x in 0 until METERING_SIZE) {
-                    val idx = (y * METERING_SIZE + x) * 4
-                    val r = meteringBytes[idx].toInt() and 0xFF
-                    val g = meteringBytes[idx + 1].toInt() and 0xFF
-                    val b = meteringBytes[idx + 2].toInt() and 0xFF
-                    val luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).toInt()
-                    if (luma >= highlightThreshold) {
-                        sumX += x
-                        sumY += y
-                        count++
+            // 1. 根据直方图计算动态阈值 (Top 2% 像素，且不低于 128)
+            var countP98 = 0
+            var dynamicThreshold = 128
+            for (i in 255 downTo 0) {
+                countP98 += histogram[i]
+                if (countP98 >= 20) { // 1024 * 0.02 ≈ 20 pixels
+                    dynamicThreshold = i.coerceAtLeast(128)
+                    break
+                }
+            }
+
+            // 2. 寻找最亮“簇”的中心
+            // 我们通过在 5x5 窗口内寻找最大亮度总和来定位最亮的块
+            // 这能有效解决“两个相距较远的光源导致质心落在中间暗处”的问题
+            var maxClusterLuma = -1.0
+            var bestX = -1
+            var bestY = -1
+            
+            val kernelSize = 2 // 半径 2 代表 5x5 窗口
+            
+            // 遍历所有可能的中心点
+            for (y in kernelSize until METERING_SIZE - kernelSize) {
+                for (x in kernelSize until METERING_SIZE - kernelSize) {
+                    val centerLuma = lumaGrid[y * METERING_SIZE + x]
+                    
+                    // 只考虑中心像素达到阈值的候选点，减少计算量并过滤背景
+                    if (centerLuma < dynamicThreshold) continue
+                    
+                    var clusterSum = 0.0
+                    for (ky in -kernelSize..kernelSize) {
+                        for (kx in -kernelSize..kernelSize) {
+                            clusterSum += lumaGrid[(y + ky) * METERING_SIZE + (x + kx)]
+                        }
+                    }
+                    
+                    // 也可以加入距离权重，优先选择靠近对焦点或中心的高光
+                    val bias: Double = if (focus != null) {
+                        val fx = focus.x * METERING_SIZE
+                        val fy = (1.0f - focus.y) * METERING_SIZE
+                        val dist = hypot(x.toDouble() - fx, y.toDouble() - fy)
+                        1.0 / (1.0 + dist * 0.05) // 距离越近权重越高
+                    } else 1.0
+
+                    val score = clusterSum * bias
+                    if (score > maxClusterLuma) {
+                        maxClusterLuma = score
+                        bestX = x
+                        bestY = y
                     }
                 }
             }
-            if (count >= 3) {
+
+            if (bestX != -1) {
                 // 归一化到 0-1，注意 GL 坐标 Y 轴翻转
-                val hx = (sumX / count / METERING_SIZE).toFloat()
-                val hy = (1.0f - (sumY / count / METERING_SIZE).toFloat())
+                val hx = bestX.toFloat() / METERING_SIZE
+                val hy = 1.0f - (bestY.toFloat() / METERING_SIZE)
                 onHighlightPointUpdated?.invoke(hx, hy)
             }
         }
