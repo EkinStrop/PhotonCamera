@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterNone
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -61,6 +62,7 @@ fun LutSelector(
     thumbnail: Bitmap?,
     onLutSelected: (String?) -> Unit,
     onEditClick: (() -> Unit)? = null,
+    onManageClick: ((String) -> Unit)? = null,
     categoryOrder: List<String> = emptyList(),
     modifier: Modifier = Modifier
 ) {
@@ -152,34 +154,51 @@ fun LutSelector(
 
     Column(modifier = modifier.fillMaxWidth()) {
         // 分类选择器 (小芯片样式)
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            items(categoryTabs) { category ->
-                val isSelected = selectedCategory == category
-                val categoryName = when (category) {
-                    LutCategoryTab.BuiltIn -> builtInText
-                    LutCategoryTab.Uncategorized -> uncategorizedText
-                    is LutCategoryTab.Category -> category.name
-                }
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp)
+            ) {
+                items(categoryTabs) { category ->
+                    val isSelected = selectedCategory == category
+                    val categoryName = when (category) {
+                        LutCategoryTab.BuiltIn -> builtInText
+                        LutCategoryTab.Uncategorized -> uncategorizedText
+                        is LutCategoryTab.Category -> category.name
+                    }
 
-                Text(
-                    text = categoryName,
-                    color = if (isSelected) Color(0xFFFF6B35) else Color.White.copy(alpha = 0.5f),
-                    fontSize = 12.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    Text(
+                        text = categoryName,
+                        color = if (isSelected) Color(0xFFFF6B35) else Color.White.copy(alpha = 0.5f),
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                selectedCategory = category
+                            }
+                            .padding(vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (onManageClick != null) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Manage Filters",
+                    tint = Color.White.copy(alpha = 0.6f),
                     modifier = Modifier
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            selectedCategory = category
-                        }
-                        .padding(vertical = 4.dp)
+                        .padding(end = 12.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .clickable { onManageClick(currentLutId ?: "") }
+                        .padding(4.dp)
                 )
             }
         }
@@ -210,7 +229,10 @@ fun LutSelector(
                         } else {
                             onLutSelected(lut.id)
                         }
-                    }
+                    },
+                    onManageClick = if (onManageClick != null) {
+                        { onManageClick(lut.id) }
+                    } else null
                 )
             }
         }
@@ -229,6 +251,7 @@ private fun LutItem(
     isSelected: Boolean,
     isVip: Boolean,
     onClick: () -> Unit,
+    onManageClick: (() -> Unit)? = null,
     isNone: Boolean = false,
     isCustom: Boolean = false,  // 添加自定义标识参数
     modifier: Modifier = Modifier
@@ -256,7 +279,10 @@ private fun LutItem(
                 color = borderColor,
                 shape = RoundedCornerShape(8.dp)
             )
-            .clickable { onClick() }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onManageClick
+            )
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center

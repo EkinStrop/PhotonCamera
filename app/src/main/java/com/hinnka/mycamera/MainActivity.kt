@@ -95,7 +95,7 @@ object Routes {
     const val BURST_DETAIL = "burst_detail/{photoId}"
     const val PHOTO_EDIT = "photo_edit"
     const val SETTINGS = "settings"
-    const val FILTER_MANAGEMENT = "filter_management"
+    const val FILTER_MANAGEMENT = "filter_management?locateLutId={locateLutId}"
     const val FRAME_MANAGEMENT = "frame_management"
     const val FRAME_EDITOR = "frame_editor?frameId={frameId}&imageFrame={imageFrame}"
     const val LUT_CREATOR = "lut_creator"
@@ -103,6 +103,9 @@ object Routes {
 
     fun photoDetail(tab: GalleryTab = GalleryTab.PHOTON, index: Int = 0, photoId: String? = null) =
         "photo_detail/$tab/$index" + (if (photoId != null) "?photoId=$photoId" else "")
+
+    fun filterManagement(locateLutId: String? = null) = 
+        "filter_management" + (if (locateLutId != null) "?locateLutId=$locateLutId" else "")
 
     fun burstDetail(photoId: String) = "burst_detail/$photoId"
 
@@ -463,8 +466,8 @@ fun NavigationHost(
                             onSettingsClick = {
                                 navController.navigate(Routes.SETTINGS)
                             },
-                            onFilterManagementClick = {
-                                navController.navigate(Routes.FILTER_MANAGEMENT)
+                            onFilterManagementClick = { lutId ->
+                                navController.navigate(Routes.filterManagement(lutId))
                             },
                             onFrameManagementClick = {
                                 navController.navigate(Routes.FRAME_MANAGEMENT)
@@ -498,8 +501,8 @@ fun NavigationHost(
                         onSettingsClick = {
                             navController.navigate(Routes.SETTINGS)
                         },
-                        onFilterManagementClick = {
-                            navController.navigate(Routes.FILTER_MANAGEMENT)
+                        onFilterManagementClick = { lutId ->
+                            navController.navigate(Routes.filterManagement(lutId))
                         },
                         onFrameManagementClick = {
                             navController.navigate(Routes.FRAME_MANAGEMENT)
@@ -612,7 +615,17 @@ fun NavigationHost(
                 )
             }
 
-            composable(Routes.FILTER_MANAGEMENT) {
+            composable(
+                route = Routes.FILTER_MANAGEMENT,
+                arguments = listOf(
+                    navArgument("locateLutId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val locateLutId = backStackEntry.arguments?.getString("locateLutId")
                 FilterManagementScreen(
                     viewModel = cameraViewModel,
                     onBack = {
@@ -622,7 +635,8 @@ fun NavigationHost(
                         navController.navigate(Routes.LUT_CREATOR)
                     },
                     pendingZipImportUris = pendingZipImportUris,
-                    onZipImportHandled = onZipImportHandled
+                    onZipImportHandled = onZipImportHandled,
+                    locateLutId = locateLutId
                 )
             }
 

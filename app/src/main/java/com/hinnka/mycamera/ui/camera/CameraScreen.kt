@@ -103,7 +103,7 @@ fun CameraScreen(
     galleryViewModel: GalleryViewModel,
     onGalleryClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onFilterManagementClick: () -> Unit,
+    onFilterManagementClick: (String?) -> Unit,
     onFrameManagementClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1096,7 +1096,7 @@ fun CameraScreen(
             onMeteringModeChange = { viewModel.setMeteringMode(it) },
             onFilterManageClick = {
                 activePanel = ActivePanel.NONE
-                onFilterManagementClick()
+                onFilterManagementClick(null)
             },
             onFrameManageClick = {
                 activePanel = ActivePanel.NONE
@@ -1212,6 +1212,10 @@ fun CameraScreen(
                         onLutSelected = { viewModel.setLut(it) },
                         onEditClick = {
                             activePanel = ActivePanel.LUT_EDIT
+                        },
+                        onManageClick = { lutId ->
+                            activePanel = ActivePanel.NONE
+                            onFilterManagementClick(lutId)
                         },
                         categoryOrder = categoryOrder
                     )

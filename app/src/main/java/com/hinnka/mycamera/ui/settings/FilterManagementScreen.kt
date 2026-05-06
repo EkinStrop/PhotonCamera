@@ -85,6 +85,7 @@ fun FilterManagementScreen(
     onLutCreatorClick: () -> Unit = {},
     pendingZipImportUris: List<Uri> = emptyList(),
     onZipImportHandled: () -> Unit = {},
+    locateLutId: String? = null,
     modifier: Modifier = Modifier
 ) {
     val currentLutId by viewModel.currentLutId.collectAsState()
@@ -161,6 +162,8 @@ fun FilterManagementScreen(
     var pendingImportUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var pendingZipUris by remember { mutableStateOf<Set<Uri>>(emptySet()) }
 
+    val lazyListState = rememberLazyListState()
+
     LaunchedEffect(pendingZipImportUris) {
         if (pendingZipImportUris.isNotEmpty()) {
             pendingImportUris = pendingZipImportUris
@@ -201,6 +204,46 @@ fun FilterManagementScreen(
             builtInText -> localLutList.filter { it.isBuiltIn }
             uncategorizedText -> localLutList.filter { !it.isBuiltIn && it.category.isEmpty() }
             else -> localLutList.filter { it.category == selectedCategory }
+        }
+    }
+
+    var hasLocated by remember(locateLutId) { mutableStateOf(false) }
+
+    LaunchedEffect(locateLutId, localLutList, categories) {
+        if (locateLutId != null && !hasLocated && categories.isNotEmpty()) {
+            val targetLut = localLutList.find { it.id == locateLutId }
+            if (targetLut != null) {
+                val targetCategory = if (targetLut.isBuiltIn) builtInText
+                else if (targetLut.category.isEmpty()) uncategorizedText
+                else targetLut.category
+                
+                val categoryIndex = categories.indexOf(targetCategory)
+                
+                // 等待页面入场动画完成 (约 350ms)，避免与 Navigation 切换动画抢占资源导致掉帧卡顿
+                kotlinx.coroutines.delay(350)
+                
+                if (categoryIndex >= 0 && selectedTabIndex != categoryIndex) {
+                    selectedTabIndex = categoryIndex
+                    // 等待 Tab 切换引起的列表重组完成
+                    kotlinx.coroutines.delay(100) 
+                }
+                
+                // 重新获取过滤后的列表中的索引
+                val filteredLutsNow = if (categoryIndex >= 0 && categoryIndex < categories.size) {
+                    when (categories[categoryIndex]) {
+                        builtInText -> localLutList.filter { it.isBuiltIn }
+                        uncategorizedText -> localLutList.filter { !it.isBuiltIn && it.category.isEmpty() }
+                        else -> localLutList.filter { it.category == categories[categoryIndex] }
+                    }
+                } else localLutList
+                
+                val indexInFiltered = filteredLutsNow.indexOfFirst { it.id == locateLutId }
+                if (indexInFiltered >= 0) {
+                    // 使用带动画的滚动，给用户一个明确的"定位"视觉反馈
+                    lazyListState.animateScrollToItem(maxOf(0, indexInFiltered - 1))
+                }
+            }
+            hasLocated = true // 标记为已定位，避免后续数据变化时反复触发
         }
     }
 
@@ -283,7 +326,6 @@ fun FilterManagementScreen(
     }
 
     // 拖拽排序状态
-    val lazyListState = rememberLazyListState()
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val fromId = from.key as? String ?: return@rememberReorderableLazyListState
         val toId = to.key as? String ?: return@rememberReorderableLazyListState
