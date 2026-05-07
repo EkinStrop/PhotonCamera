@@ -106,6 +106,7 @@ class VideoRecorder(
     private var pendingAudioSamples = mutableListOf<EncodedSample>()
     private var videoFormat: MediaFormat? = null
     private var audioFormat: MediaFormat? = null
+    private var errorCallback: ((String) -> Unit)? = null
     private var finishCallback: ((Uri?) -> Unit)? = null
     private var audioBytesQueued = 0L
     private var videoStartTimestampUs: Long? = null
@@ -141,18 +142,20 @@ class VideoRecorder(
         codecMime: String,
         colorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest(),
         orientationHintDegrees: Int = 0,
+        onError: ((String) -> Unit)? = null,
         onFinished: ((Uri?) -> Unit)? = null
     ): Boolean {
         if (isRecording) return false
 
-        requestedSize = android.util.Size(size.width.makeEven(), size.height.makeEven())
+        requestedSize = android.util.Size(size.width.align16(), size.height.align16())
         requestedFps = fps
         requestedBitrateMbps = bitrateMbps
         requestedCodecMime = codecMime
         requestedColorConfig = colorConfig
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
         outputDateTakenMs = System.currentTimeMillis()
-        finishCallback = onFinished
+        this.errorCallback = onError
+        this.finishCallback = onFinished
         resetMuxerState()
         frameSelectionStartTimestampUs = Long.MIN_VALUE
         lastAcceptedFrameSlot = Long.MIN_VALUE
@@ -206,6 +209,7 @@ class VideoRecorder(
         if (!isRecording) return
         stopRequested = true
         scope.launch {
+            errorCallback?.invoke("Recording stopped unexpectedly")
             finishCallback?.invoke(null)
             cleanup()
         }
@@ -273,6 +277,15 @@ class VideoRecorder(
         val videoBitrate = (requestedBitrateMbps * 1_000_000).coerceIn(2_000_000, 300_000_000)
 
         videoEncoder = MediaCodec.createEncoderByType(requestedCodecMime).apply {
+            val capabilities = codecInfo.getCapabilitiesForType(requestedCodecMime)
+            val isCbrSupported = capabilities.encoderCapabilities?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true
+            val bitrateMode = if (isCbrSupported) {
+                MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+            } else {
+                PLog.w(TAG, "CBR bitrate mode not supported, falling back to VBR")
+                MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+            }
+
             val resolvedColorConfig = resolveVideoEncoderColorConfig(codecInfo, requestedCodecMime, requestedColorConfig)
             val format = MediaFormat.createVideoFormat(requestedCodecMime, width, height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -281,19 +294,34 @@ class VideoRecorder(
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
                 // 实时编码优先级，避免编码延迟堆积
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
-                // CBR 模式码率更稳定，减少输出缓冲区阻塞
-                setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode)
                 // 禁用 B 帧，降低编码延迟
                 setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
                 resolvedColorConfig.applyTo(this)
             }
-            configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            inputSurface = createInputSurface()
-            start()
+
+            try {
+                configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                inputSurface = createInputSurface()
+                start()
+            } catch (e: Exception) {
+                PLog.e(TAG, "Failed to start video encoder with primary config: ${e.message}")
+                if (isCbrSupported) {
+                    PLog.i(TAG, "Retrying with VBR as fallback...")
+                    format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+                    reset()
+                    configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                    inputSurface = createInputSurface()
+                    start()
+                } else {
+                    throw e
+                }
+            }
 
             PLog.i(
                 TAG,
-                "Configured video encoder: mime=$requestedCodecMime, colorPipeline=${resolvedColorConfig.pipeline}, " +
+                "Configured video encoder: mime=$requestedCodecMime, bitrateMode=${if (bitrateMode == 2) "CBR" else "VBR"}, " +
+                    "colorPipeline=${resolvedColorConfig.pipeline}, " +
                     "colorStandard=${resolvedColorConfig.colorStandard}, colorTransfer=${resolvedColorConfig.colorTransfer}, " +
                     "colorRange=${resolvedColorConfig.colorRange}, codecProfile=${resolvedColorConfig.codecProfile}, " +
                     "prefer10BitSurface=${resolvedColorConfig.prefer10BitInputSurface}, request=${requestedColorConfig.logProfile.name}, " +
@@ -538,7 +566,18 @@ class VideoRecorder(
 
             try {
                 if (videoEncoder == null) {
-                    initEncoders(frame.sharedContext, frame.sharedDisplay)
+                    try {
+                        initEncoders(frame.sharedContext, frame.sharedDisplay)
+                    } catch (e: Exception) {
+                        val diagnostic = if (e is MediaCodec.CodecException) {
+                            "isTransient=${e.isTransient}, isRecoverable=${e.isRecoverable}, errorCode=${e.errorCode}"
+                        } else ""
+                        val errorMessage = "Failed to initialize encoders: ${e.localizedMessage ?: "Unknown error"}. $diagnostic"
+                        PLog.e(TAG, errorMessage, e)
+                        errorCallback?.invoke(errorMessage)
+                        forceStop()
+                        return
+                    }
                 }
                 val videoRenderer = renderer ?: continue
                 val presentationTimeUs = normalizeVideoPresentationTime(frame.timestampUs)
@@ -550,9 +589,12 @@ class VideoRecorder(
                 if (renderCostMs > statsRenderTimeMaxMs) {
                     statsRenderTimeMaxMs = renderCostMs
                 }
-                logRenderStatsIfNeeded()
+//                logRenderStatsIfNeeded()
             } catch (e: Exception) {
-                PLog.e(TAG, "Failed to render frame to encoder", e)
+                val diagnostic = if (e is MediaCodec.CodecException) {
+                    "isTransient=${e.isTransient}, isRecoverable=${e.isRecoverable}, errorCode=${e.errorCode}"
+                } else ""
+                PLog.e(TAG, "Failed to render frame to encoder. $diagnostic", e)
             }
         }
     }
@@ -959,8 +1001,8 @@ class VideoRecorder(
     }
 }
 
-private fun Int.makeEven(): Int {
-    return if (this % 2 == 0) this else this - 1
+private fun Int.align16(): Int {
+    return (this / 16 * 16).coerceAtLeast(16)
 }
 
 private fun normalizeOrientationHint(degrees: Int): Int {

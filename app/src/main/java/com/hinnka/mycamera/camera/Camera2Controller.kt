@@ -2864,7 +2864,11 @@ class Camera2Controller(private val context: Context) {
                 logProfile = _state.value.videoConfig.logProfile,
                 hasActiveLut = _state.value.lutEnabled && _state.value.currentLutName != null
             ),
-            orientationHintDegrees = resolveVideoOrientationHintDegrees()
+            orientationHintDegrees = resolveVideoOrientationHintDegrees(),
+            onError = { message ->
+                PLog.e(TAG, "Video recording error: $message")
+                onCameraError?.invoke(-1, message, false)
+            }
         ) { uri ->
             PLog.i(TAG, "Video saved: $uri")
             _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())

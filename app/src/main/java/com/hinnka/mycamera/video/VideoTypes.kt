@@ -51,10 +51,11 @@ enum class VideoResolutionPreset(
     HD_720P("720p", 720, 1280);
 
     fun resolveOutputSize(portraitAspectRatio: Float): Size {
-        val clampedAspect = portraitAspectRatio.coerceIn(0.1f, 1f)
+        val clampedAspect = portraitAspectRatio.coerceIn(0.1f, 1.0f)
         val height = longEdge
-        val width = (height * clampedAspect).roundToInt().coerceAtLeast(2).makeEven()
-        return Size(width, height.makeEven())
+        val width = (height * clampedAspect).toInt().align16()
+
+        return Size(width, height.align16())
     }
 }
 
@@ -155,6 +156,6 @@ fun resolveOpenGatePortraitAspectRatio(
     }.coerceIn(0.1f, 1f)
 }
 
-private fun Int.makeEven(): Int {
-    return if (this % 2 == 0) this else this - 1
+private fun Int.align16(): Int {
+    return (this / 16 * 16).coerceAtLeast(16)
 }
