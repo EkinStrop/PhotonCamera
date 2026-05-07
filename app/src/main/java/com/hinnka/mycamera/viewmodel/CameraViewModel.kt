@@ -2326,7 +2326,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (mainCamera.focalLength35mmEquivalent > 0) {
             customFocalLengths.forEach { fl ->
                 val zoom = fl / mainCamera.focalLength35mmEquivalent
-                if (stops.none { abs(it - zoom) <= 0.1f }) {
+                if (stops.none { abs(it - zoom) <= 0.01f }) {
                     stops.add(zoom)
                 }
             }
