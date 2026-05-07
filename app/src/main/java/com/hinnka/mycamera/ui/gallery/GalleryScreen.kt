@@ -50,6 +50,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
+import android.annotation.SuppressLint
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.view.MotionEvent
+import androidx.compose.ui.graphics.toArgb
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import com.hinnka.mycamera.R
@@ -456,7 +462,7 @@ fun GalleryScreen(
                     selectedPhotos = selectedPhotos,
                     isSelectionMode = isSelectionMode,
                     isLoadingMore = (selectedTab == GalleryTab.SYSTEM && isSystemLoadingMore) ||
-                        (selectedTab == GalleryTab.PHOTON && isPhotonLoadingMore),
+                            (selectedTab == GalleryTab.PHOTON && isPhotonLoadingMore),
                     onPhotoClick = onPhotoClick,
                     onLoadMore = { scope.launch { viewModel.loadCurrentTabMore() } },
                     modifier = Modifier.fillMaxSize()
@@ -546,13 +552,17 @@ private fun GalleryRecyclerGrid(
 
     val currentScrollState = if (selectedTab == GalleryTab.PHOTON) photonScrollState else systemScrollState
 
-    // Use key(selectedTab) to ensure we have separate RecyclerView state management for each tab
     key(selectedTab) {
         AndroidView(
             modifier = modifier,
             factory = { context ->
+                val container = FrameLayout(context)
                 val spacingPx = (4f * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
-                RecyclerView(context).apply {
+                val recyclerView = RecyclerView(context).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
                     layoutManager = StaggeredGridLayoutManager(3, RecyclerView.VERTICAL).apply {
                         gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
                         // Restore state for this specific tab
@@ -561,7 +571,7 @@ private fun GalleryRecyclerGrid(
                     setPadding(spacingPx / 2, spacingPx / 2, spacingPx / 2, spacingPx / 2)
                     clipToPadding = false
                     overScrollMode = RecyclerView.OVER_SCROLL_NEVER
-                    isVerticalScrollBarEnabled = true
+                    isVerticalScrollBarEnabled = false
                     itemAnimator = null
                     setHasFixedSize(false)
                     addItemDecoration(GalleryGridSpacingDecoration(spacingPx))
@@ -581,8 +591,21 @@ private fun GalleryRecyclerGrid(
                         }
                     })
                 }
+                container.addView(recyclerView)
+
+                val fastScroller = GalleryFastScrollerView(context, recyclerView).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                }
+                container.addView(fastScroller)
+
+                container
             },
-            update = { recyclerView ->
+            update = { container ->
+                val recyclerView = container.getChildAt(0) as RecyclerView
+                val fastScroller = container.getChildAt(1) as GalleryFastScrollerView
                 val spanCount = 3 // Keep 3 columns as requested
                 val layoutManager = recyclerView.layoutManager as? StaggeredGridLayoutManager
                 if (layoutManager != null && layoutManager.spanCount != spanCount) {
@@ -606,8 +629,179 @@ private fun GalleryRecyclerGrid(
                 }
                 // Ensure layout is recalculated if entries changed to prevent gaps
                 (recyclerView.layoutManager as? StaggeredGridLayoutManager)?.invalidateSpanAssignments()
+
+                fastScroller.setEntries(entries)
             }
         )
+    }
+}
+
+private class GalleryFastScrollerView(
+    context: Context,
+    private val recyclerView: RecyclerView
+) : View(context) {
+    private val density = context.resources.displayMetrics.density
+    private val thumbWidth = (4 * density).toInt()
+    private val thumbHeight = (56 * density).toInt()
+    private val trackWidth = (6 * density).toInt()
+    private val bubbleMargin = (48 * density).toInt()
+
+    private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xE6FF5722.toInt() // AccentOrange with alpha
+    }
+    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x29FFFFFF.toInt() // White with 0.16 alpha
+    }
+    private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+    }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        textSize = 13 * density
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+
+    private var entries: List<GalleryGridEntry> = emptyList()
+    private var isDragging = false
+    private var lastTouchY = 0f
+    private var thumbAlpha = 0f
+    private var dragLabel: String? = null
+
+    private val hideRunnable = Runnable {
+        animateThumb(0f)
+    }
+
+    init {
+        recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (!isDragging) {
+                    showThumb()
+                    invalidate()
+                }
+            }
+
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_IDLE && !isDragging) {
+                    postDelayed(hideRunnable, 900)
+                } else {
+                    removeCallbacks(hideRunnable)
+                    showThumb()
+                }
+            }
+        })
+    }
+
+    fun setEntries(entries: List<GalleryGridEntry>) {
+        this.entries = entries
+        invalidate()
+    }
+
+    private fun showThumb() {
+        removeCallbacks(hideRunnable)
+        if (thumbAlpha < 1f) {
+            animateThumb(1f)
+        }
+    }
+
+    private fun animateThumb(targetAlpha: Float) {
+        animate().alpha(targetAlpha).setDuration(180).start()
+        thumbAlpha = targetAlpha
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (entries.isEmpty() || thumbAlpha == 0f && !isDragging) return
+
+        val range = recyclerView.computeVerticalScrollRange()
+        val extent = recyclerView.computeVerticalScrollExtent()
+        val offset = recyclerView.computeVerticalScrollOffset()
+
+        if (range <= extent) return
+
+        val usableHeight = height - thumbHeight
+        val progress = offset.toFloat() / (range - extent).toFloat()
+        val thumbTop = (progress * usableHeight).coerceIn(0f, usableHeight.toFloat())
+
+        // Draw track
+        val trackLeft = width - trackWidth.toFloat()
+        canvas.drawRoundRect(trackLeft, 0f, width.toFloat(), height.toFloat(), 999f, 999f, trackPaint)
+
+        // Draw thumb
+        val thumbLeft = width - thumbWidth.toFloat() - (1 * density)
+        canvas.drawRoundRect(thumbLeft, thumbTop, width.toFloat() - (1 * density), thumbTop + thumbHeight, 999f, 999f, thumbPaint)
+
+        // Draw bubble
+        if (isDragging && dragLabel != null) {
+            val label = dragLabel!!
+            val textBounds = Rect()
+            textPaint.getTextBounds(label, 0, label.length, textBounds)
+            val bubblePaddingH = 16 * density
+            val bubblePaddingV = 10 * density
+            val bubbleWidth = textBounds.width() + bubblePaddingH * 2
+            val bubbleHeight = textBounds.height() + bubblePaddingV * 2
+            val bubbleRight = width - bubbleMargin.toFloat()
+            val bubbleLeft = bubbleRight - bubbleWidth
+            val bubbleCenterY = thumbTop + thumbHeight / 2f
+            val bubbleTop = (bubbleCenterY - bubbleHeight / 2f).coerceIn(0f, height - bubbleHeight)
+            val bubbleBottom = bubbleTop + bubbleHeight
+
+            canvas.drawRoundRect(bubbleLeft, bubbleTop, bubbleRight, bubbleBottom, 999f, 999f, bubblePaint)
+            canvas.drawText(label, bubbleLeft + bubbleWidth / 2f, bubbleTop + bubblePaddingV + textBounds.height(), textPaint)
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val x = event.x
+        val y = event.y
+
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                if (x < width - 40 * density) return false
+                isDragging = true
+                showThumb()
+                scrollTo(y)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (isDragging) {
+                    scrollTo(y)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isDragging) {
+                    isDragging = false
+                    dragLabel = null
+                    postDelayed(hideRunnable, 900)
+                    invalidate()
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private fun scrollTo(y: Float) {
+        val usableHeight = height - thumbHeight
+        val progress = ((y - thumbHeight / 2f) / usableHeight).coerceIn(0f, 1f)
+        val itemCount = recyclerView.adapter?.itemCount ?: 0
+        if (itemCount > 0) {
+            val targetPos = (progress * (itemCount - 1)).toInt()
+            recyclerView.scrollToPosition(targetPos)
+            dragLabel = entries.getOrNull(targetPos)?.toFastScrollDateLabel(context)
+            invalidate()
+        }
+    }
+
+    private fun GalleryGridEntry.toFastScrollDateLabel(context: Context): String {
+        return when (this) {
+            is GalleryGridEntry.Header -> title
+            is GalleryGridEntry.Photo -> {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                sdf.format(java.util.Date(photo.dateAdded))
+            }
+        }
     }
 }
 
@@ -697,7 +891,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
 
                 val oldEntry = oldEntries[oldItemPosition]
                 val newEntry = entries[newItemPosition]
-                
+
                 // If anything about the UI state changed, we should rebind
                 if (oldIsSelectionMode != isSelectionMode || oldIsLandscape != isLandscape || oldRotationDegrees != rotationDegrees) return false
 
@@ -709,6 +903,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
                         val isSelected = id in selectedPhotoIds
                         wasSelected == isSelected && oldEntry.photo.dateAdded == newEntry.photo.dateAdded
                     }
+
                     else -> false
                 }
             }
@@ -739,9 +934,11 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
             VIEW_TYPE_HEADER -> HeaderHolder(
                 LayoutInflater.from(parent.context).inflate(R.layout.item_gallery_header, parent, false) as TextView
             )
+
             VIEW_TYPE_LOADING -> LoadingHolder(
                 LayoutInflater.from(parent.context).inflate(R.layout.item_gallery_loading, parent, false)
             )
+
             else -> PhotoHolder(GalleryPhotoItemView(parent.context))
         }
     }
@@ -806,7 +1003,7 @@ private class GalleryRecyclerAdapter : RecyclerView.Adapter<RecyclerView.ViewHol
 
     private fun GalleryGridEntry.isFullSpan(): Boolean =
         this is GalleryGridEntry.Header ||
-            (this is GalleryGridEntry.Photo && photo.shouldUseFullLineSpan())
+                (this is GalleryGridEntry.Photo && photo.shouldUseFullLineSpan())
 
     private class HeaderHolder(view: TextView) : RecyclerView.ViewHolder(view)
     private class LoadingHolder(view: View) : RecyclerView.ViewHolder(view)
@@ -926,9 +1123,11 @@ private class GalleryPhotoItemView(context: Context) : FrameLayout(context) {
         motionIcon.visibility = if (photo.isMotionPhoto) VISIBLE else GONE
         burstIcon.visibility = if (photo.isBurstPhoto) VISIBLE else GONE
         rawBadge.visibility = if (photo.isImage && viewModel.isRawInGallery(photo.id)) VISIBLE else GONE
-        importedBadge.visibility = if (viewModel.selectedTab == GalleryTab.PHOTON && photo.metadata?.isImported == true) VISIBLE else GONE
+        importedBadge.visibility =
+            if (viewModel.selectedTab == GalleryTab.PHOTON && photo.metadata?.isImported == true) VISIBLE else GONE
         importedBadge.text = context.getString(R.string.imported)
-        relatedBadge.visibility = if (viewModel.selectedTab == GalleryTab.SYSTEM && photo.relatedPhoto != null) VISIBLE else GONE
+        relatedBadge.visibility =
+            if (viewModel.selectedTab == GalleryTab.SYSTEM && photo.relatedPhoto != null) VISIBLE else GONE
 
         setOnClickListener { onClick() }
         setOnLongClickListener {
