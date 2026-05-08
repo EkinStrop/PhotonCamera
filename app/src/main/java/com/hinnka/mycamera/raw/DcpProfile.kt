@@ -102,6 +102,7 @@ object DcpProfileParser {
     )
 
     private val cache = mutableMapOf<String, CacheEntry>()
+    private val renderPlanCache = mutableMapOf<String, DcpRenderPlan>()
 
     fun parse(filePath: String): DcpProfile? {
         val file = File(filePath)
@@ -134,7 +135,15 @@ object DcpProfileParser {
         metadata: RawMetadata
     ): DcpRenderPlan? {
         if (dcpInfo == null) return null
-        val profile = parse(resolveFilePath(context, dcpInfo) ?: return null) ?: return null
+        val filePath = resolveFilePath(context, dcpInfo) ?: return null
+        val file = File(filePath)
+        val stamp = file.lastModified() xor file.length()
+        val renderPlanKey = buildRenderPlanKey(filePath, stamp, metadata)
+        synchronized(renderPlanCache) {
+            renderPlanCache[renderPlanKey]?.let { return it }
+        }
+
+        val profile = parse(filePath) ?: return null
         val selectedHueSat = interpolateHueSatMap(profile, metadata)
         val selectedMatrix = computeInterpolatedCameraToXyz(profile, metadata)?.let { cameraToXyz ->
             val xyzToWorking = computeXyzD50ToGamut(ColorSpace.ProPhoto) ?: return@let cameraToXyz
@@ -147,13 +156,35 @@ object DcpProfileParser {
             hueSatMap = selectedHueSat,
             lookTable = profile.lookTable?.takeIf { it.isValid },
             toneCurveLut = profile.toneCurve?.takeIf { it.isValid }?.toLut()
-        )
+        ).also { plan ->
+            synchronized(renderPlanCache) {
+                renderPlanCache[renderPlanKey] = plan
+            }
+        }
+    }
+
+    fun prewarm(context: Context, dcpInfo: DcpInfo?) {
+        if (dcpInfo == null) return
+        val start = System.currentTimeMillis()
+        val filePath = resolveFilePath(context, dcpInfo) ?: return
+        parse(filePath)
+        PLog.d(TAG, "Prewarmed DCP: ${dcpInfo.id}, took=${System.currentTimeMillis() - start}ms")
     }
 
     fun clearCache() {
         synchronized(cache) {
             cache.clear()
         }
+        synchronized(renderPlanCache) {
+            renderPlanCache.clear()
+        }
+    }
+
+    private fun buildRenderPlanKey(filePath: String, stamp: Long, metadata: RawMetadata): String {
+        val wbKey = metadata.whiteBalanceGains.joinToString(",") { gain ->
+            (gain * 1000f).toInt().toString()
+        }
+        return "$filePath|$stamp|$wbKey|${metadata.colorCorrectionMatrix.contentHashCode()}"
     }
 
     private fun resolveFilePath(context: Context, dcpInfo: DcpInfo): String? {

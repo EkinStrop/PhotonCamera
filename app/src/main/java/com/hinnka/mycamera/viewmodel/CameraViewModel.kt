@@ -35,7 +35,9 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.model.SafeImage
 import com.hinnka.mycamera.phantom.PhantomWidgetProvider
 import com.hinnka.mycamera.raw.ColorSpace
+import com.hinnka.mycamera.raw.DcpProfileParser
 import com.hinnka.mycamera.raw.DcpInfo
+import com.hinnka.mycamera.raw.RawDemosaicProcessor
 import com.hinnka.mycamera.color.TransferCurve
 import com.hinnka.mycamera.raw.RawProfile
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
@@ -713,7 +715,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setRawDcpId(dcpId: String?) {
-        viewModelScope.launch { userPreferencesRepository.saveRawDcpId(dcpId) }
+        viewModelScope.launch {
+            userPreferencesRepository.saveRawDcpId(dcpId)
+            prewarmRawDcp(dcpId)
+        }
     }
     fun setRawBaselineLutId(lutId: String?) {
         viewModelScope.launch {
@@ -809,6 +814,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun prewarmDepthEstimator() {
         cameraController.previewDepthProcessor.prewarm()
+        viewModelScope.launch {
+            RawDemosaicProcessor.getInstance().prewarmDepthEstimator(getApplication<Application>())
+        }
+        viewModelScope.launch {
+            prewarmRawDcp(rawDcpId.firstOrNull())
+        }
+    }
+
+    private suspend fun prewarmRawDcp(dcpId: String?) = withContext(Dispatchers.IO) {
+        val dcpInfo = dcpId?.let { id ->
+            contentRepository.getAvailableDcps().firstOrNull { it.id == id }
+        } ?: return@withContext
+        DcpProfileParser.prewarm(getApplication<Application>(), dcpInfo)
     }
 
     /**

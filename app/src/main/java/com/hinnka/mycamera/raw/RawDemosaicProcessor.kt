@@ -12,6 +12,7 @@ import com.hinnka.mycamera.utils.BitmapUtils
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RawProcessor
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -207,6 +208,13 @@ class RawDemosaicProcessor {
             depthEstimator ?: DepthEstimator(context.applicationContext).also { depthEstimator = it }
         }
     }
+
+    suspend fun prewarmDepthEstimator(context: Context) = withContext(Dispatchers.Default) {
+        val start = System.currentTimeMillis()
+        getDepthEstimator(context.applicationContext)
+        PLog.d(TAG, "RAW DepthEstimator prewarmed, took=${System.currentTimeMillis() - start}ms")
+    }
+
     private var gfChromaFboId = 0
 
     // 缓冲区

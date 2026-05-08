@@ -433,6 +433,7 @@ object GalleryManager {
         chromaNoiseReduction: Float = 0f,
         quality: Int = 92,
         preparedUltraHdrSource: GainmapSourceSet? = null,
+        preparedGainmapResult: GainmapResult? = null,
     ): Boolean = withContext(Dispatchers.IO) {
         beginHdrWork(photoId)
         try {
@@ -468,10 +469,13 @@ object GalleryManager {
                 return@withContext false
             }
 
-            val gainmapResult = gainmapProducer.build(
+            val gainmapResult = preparedGainmapResult ?: gainmapProducer.build(
                 ultraHdrSource,
                 HdrGainmapStrength.coerce(resolvedMetadata.hdrEffectStrength)
             )
+            if (preparedGainmapResult != null) {
+                PLog.d(TAG, "buildDetailHdrCache reused prepared gainmap for $photoId")
+            }
             FileOutputStream(tempFile).use { outputStream ->
                 if (!writeFinalJpeg(ultraHdrSource.sdrBase, outputStream, quality, gainmapResult)) {
                     tempFile.delete()
@@ -539,6 +543,7 @@ object GalleryManager {
         photoQuality: Int = 95,
         suffix: String? = null,
         preparedUltraHdrSource: GainmapSourceSet? = null,
+        preparedGainmapResult: GainmapResult? = null,
     ): Boolean {
         return withContext(Dispatchers.IO) {
             val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.jpg")
@@ -574,13 +579,17 @@ object GalleryManager {
                 } else {
                     PLog.d(TAG, "prepareUltraHdrSource reused in-memory source for export: $id")
                 }
-                var gainmapResult: GainmapResult? = null
-                val gainmapElapsed = measureTimeMillis {
-                    gainmapResult = ultraHdrSource?.let {
-                        gainmapProducer.build(it, HdrGainmapStrength.coerce(metadata.hdrEffectStrength))
+                var gainmapResult: GainmapResult? = preparedGainmapResult
+                if (preparedGainmapResult == null) {
+                    val gainmapElapsed = measureTimeMillis {
+                        gainmapResult = ultraHdrSource?.let {
+                            gainmapProducer.build(it, HdrGainmapStrength.coerce(metadata.hdrEffectStrength))
+                        }
                     }
+                    PLog.d(TAG, "gainmapProducer.build took ${gainmapElapsed}ms, enabled=${gainmapResult != null}")
+                } else {
+                    PLog.d(TAG, "gainmapProducer.build reused prepared result, enabled=true")
                 }
-                PLog.d(TAG, "gainmapProducer.build took ${gainmapElapsed}ms, enabled=${gainmapResult != null}")
 
                 // 读取照片
                 val processedBitmap = (ultraHdrSource?.sdrBase ?: if (metadata.hasAiDenoisedBase) {
@@ -1201,6 +1210,14 @@ object GalleryManager {
             } else {
                 null
             }
+            val preparedGainmapResult = preparedUltraHdrSource?.let { source ->
+                var result: GainmapResult? = null
+                val gainmapElapsed = measureTimeMillis {
+                    result = gainmapProducer.build(source, HdrGainmapStrength.coerce(metadata.hdrEffectStrength))
+                }
+                PLog.d(TAG, "saveRawPhoto prepared gainmap for reuse, took=${gainmapElapsed}ms")
+                result
+            }
             preparedUltraHdrSource?.let {
                 PLog.d(TAG, "saveRawPhoto building detail HDR from in-memory RAW result: $photoId")
                 buildDetailHdrCache(
@@ -1210,7 +1227,8 @@ object GalleryManager {
                     sharpening = sharpeningValue,
                     noiseReduction = noiseReductionValue,
                     chromaNoiseReduction = chromaNoiseReductionValue,
-                    preparedUltraHdrSource = it
+                    preparedUltraHdrSource = it,
+                    preparedGainmapResult = preparedGainmapResult
                 )
             }
             if (shouldAutoSave) {
@@ -1224,7 +1242,8 @@ object GalleryManager {
                     noiseReductionValue,
                     chromaNoiseReductionValue,
                     photoQuality,
-                    preparedUltraHdrSource = preparedUltraHdrSource
+                    preparedUltraHdrSource = preparedUltraHdrSource,
+                    preparedGainmapResult = preparedGainmapResult
                 )
             }
             preparedUltraHdrSource?.hdrReference?.bitmap?.let {
