@@ -7,6 +7,7 @@ import android.media.Image
 import android.opengl.*
 import com.hinnka.mycamera.data.ContentRepository
 import com.hinnka.mycamera.camera.AspectRatio
+import com.hinnka.mycamera.ml.DepthEstimator
 import com.hinnka.mycamera.utils.BitmapUtils
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.RawProcessor
@@ -198,6 +199,14 @@ class RawDemosaicProcessor {
     private var gfWidth = 0
     private var gfHeight = 0
     private var gfChromaTexId = 0
+
+    private var depthEstimator: DepthEstimator? = null
+
+    private fun getDepthEstimator(context: Context): DepthEstimator {
+        return depthEstimator ?: synchronized(this) {
+            depthEstimator ?: DepthEstimator(context.applicationContext).also { depthEstimator = it }
+        }
+    }
     private var gfChromaFboId = 0
 
     // 缓冲区
@@ -586,6 +595,7 @@ class RawDemosaicProcessor {
             )
             val autoExposureEv = if (rawAutoExposure) {
                 resolveRawAutoExposureEv(
+                    context = context,
                     metadata = actualMetadata,
                     sourceTextureId = demosaicTextureId,
                     dcpRenderPlan = resolvedDcpRenderPlan
@@ -2115,6 +2125,7 @@ class RawDemosaicProcessor {
     }
 
     private fun resolveRawAutoExposureEv(
+        context: Context,
         metadata: RawMetadata,
         sourceTextureId: Int,
         dcpRenderPlan: DcpRenderPlan?
@@ -2145,11 +2156,34 @@ class RawDemosaicProcessor {
             )
             checkGlError("resolveRawAutoExposureEv")
             buffer.position(0)
+
+            // Calculate depth weighting
+            val bitmap = Bitmap.createBitmap(meteringWidth, meteringHeight, Bitmap.Config.ARGB_8888)
+            bitmap.copyPixelsFromBuffer(buffer)
+            buffer.position(0) // Reset for MeteringSystem
+
+            val depthMap = getDepthEstimator(context).estimateDepth(bitmap)
+            val weightBuffer = depthMap?.let {
+                val wb = ByteBuffer.allocateDirect(it.byteCount)
+                it.copyPixelsToBuffer(wb)
+                wb.position(0)
+                wb
+            }
+
             val ev = MeteringSystem.analyzeRenderedExposureEv(
                 byteBuffer = buffer,
                 width = meteringWidth,
                 height = meteringHeight,
+                weightBuffer = weightBuffer
             )
+            
+            // Clean up temporary bitmaps
+            if (depthMap != null && !depthMap.isRecycled) {
+                depthMap.recycle()
+            }
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
             PLog.d(
                 TAG,
                 "RAW auto exposure: renderedEv=$ev"

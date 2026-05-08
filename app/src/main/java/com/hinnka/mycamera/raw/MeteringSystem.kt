@@ -20,15 +20,43 @@ object MeteringSystem {
         byteBuffer: ByteBuffer,
         width: Int,
         height: Int,
+        weightBuffer: ByteBuffer? = null // Optional weight mask (e.g. depth map)
     ): Float {
         val pixelCount = width * height
         if (pixelCount == 0) return 0f
 
         val lumas = FloatArray(pixelCount)
+        var weightedLumaSum = 0f
+        var totalWeight = 0f
 
         byteBuffer.position(0)
+        weightBuffer?.position(0)
+
         for (y in 0 until height) {
+            val ny = (y.toFloat() / height) - 0.5f
             for (x in 0 until width) {
+                val nx = (x.toFloat() / width) - 0.5f
+
+                // 1. Spatial weight (Center-Weighted)
+                // Default fallback as subjects are often in the center
+                val distSq = nx * nx + ny * ny
+                val spatialWeight = lerp(1.0f, 0.5f, distSq * 2f)
+
+                // 2. Depth weight (Subject-Priority)
+                var depthWeight = 1.0f
+                if (weightBuffer != null && weightBuffer.hasRemaining()) {
+                    // Read depth value (usually Gray8 or RGBA8).
+                    // In DepthEstimator output (Grayscale ARGB), all R/G/B channels are the same.
+                    val wValue = (weightBuffer.get().toInt() and 0xFF) / 255f
+                    // Higher depth value (closer) gets higher weight (up to 5x)
+                    depthWeight = lerp(1.0f, 10.0f, wValue)
+                    // If it's 4-channel ARGB/RGBA, skip the other 3 bytes
+                    if (weightBuffer.capacity() >= pixelCount * 4 && weightBuffer.remaining() >= 3) {
+                        weightBuffer.get(); weightBuffer.get(); weightBuffer.get()
+                    }
+                }
+
+                val finalWeight = spatialWeight * depthWeight
 
                 val r = (byteBuffer.get().toInt() and 0xFF) / 255f
                 val g = (byteBuffer.get().toInt() and 0xFF) / 255f
@@ -38,6 +66,9 @@ object MeteringSystem {
                 val luma = r * 0.2126f + g * 0.7152f + b * 0.0722f
                 val idx = y * width + x
                 lumas[idx] = luma
+
+                weightedLumaSum += luma * finalWeight
+                totalWeight += finalWeight
             }
         }
 
@@ -47,8 +78,8 @@ object MeteringSystem {
         
         val highlightAnchorGain = 1f / p998.coerceAtLeast(0.01f)
 
-        // 3. Midtone Balance Logic (Spatial Average)
-        val avgLuma = lumas.average().toFloat()
+        // 3. Midtone Balance Logic (Spatial Weighted Average)
+        val avgLuma = weightedLumaSum / totalWeight.coerceAtLeast(0.001f)
         val midToneGain = DISPLAY_TARGET_LUMA / avgLuma.coerceAtLeast(0.001f)
         val dynamicRangeGap = midToneGain / highlightAnchorGain
 
