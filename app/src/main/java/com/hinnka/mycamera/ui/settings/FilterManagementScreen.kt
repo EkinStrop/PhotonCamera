@@ -98,6 +98,11 @@ fun FilterManagementScreen(
     // 本地可变列表用于拖拽排序
     var localLutList by remember { mutableStateOf(availableLuts) }
 
+    // 如果初始为空但 ViewModel 数据已加载，立即同步
+    if (localLutList.isEmpty() && availableLuts.isNotEmpty()) {
+        localLutList = availableLuts
+    }
+
     // 当 availableLuts 更新时同步本地列表
     LaunchedEffect(availableLuts) {
         val existingIds = localLutList.map { it.id }.toSet()
@@ -214,33 +219,33 @@ fun FilterManagementScreen(
 
     var hasLocated by remember(locateLutId) { mutableStateOf(false) }
 
-    LaunchedEffect(locateLutId, localLutList, categories) {
-        if (locateLutId != null && !hasLocated && categories.isNotEmpty()) {
+    // 自动定位到指定滤镜
+    LaunchedEffect(locateLutId, categories) {
+        if (!locateLutId.isNullOrEmpty() && !hasLocated && categories.isNotEmpty()) {
+            // 确保本地列表已同步且包含目标项
             val targetLut = localLutList.find { it.id == locateLutId }
             if (targetLut != null) {
-                val targetCategory = if (targetLut.isBuiltIn) builtInText
-                else if (targetLut.category.isEmpty()) uncategorizedText
-                else targetLut.category
-                
-                val categoryIndex = categories.indexOf(targetCategory)
-                
                 // 等待页面入场动画完成 (约 350ms)，避免与 Navigation 切换动画抢占资源导致掉帧卡顿
                 kotlinx.coroutines.delay(350)
+                
+                // 查找目标所属分类
+                val categoryName = if (targetLut.isBuiltIn) builtInText 
+                                 else if (targetLut.category.isEmpty()) uncategorizedText 
+                                 else targetLut.category
+                val categoryIndex = categories.indexOf(categoryName)
                 
                 if (categoryIndex >= 0 && selectedTabIndex != categoryIndex) {
                     selectedTabIndex = categoryIndex
                     // 等待 Tab 切换引起的列表重组完成
-                    kotlinx.coroutines.delay(100) 
+                    kotlinx.coroutines.delay(150) 
                 }
                 
-                // 重新获取过滤后的列表中的索引
-                val filteredLutsNow = if (categoryIndex >= 0 && categoryIndex < categories.size) {
-                    when (categories[categoryIndex]) {
-                        builtInText -> localLutList.filter { it.isBuiltIn }
-                        uncategorizedText -> localLutList.filter { !it.isBuiltIn && it.category.isEmpty() }
-                        else -> localLutList.filter { it.category == categories[categoryIndex] }
-                    }
-                } else localLutList
+                // 重新获取当前分类下的列表并定位
+                val filteredLutsNow = when (categoryName) {
+                    builtInText -> localLutList.filter { it.isBuiltIn }
+                    uncategorizedText -> localLutList.filter { !it.isBuiltIn && it.category.isEmpty() }
+                    else -> localLutList.filter { it.category == categoryName }
+                }
                 
                 val indexInFiltered = filteredLutsNow.indexOfFirst { it.id == locateLutId }
                 if (indexInFiltered >= 0) {

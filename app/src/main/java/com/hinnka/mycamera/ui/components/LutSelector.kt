@@ -189,6 +189,7 @@ fun LutSelector(
             }
 
             if (onManageClick != null) {
+                var lastClickTime by remember { mutableLongStateOf(0L) }
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Manage Filters",
@@ -197,7 +198,13 @@ fun LutSelector(
                         .padding(end = 12.dp)
                         .size(24.dp)
                         .clip(CircleShape)
-                        .clickable { onManageClick(currentLutId ?: "") }
+                        .clickable {
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastClickTime > 1000) {
+                                lastClickTime = currentTime
+                                onManageClick(currentLutId ?: "")
+                            }
+                        }
                         .padding(4.dp)
                 )
             }
@@ -212,6 +219,7 @@ fun LutSelector(
         ) {
             // LUT 列表
             items(filteredLuts, key = { it.id }) { lut ->
+                var lastManageClickTime by remember { mutableLongStateOf(0L) }
                 LutItem(
                     id = lut.id,
                     name = lut.getName(),
@@ -231,7 +239,13 @@ fun LutSelector(
                         }
                     },
                     onManageClick = if (onManageClick != null) {
-                        { onManageClick(lut.id) }
+                        {
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastManageClickTime > 1000) {
+                                lastManageClickTime = currentTime
+                                onManageClick(lut.id)
+                            }
+                        }
                     } else null
                 )
             }
