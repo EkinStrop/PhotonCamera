@@ -155,6 +155,8 @@ class Camera2Controller(private val context: Context) {
     private var videoCaptureStatsWindowStartMs: Long = 0L
     private var videoCaptureStatsFrames: Int = 0
     private var videoCaptureStatsLastTimestampNs: Long = 0L
+    @Volatile
+    private var cameraOpenGeneration: Long = 0L
 
     private val _state = MutableStateFlow(CameraState())
     val state: StateFlow<CameraState> = _state.asStateFlow()
@@ -656,6 +658,7 @@ class Camera2Controller(private val context: Context) {
     fun openCamera(surfaceTexture: SurfaceTexture, preserveVideoRecording: Boolean = false) {
         // 先关闭旧的相机和资源，防止资源泄漏
         closeCamera(preserveVideoRecording = preserveVideoRecording)
+        val openGeneration = ++cameraOpenGeneration
 
         // 确保在权限已授予后才发现相机（延迟初始化）
         if (_state.value.availableCameras.isEmpty()) {
@@ -918,12 +921,21 @@ class Camera2Controller(private val context: Context) {
 
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
+                    if (openGeneration != cameraOpenGeneration) {
+                        PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
+                        camera.close()
+                        return
+                    }
                     PLog.d(TAG, "Camera opened: ${camera.id}")
                     cameraDevice = camera
-                    createPreviewSession()
+                    createPreviewSession(openGeneration = openGeneration)
                 }
 
                 override fun onDisconnected(camera: CameraDevice) {
+                    if (openGeneration != cameraOpenGeneration) {
+                        camera.close()
+                        return
+                    }
                     PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
                     videoRecorder.forceStop()
                     stopVideoRecordingTicker()
@@ -943,6 +955,10 @@ class Camera2Controller(private val context: Context) {
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
+                    if (openGeneration != cameraOpenGeneration) {
+                        camera.close()
+                        return
+                    }
                     val errorMessage = when (error) {
                         ERROR_CAMERA_IN_USE ->
                             "相机正在被其他应用使用"
@@ -1103,7 +1119,14 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun createPreviewSession(forceStandardSession: Boolean = false) {
+    private fun createPreviewSession(
+        forceStandardSession: Boolean = false,
+        openGeneration: Long = cameraOpenGeneration
+    ) {
+        if (openGeneration != cameraOpenGeneration) {
+            PLog.w(TAG, "Skipping stale preview session creation")
+            return
+        }
         val device = cameraDevice ?: return
         val surface = previewSurface ?: return
         val captureMode = _state.value.captureMode
@@ -1143,20 +1166,29 @@ class Camera2Controller(private val context: Context) {
                     Executors.newSingleThreadExecutor(),
                     object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(session: CameraCaptureSession) {
+                            if (openGeneration != cameraOpenGeneration) {
+                                PLog.w(TAG, "Closing stale video preview session")
+                                session.close()
+                                return
+                            }
                             if (useHlgCapture) {
                                 _state.value = _state.value.copy(currentDynamicRangeProfile = "HLG10")
                             } else if (_state.value.currentDynamicRangeProfile != "STANDARD") {
                                 _state.value = _state.value.copy(currentDynamicRangeProfile = "STANDARD")
                             }
-                            onSessionConfigured(session)
+                            onSessionConfigured(session, openGeneration)
                         }
 
                         override fun onConfigureFailed(session: CameraCaptureSession) {
+                            if (openGeneration != cameraOpenGeneration) {
+                                session.close()
+                                return
+                            }
                             PLog.e(TAG, "Video session configuration failed: useHlgCapture=$useHlgCapture")
                             if (useHlgCapture) {
                                 PLog.w(TAG, "Retrying video preview session with STANDARD dynamic range fallback")
                                 _state.value = _state.value.copy(currentDynamicRangeProfile = "STANDARD")
-                                createPreviewSession(forceStandardSession = true)
+                                createPreviewSession(forceStandardSession = true, openGeneration = openGeneration)
                             }
                         }
                     }
@@ -1193,15 +1225,24 @@ class Camera2Controller(private val context: Context) {
                 Executors.newSingleThreadExecutor(),
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
+                        if (openGeneration != cameraOpenGeneration) {
+                            PLog.w(TAG, "Closing stale preview session")
+                            session.close()
+                            return
+                        }
                         if (useHlgCapture) {
                             _state.value = _state.value.copy(currentDynamicRangeProfile = "HLG10")
                         } else if (_state.value.currentDynamicRangeProfile != "STANDARD") {
                             _state.value = _state.value.copy(currentDynamicRangeProfile = "STANDARD")
                         }
-                        onSessionConfigured(session)
+                        onSessionConfigured(session, openGeneration)
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
+                        if (openGeneration != cameraOpenGeneration) {
+                            session.close()
+                            return
+                        }
                         PLog.e(
                             TAG,
                             "Session configuration failed: useHlgCapture=$useHlgCapture, " +
@@ -1211,7 +1252,7 @@ class Camera2Controller(private val context: Context) {
                        if (useHlgCapture) {
                             PLog.w(TAG, "Retrying preview session with STANDARD dynamic range fallback")
                             _state.value = _state.value.copy(currentDynamicRangeProfile = "STANDARD")
-                            createPreviewSession(forceStandardSession = true)
+                            createPreviewSession(forceStandardSession = true, openGeneration = openGeneration)
                         }
                     }
                 }
@@ -1227,7 +1268,12 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun onSessionConfigured(session: CameraCaptureSession) {
+    private fun onSessionConfigured(session: CameraCaptureSession, openGeneration: Long = cameraOpenGeneration) {
+        if (openGeneration != cameraOpenGeneration) {
+            PLog.w(TAG, "Ignoring stale configured session")
+            session.close()
+            return
+        }
         captureSession = session
 
         try {
@@ -3342,6 +3388,7 @@ class Camera2Controller(private val context: Context) {
      */
     fun closeCamera(preserveVideoRecording: Boolean = false) {
         try {
+            cameraOpenGeneration++
             val keepVideoRecording = preserveVideoRecording && _state.value.videoRecordingState.isRecording
             if (keepVideoRecording) {
                 PLog.d(TAG, "Closing camera while keeping active video recording")

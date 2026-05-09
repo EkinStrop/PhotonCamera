@@ -347,8 +347,15 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(state.isPreviewActive, hasPlayedInitialPreviewTransition, canStartShutterAnimation) {
-        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive || !canStartShutterAnimation) return@LaunchedEffect
+    LaunchedEffect(
+        state.isPreviewActive,
+        state.captureMode,
+        hasPlayedInitialPreviewTransition,
+        canStartShutterAnimation
+    ) {
+        val canRevealInitialPreview =
+            canStartShutterAnimation || state.captureMode == CaptureMode.VIDEO
+        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive || !canRevealInitialPreview) return@LaunchedEffect
         previewTransitionActive = true
         delay(InitialPreviewTransitionDelayMillis)
         previewTransitionRevealing = true
