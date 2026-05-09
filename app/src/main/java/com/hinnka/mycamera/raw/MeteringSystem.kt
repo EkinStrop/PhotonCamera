@@ -83,13 +83,13 @@ object MeteringSystem {
         val midToneGain = DISPLAY_TARGET_LUMA / avgLuma.coerceAtLeast(0.001f)
         val dynamicRangeGap = midToneGain / highlightAnchorGain
 
-        val extra = 1f - smoothStep(0.66f, 3f, dynamicRangeGap)
+        val extra = 1f - smoothStep(0.66f, 2.22f, dynamicRangeGap)
 
-        val baseGain = midToneGain * lerp(0.9f, 1.2f, extra)
+        val adaptiveGain = midToneGain * lerp(0.9f, 1.2f, extra)
 
-        val maxAllowedGain = highlightAnchorGain * 1.1f
+//        val maxAllowedGain = highlightAnchorGain * 1.1f
 
-        val adaptiveGain = minOf(baseGain, maxAllowedGain)
+//        val adaptiveGain = minOf(baseGain, maxAllowedGain)
 
         val meteredEv = log2(adaptiveGain.coerceIn(0.25f, 4.0f))
         
