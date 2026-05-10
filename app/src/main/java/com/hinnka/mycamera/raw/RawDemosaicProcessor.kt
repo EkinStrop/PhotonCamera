@@ -52,7 +52,8 @@ class RawDemosaicProcessor {
      */
     private fun convertDngRawDataToMetadata(
         dngRawData: DngRawData,
-        exposureBias: Float
+        exposureBias: Float,
+        baseMetadata: RawMetadata? = null
     ): RawMetadata {
         // CFA 模式：使用从 JNI 传递过来的实际值
         val cfaPattern = dngRawData.cfaPattern
@@ -86,7 +87,7 @@ class RawDemosaicProcessor {
                 dngRawData.activeArray[2],
                 dngRawData.activeArray[3]
             )
-        } else null
+        } else baseMetadata?.activeArray
 
         return RawMetadata(
             width = dngRawData.width,
@@ -100,13 +101,20 @@ class RawDemosaicProcessor {
             lensShadingMap = dngRawData.lensShadingMap,
             lensShadingMapWidth = dngRawData.lensShadingMapWidth,
             lensShadingMapHeight = dngRawData.lensShadingMapHeight,
-            baselineExposure = dngRawData.baselineExposure,
-            exposureBias = if (dngRawData.exposureBias == 0f) exposureBias else dngRawData.exposureBias,
-            iso = dngRawData.iso,
-            shutterSpeed = dngRawData.shutterSpeed,
-            aperture = dngRawData.aperture,
+            baselineExposure = if (dngRawData.baselineExposure == 0f) (baseMetadata?.baselineExposure ?: 0f) else dngRawData.baselineExposure,
+            exposureBias = if (dngRawData.exposureBias == 0f) {
+                if (baseMetadata != null && baseMetadata.exposureBias != 0f) baseMetadata.exposureBias else exposureBias
+            } else dngRawData.exposureBias,
+            iso = if (dngRawData.iso == 0) (baseMetadata?.iso ?: 100) else dngRawData.iso,
+            shutterSpeed = if (dngRawData.shutterSpeed == 0L) (baseMetadata?.shutterSpeed ?: 0L) else dngRawData.shutterSpeed,
+            aperture = if (dngRawData.aperture == 0f) (baseMetadata?.aperture ?: 0f) else dngRawData.aperture,
             activeArray = activeArray,
-            noiseProfile = dngRawData.noiseProfile ?: floatArrayOf(0f, 0f)
+            noiseProfile = dngRawData.noiseProfile ?: baseMetadata?.noiseProfile ?: floatArrayOf(0f, 0f),
+            postRawSensitivityBoost = baseMetadata?.postRawSensitivityBoost ?: 1.0f,
+            exposureCompensation = baseMetadata?.exposureCompensation ?: 0f,
+            aeMode = baseMetadata?.aeMode ?: 1,
+            afRegions = baseMetadata?.afRegions,
+            frameCount = baseMetadata?.frameCount ?: 1
         )
     }
 
@@ -544,7 +552,7 @@ class RawDemosaicProcessor {
             actualWidth = dngRawData.width
             actualHeight = dngRawData.height
             actualRowStride = dngRawData.rowStride
-            actualMetadata = convertDngRawDataToMetadata(dngRawData, exposureBias)
+            actualMetadata = convertDngRawDataToMetadata(dngRawData, exposureBias, actualMetadata)
             actualRotation = dngRawData.rotation
             onMetadata?.invoke(actualMetadata)
         }
@@ -584,7 +592,7 @@ class RawDemosaicProcessor {
             actualWidth = linearRawData.width
             actualHeight = linearRawData.height
             actualRowStride = linearRawData.rowStride
-            actualMetadata = convertDngRawDataToMetadata(linearRawData, exposureBias)
+            actualMetadata = convertDngRawDataToMetadata(linearRawData, exposureBias, actualMetadata)
         }
 
         val resolvedDcpRenderPlan = dcpRenderPlan ?: rawDcpId?.let { dcpId ->

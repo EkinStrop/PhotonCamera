@@ -78,7 +78,8 @@ data class RawMetadata(
     val exposureBias: Float = 0f,
     val iso: Int = 100,
     val shutterSpeed: Long = 0L,
-    val aperture: Float = 0f
+    val aperture: Float = 0f,
+    val frameCount: Int = 1
 ) {
     companion object {
         private const val TAG = "RawMetadata"
@@ -668,6 +669,7 @@ data class RawMetadata(
         if (baselineExposure != other.baselineExposure) return false
         if (iso != other.iso) return false
         if (shutterSpeed != other.shutterSpeed) return false
+        if (frameCount != other.frameCount) return false
 
         return true
     }
@@ -687,6 +689,7 @@ data class RawMetadata(
         result = 31 * result + baselineExposure.hashCode()
         result = 31 * result + iso
         result = 31 * result + shutterSpeed.hashCode()
+        result = 31 * result + frameCount
         return result
     }
 }

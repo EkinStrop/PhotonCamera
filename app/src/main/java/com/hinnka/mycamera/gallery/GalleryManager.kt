@@ -1761,7 +1761,7 @@ object GalleryManager {
                 width = finalStackResult.width,
                 height = finalStackResult.height,
                 rowStride = finalStackResult.width * 2, // 16-bit Bayer
-                metadata = rawMetadata.forStackRender(finalStackResult),
+                metadata = rawMetadata.forStackRender(finalStackResult, images.size),
                 aspectRatio = aspectRatio,
                 cropRegion = metadata.cropRegion,
                 rotation = rotation,
@@ -1974,9 +1974,9 @@ object GalleryManager {
         return output
     }
 
-    private fun RawMetadata.forStackRender(stackResult: RawStackResult): RawMetadata {
+    private fun RawMetadata.forStackRender(stackResult: RawStackResult, frameCount: Int): RawMetadata {
         if (!stackResult.isNormalizedSensorData) {
-            return this
+            return this.copy(frameCount = frameCount)
         }
         return copy(
             width = stackResult.width,
@@ -1986,6 +1986,7 @@ object GalleryManager {
             lensShadingMap = null,
             lensShadingMapWidth = 0,
             lensShadingMapHeight = 0,
+            frameCount = frameCount
         )
     }
 
