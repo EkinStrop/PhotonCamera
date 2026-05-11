@@ -1,0 +1,36 @@
+{
+    "id": "xpan",
+    "name": {
+        "en": "XPAN",
+        "zh": "XPAN"
+    },
+    "version": 1,
+    "editable": true,
+    "layout": {
+        "position": "BOTTOM",
+        "backgroundColor": "#FFFFFF",
+        "lineSpacing": 16,
+        "height": 400,
+        "padding": 0
+    },
+    "elements": [
+        {
+            "type": "logo",
+            "logoType": "BRAND",
+            "overrideSource": "hasselblad_l",
+            "alignment": "CENTER",
+            "light": false,
+            "size": 48,
+            "line": 0
+        },
+        {
+            "type": "logo",
+            "logoType": "BRAND",
+            "overrideSource": "xpan",
+            "alignment": "CENTER",
+            "light": false,
+            "size": 64,
+            "line": 1
+        }
+    ]
+}

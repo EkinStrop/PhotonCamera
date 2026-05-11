@@ -744,13 +744,14 @@ class FrameRenderer(
         "dji" to listOf(R.drawable.ic_brand_dji, R.drawable.ic_brand_dji),
         "fujifilm" to listOf(R.drawable.ic_brand_fujifilm, R.drawable.ic_brand_fujifilm_light),
         "hasselblad" to listOf(R.drawable.ic_brand_hasselblad, R.drawable.ic_brand_hasselblad_light),
-        "hasselblad_l" to listOf(R.drawable.ic_brand_hasselblad_l, R.drawable.ic_brand_hasselblad_l),
+        "hasselblad_l" to listOf(R.drawable.ic_brand_hasselblad_l, R.drawable.ic_brand_hasselblad_l_light),
         "leica" to listOf(R.drawable.ic_brand_leica, R.drawable.ic_brand_leica),
         "nikon" to listOf(R.drawable.ic_brand_nikon, R.drawable.ic_brand_nikon),
         "panasonic" to listOf(R.drawable.ic_brand_panasonic, R.drawable.ic_brand_panasonic_light),
         "olympus" to listOf(R.drawable.ic_brand_olympus, R.drawable.ic_brand_olympus),
         "pentax" to listOf(R.drawable.ic_brand_pentax, R.drawable.ic_brand_pentax),
         "ricoh" to listOf(R.drawable.ic_brand_ricoh, R.drawable.ic_brand_ricoh),
+        "xpan" to listOf(R.drawable.ic_xpan, R.drawable.ic_xpan_light),
     )
 
     private fun getBrandLogoDrawable(brand: String?, light: Boolean = false): Int {

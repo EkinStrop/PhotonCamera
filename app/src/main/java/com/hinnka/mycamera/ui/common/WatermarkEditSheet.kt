@@ -114,6 +114,7 @@ fun WatermarkEditSheet(
                 "olympus" to "Olympus",
                 "pentax" to "Pentax",
                 "ricoh" to "Ricoh",
+                "xpan" to "XPAN",
             )
 
             val effectiveLogo = properties["LOGO"]

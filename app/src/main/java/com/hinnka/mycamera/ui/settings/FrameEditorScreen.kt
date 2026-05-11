@@ -1539,7 +1539,8 @@ private fun logoSourceOptions(): List<Pair<String?, String>> = listOf(
     "panasonic" to "Panasonic",
     "olympus" to "Olympus",
     "pentax" to "Pentax",
-    "ricoh" to "Ricoh"
+    "ricoh" to "Ricoh",
+    "xpan" to "XPAN",
 )
 
 @Composable
