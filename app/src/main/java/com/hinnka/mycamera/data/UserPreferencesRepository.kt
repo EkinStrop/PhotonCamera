@@ -60,6 +60,7 @@ data class UserPreferences(
     val rawNlmNoiseFactor: Float = 0f,
     val rawExposureCompensation: Float = 0f,
     val rawAutoExposure: Boolean = true,
+    val rawDROEnabled: Boolean = false,
     val rawBlackPointCorrection: Float = 0f,
     val rawWhitePointCorrection: Float = 0f,
     val rawAutoWhiteBalanceEstimate: Boolean = false,
@@ -156,6 +157,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val RAW_NLM_NOISE_FACTOR_KEY = floatPreferencesKey("raw_nlm_noise_factor")
         private val RAW_EXPOSURE_COMPENSATION_KEY = floatPreferencesKey("raw_exposure_compensation")
         private val RAW_AUTO_EXPOSURE_KEY = booleanPreferencesKey("raw_auto_exposure")
+        private val RAW_DRO_ENABLED_KEY = booleanPreferencesKey("raw_dro_enabled")
         private val RAW_BLACK_POINT_CORRECTION_KEY = floatPreferencesKey("raw_black_point_correction")
         private val RAW_WHITE_POINT_CORRECTION_KEY = floatPreferencesKey("raw_white_point_correction")
         private val RAW_AUTO_WHITE_BALANCE_ESTIMATE_KEY = booleanPreferencesKey("raw_auto_white_balance_estimate")
@@ -261,6 +263,7 @@ class UserPreferencesRepository(private val context: Context) {
                 rawNlmNoiseFactor = preferences[RAW_NLM_NOISE_FACTOR_KEY] ?: 0f,
                 rawExposureCompensation = preferences[RAW_EXPOSURE_COMPENSATION_KEY] ?: 0f,
                 rawAutoExposure = preferences[RAW_AUTO_EXPOSURE_KEY] ?: true,
+                rawDROEnabled = preferences[RAW_DRO_ENABLED_KEY] ?: false,
                 rawBlackPointCorrection = preferences[RAW_BLACK_POINT_CORRECTION_KEY] ?: 0f,
                 rawWhitePointCorrection = preferences[RAW_WHITE_POINT_CORRECTION_KEY] ?: 0f,
                 rawAutoWhiteBalanceEstimate = preferences[RAW_AUTO_WHITE_BALANCE_ESTIMATE_KEY] ?: false,
@@ -544,6 +547,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveRawAutoExposure(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[RAW_AUTO_EXPOSURE_KEY] = enabled
+        }
+    }
+
+    suspend fun updateRawDROEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_DRO_ENABLED_KEY] = enabled
         }
     }
 

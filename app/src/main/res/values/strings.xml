@@ -658,6 +658,8 @@
     <string name="settings_raw_exposure_compensation">Exposure Compensation</string>
     <string name="settings_raw_auto_exposure">Auto Exposure</string>
     <string name="settings_raw_auto_exposure_description">Automatically meters RAW linear data during development and applies exposure compensation.</string>
+    <string name="settings_raw_dro">Dynamic Range Optimization</string>
+    <string name="settings_raw_dro_description">Intelligently lifts shadows while protecting highlights in high-contrast scenes.</string>
     <string name="settings_raw_metering_center_weight">RAW Metering Center Weight</string>
     <string name="settings_raw_metering_center_weight_description">Lower values are closer to evaluative metering; higher values tighten and emphasize the center area.</string>
     <string name="settings_raw_black_point_correction">Black Point Correction</string>

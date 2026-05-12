@@ -16,14 +16,21 @@ object MeteringSystem {
     private const val DISPLAY_TARGET_LUMA = 0.46f
 
 
+    data class MeteringResult(
+        val meteredEv: Float,
+        val dynamicRangeGap: Float,
+        val avgLuma: Float,
+        val p998: Float
+    )
+
     fun analyzeRenderedExposureEv(
         byteBuffer: ByteBuffer,
         width: Int,
         height: Int,
         weightBuffer: ByteBuffer? = null // Optional weight mask (e.g. depth map)
-    ): Float {
+    ): MeteringResult {
         val pixelCount = width * height
-        if (pixelCount == 0) return 0f
+        if (pixelCount == 0) return MeteringResult(0f, 0f, 0f, 0f)
 
         val lumas = FloatArray(pixelCount)
         var weightedLumaSum = 0f
@@ -93,9 +100,14 @@ object MeteringSystem {
 
         val meteredEv = log2(adaptiveGain.coerceIn(0.25f, 4.0f))
         
-        PLog.d("MeteringSystem", "Smart AE: p998=$p998 avg=$avgLuma midToneGain=$midToneGain highlightAnchorGain=$highlightAnchorGain gain=$adaptiveGain ev=$meteredEv")
+        PLog.d("MeteringSystem", "Smart AE: p998=$p998 avg=$avgLuma midToneGain=$midToneGain highlightAnchorGain=$highlightAnchorGain gain=$adaptiveGain ev=$meteredEv gap=$dynamicRangeGap")
         
-        return meteredEv.coerceIn(-2f, 2f)
+        return MeteringResult(
+            meteredEv = meteredEv.coerceIn(-2f, 2f),
+            dynamicRangeGap = dynamicRangeGap,
+            avgLuma = avgLuma,
+            p998 = p998
+        )
     }
 
     private fun percentile(sortedValues: FloatArray, percentile: Float): Float {

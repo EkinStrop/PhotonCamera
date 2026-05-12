@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.media.Image
 import android.opengl.*
+import android.util.Log
 import com.hinnka.mycamera.data.ContentRepository
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.ml.SharedDepthEstimator
@@ -26,6 +27,8 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 import android.opengl.Matrix as GlMatrix
 import androidx.core.graphics.createBitmap
+import kotlin.math.ln
+import kotlin.math.pow
 
 /**
  * RAW 图像解马赛克处理器
@@ -101,12 +104,14 @@ class RawDemosaicProcessor {
             lensShadingMap = dngRawData.lensShadingMap,
             lensShadingMapWidth = dngRawData.lensShadingMapWidth,
             lensShadingMapHeight = dngRawData.lensShadingMapHeight,
-            baselineExposure = if (dngRawData.baselineExposure == 0f) (baseMetadata?.baselineExposure ?: 0f) else dngRawData.baselineExposure,
+            baselineExposure = if (dngRawData.baselineExposure == 0f) (baseMetadata?.baselineExposure
+                ?: 0f) else dngRawData.baselineExposure,
             exposureBias = if (dngRawData.exposureBias == 0f) {
                 if (baseMetadata != null && baseMetadata.exposureBias != 0f) baseMetadata.exposureBias else exposureBias
             } else dngRawData.exposureBias,
             iso = if (dngRawData.iso == 0) (baseMetadata?.iso ?: 100) else dngRawData.iso,
-            shutterSpeed = if (dngRawData.shutterSpeed == 0L) (baseMetadata?.shutterSpeed ?: 0L) else dngRawData.shutterSpeed,
+            shutterSpeed = if (dngRawData.shutterSpeed == 0L) (baseMetadata?.shutterSpeed
+                ?: 0L) else dngRawData.shutterSpeed,
             aperture = if (dngRawData.aperture == 0f) (baseMetadata?.aperture ?: 0f) else dngRawData.aperture,
             activeArray = activeArray,
             noiseProfile = dngRawData.noiseProfile ?: baseMetadata?.noiseProfile ?: floatArrayOf(0f, 0f),
@@ -273,6 +278,7 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawDROEnabled: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         rawDcpId: String? = null,
@@ -297,6 +303,7 @@ class RawDemosaicProcessor {
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
+                rawDROEnabled = rawDROEnabled,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 rawDcpId = rawDcpId,
@@ -329,6 +336,7 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawDROEnabled: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
@@ -358,6 +366,7 @@ class RawDemosaicProcessor {
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
+                rawDROEnabled = rawDROEnabled,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 chromaDenoiseValue = chromaDenoiseValue,
@@ -382,6 +391,7 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawDROEnabled: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         rawDcpId: String? = null,
@@ -406,6 +416,7 @@ class RawDemosaicProcessor {
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
+                rawDROEnabled = rawDROEnabled,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 rawDcpId = rawDcpId,
@@ -439,6 +450,7 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawDROEnabled: Boolean = false,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
@@ -534,7 +546,8 @@ class RawDemosaicProcessor {
                     srcBuf.position(0)
                     val src = srcBuf.asShortBuffer()
                     val dstSize = newWidth * newHeight * 3 * 2 // 3 channels * 2 bytes
-                    val dstByteBuf = com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(dstSize.toLong())?.order(java.nio.ByteOrder.nativeOrder())
+                    val dstByteBuf = com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(dstSize.toLong())
+                        ?.order(java.nio.ByteOrder.nativeOrder())
                         ?: throw OutOfMemoryError("Failed to allocate native direct buffer")
                     val dst = dstByteBuf.asShortBuffer()
 
@@ -601,24 +614,38 @@ class RawDemosaicProcessor {
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 dcpRenderPlan = resolvedDcpRenderPlan
             )
-            val autoExposureEv = if (rawAutoExposure) {
-                resolveRawAutoExposureEv(
+            var shadowLift = 0f
+            var effectiveExposureCompensation = rawExposureCompensation
+            if (rawAutoExposure) {
+                val meteringResult = resolveRawAutoExposureEv(
                     context = context,
                     metadata = actualMetadata,
                     sourceTextureId = demosaicTextureId,
                     dcpRenderPlan = resolvedDcpRenderPlan
                 )
-            } else {
-                0f
-            }
-            if (autoExposureEv != 0f) {
-                renderLinearPass(
-                    metadata = actualMetadata,
-                    rawExposureCompensation = rawExposureCompensation + autoExposureEv,
-                    rawBlackPointCorrection = rawBlackPointCorrection,
-                    rawWhitePointCorrection = rawWhitePointCorrection,
-                    dcpRenderPlan = resolvedDcpRenderPlan
-                )
+                val autoExposureEv = meteringResult.meteredEv
+                if (rawDROEnabled && autoExposureEv > 0f && meteringResult.dynamicRangeGap > 1.2f) {
+                    val maxLinearGainEv = ln(1.0f / meteringResult.p998.coerceAtLeast(0.01f)) / ln(2.0f)
+                    val linearEv = autoExposureEv.coerceAtMost(maxLinearGainEv).coerceAtLeast(0f)
+                    val remainingEv = autoExposureEv - linearEv
+                    shadowLift = ((2.0f.pow(remainingEv) - 1.0f) / 0.67f).coerceIn(0f, 1.0f)
+
+                    PLog.d(TAG, "Raw DRO enabled linearEv = $linearEv shadowLift=$shadowLift")
+
+                    effectiveExposureCompensation += linearEv
+                } else {
+                    effectiveExposureCompensation += autoExposureEv
+                }
+
+                if (effectiveExposureCompensation != rawExposureCompensation) {
+                    renderLinearPass(
+                        metadata = actualMetadata,
+                        rawExposureCompensation = effectiveExposureCompensation,
+                        rawBlackPointCorrection = rawBlackPointCorrection,
+                        rawWhitePointCorrection = rawWhitePointCorrection,
+                        dcpRenderPlan = resolvedDcpRenderPlan
+                    )
+                }
             }
             // rawTextureId 已被 linearPass 消费，提前释放 GPU 显存
             if (rawTextureId != 0) {
@@ -702,7 +729,12 @@ class RawDemosaicProcessor {
             // 5. 第二步：Combined Pass (HDR Linear -> LDR sRGB + LUT)
             setupCombinedFramebuffer(actualWidth, actualHeight)
             val combinedStart = System.currentTimeMillis()
-            renderCombinedPass(actualMetadata, inputTextureId = outputTexture, dcpRenderPlan = resolvedDcpRenderPlan)
+            renderCombinedPass(
+                metadata = actualMetadata,
+                inputTextureId = outputTexture,
+                dcpRenderPlan = resolvedDcpRenderPlan,
+                shadowLift = shadowLift
+            )
             PLog.d(TAG, "Combined Pass took: ${System.currentTimeMillis() - combinedStart}ms")
             // outputTexture (gfTexId[1]) 已被 combinedPass 消费，提前释放
             if (gfTexId[1] != 0) {
@@ -1011,9 +1043,12 @@ class RawDemosaicProcessor {
 
         gfPass0Program = createGfProgram(vShader, BM3DShaders.PASS0_CHROMA_DENOISE, "BM3D_Pass0")
         nlmPassHProgram = createGfProgram(vShader, BM3DShaders.PASS1_BASIC_ESTIMATE, "BM3D_Pass1")
-        nlmPassVProgram = createGfProgram(vShader, BM3DShaders.PASS2_WIENER,         "BM3D_Pass2")
+        nlmPassVProgram = createGfProgram(vShader, BM3DShaders.PASS2_WIENER, "BM3D_Pass2")
 
-        PLog.d(TAG, "Denoise programs: BM3D_Pass0=$gfPass0Program BM3D_Pass1=$nlmPassHProgram BM3D_Pass2=$nlmPassVProgram")
+        PLog.d(
+            TAG,
+            "Denoise programs: BM3D_Pass0=$gfPass0Program BM3D_Pass1=$nlmPassHProgram BM3D_Pass2=$nlmPassVProgram"
+        )
     }
 
     private fun setupNLMFramebuffers(width: Int, height: Int) {
@@ -1137,7 +1172,7 @@ class RawDemosaicProcessor {
         val baseNoise = if (noiseBase > 0f) {
             noiseBase * 0.8f
         } else {
-             0.010f * gainSqrt
+            0.010f * gainSqrt
         }
         val noise = baseNoise + gainNoise
 
@@ -1693,7 +1728,11 @@ class RawDemosaicProcessor {
         return dummyDcpToneCurveTextureId
     }
 
-    private fun uploadDcp3DTexture(textureIdProvider: () -> Int, assignTextureId: (Int) -> Unit, table: DcpHueSatMap): Int {
+    private fun uploadDcp3DTexture(
+        textureIdProvider: () -> Int,
+        assignTextureId: (Int) -> Unit,
+        table: DcpHueSatMap
+    ): Int {
         var textureId = textureIdProvider()
         if (textureId == 0) {
             val textures = IntArray(1)
@@ -1743,19 +1782,20 @@ class RawDemosaicProcessor {
     private fun bindDcpCombinedResources(dcpRenderPlan: DcpRenderPlan?) {
         val hueSatMap = dcpRenderPlan?.hueSatMap?.takeIf { it.isValid }
         val lookTable = dcpRenderPlan?.lookTable?.takeIf { it.isValid }
-        val toneCurveLut = dcpRenderPlan?.toneCurveLut
 
         PLog.d(TAG, "bindDcpCombinedResources: hueSatMap=${hueSatMap?.values?.size}")
         PLog.d(TAG, "bindDcpCombinedResources: lookTable=${lookTable?.values?.size}")
-        PLog.d(TAG, "bindDcpCombinedResources: toneCurveLut=${toneCurveLut?.size}")
 
         GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatTexture"), 2)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableTexture"), 3)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveTexture"), 4)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEnabled"), if (hueSatMap != null) 1 else 0)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEnabled"), if (lookTable != null) 1 else 0)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveEnabled"), if (toneCurveLut != null) 1 else 0)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveSize"), toneCurveLut?.size?.toFloat() ?: 0f)
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEnabled"),
+            if (hueSatMap != null) 1 else 0
+        )
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEnabled"),
+            if (lookTable != null) 1 else 0
+        )
 
         if (hueSatMap != null) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
@@ -1814,19 +1854,6 @@ class RawDemosaicProcessor {
                 DcpHueSatMap.ENCODING_LINEAR
             )
         }
-
-        if (toneCurveLut != null) {
-            GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
-            uploadDcpToneCurveTexture(toneCurveLut)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, dcpToneCurveTextureId)
-            GLES30.glUniform1f(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpToneCurveSize"),
-                toneCurveLut.size.toFloat()
-            )
-        } else {
-            GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, ensureDummyDcpToneCurveTexture())
-        }
         checkGlError("bindDcpCombinedResources")
     }
 
@@ -1839,9 +1866,21 @@ class RawDemosaicProcessor {
         inputTextureId: Int = demosaicTextureId,
         dcpRenderPlan: DcpRenderPlan? = null,
         viewportWidth: Int = metadata.width,
-        viewportHeight: Int = metadata.height
+        viewportHeight: Int = metadata.height,
+        shadowLift: Float = 0f
     ) {
-        val curveLut = ACR3Curve.samples()
+        val baseCurve = dcpRenderPlan?.toneCurveLut ?: ACR3Curve.samples()
+        val combinedLut = if (shadowLift > 0f) {
+            FloatArray(baseCurve.size) { i ->
+                val v = baseCurve[i]
+                val liftBase = v.toDouble().pow(0.75).toFloat() - v
+                val blackToe = (v / 0.01f).coerceAtMost(1.0f)
+                val lift = shadowLift * liftBase * (1.0f - v) * blackToe
+                (v + lift * 1.5f).coerceIn(0f, 1f)
+            }
+        } else {
+            baseCurve
+        }
         val outputTransform = computeWorkingToOutputTransform(ColorSpace.ProPhoto, ColorSpace.SRGB)
 
         GLES30.glUseProgram(combinedProgram)
@@ -1858,12 +1897,12 @@ class RawDemosaicProcessor {
         GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uInputTexture"), 0)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-        uploadCurveTexture(curveLut)
+        uploadCurveTexture(combinedLut)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, curveTextureId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uCurveTexture"), 1)
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(combinedProgram, "uCurveSize"),
-            curveLut.size.toFloat()
+            combinedLut.size.toFloat()
         )
         GLES30.glUniform1i(
             GLES30.glGetUniformLocation(combinedProgram, "uCurveEnabled"),
@@ -1974,15 +2013,15 @@ class RawDemosaicProcessor {
             val row = index / 3
             val col = index % 3
             lhs[row * 3] * rhs[col] +
-                lhs[row * 3 + 1] * rhs[3 + col] +
-                lhs[row * 3 + 2] * rhs[6 + col]
+                    lhs[row * 3 + 1] * rhs[3 + col] +
+                    lhs[row * 3 + 2] * rhs[6 + col]
         }
     }
 
     private fun invertMatrix3x3(matrix: FloatArray): FloatArray? {
         val det = matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7]) -
-            matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6]) +
-            matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6])
+                matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6]) +
+                matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6])
 
         if (abs(det) < 1e-12f) {
             PLog.e(TAG, "Matrix is singular, cannot invert")
@@ -2137,7 +2176,7 @@ class RawDemosaicProcessor {
         metadata: RawMetadata,
         sourceTextureId: Int,
         dcpRenderPlan: DcpRenderPlan?
-    ): Float {
+    ): MeteringSystem.MeteringResult {
         val meteringWidth = minOf(metadata.width, 256).coerceAtLeast(1)
         val meteringHeight = minOf(metadata.height, 256).coerceAtLeast(1)
         return try {
@@ -2178,13 +2217,13 @@ class RawDemosaicProcessor {
                 wb
             }
 
-            val ev = MeteringSystem.analyzeRenderedExposureEv(
+            val meteringResult = MeteringSystem.analyzeRenderedExposureEv(
                 byteBuffer = buffer,
                 width = meteringWidth,
                 height = meteringHeight,
                 weightBuffer = weightBuffer
             )
-            
+
             // Clean up temporary bitmaps
             if (depthMap != null && !depthMap.isRecycled) {
                 depthMap.recycle()
@@ -2194,12 +2233,12 @@ class RawDemosaicProcessor {
             }
             PLog.d(
                 TAG,
-                "RAW auto exposure: renderedEv=$ev"
+                "RAW auto exposure: renderedEv=${meteringResult.meteredEv} gap=${meteringResult.dynamicRangeGap}"
             )
-            ev
+            meteringResult
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to resolve RAW auto exposure", e)
-            0f
+            MeteringSystem.MeteringResult(0f, 0f, 0f, 0f)
         }
     }
 
@@ -2355,13 +2394,14 @@ class RawDemosaicProcessor {
 
         // --- 降级路径：直接分配 ByteBuffer（Java 堆）---
         val pixelBuffer = try {
-            com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())?.order(ByteOrder.nativeOrder())
+            com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())
+                ?.order(ByteOrder.nativeOrder())
                 ?: throw OutOfMemoryError("Failed to allocate native direct buffer")
         } catch (e: OutOfMemoryError) {
             PLog.e(TAG, "OOM allocating pixel buffer ($width x $height, ${pixelSize}B)", e)
             return null
         }
-        
+
         try {
             GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
             GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, pixelBuffer)

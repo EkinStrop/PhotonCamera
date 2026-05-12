@@ -258,6 +258,7 @@ object GalleryMediaStore {
             aiDenoiseStrength = metadata.aiDenoiseStrength,
             rawBlackLevelMode = metadata.rawBlackLevelMode,
             rawCustomBlackLevel = metadata.rawCustomBlackLevel,
+            rawDROEnabled = metadata.rawDROEnabled,
             cameraId = metadata.cameraId
         )
     }
@@ -383,6 +384,7 @@ object GalleryMediaStore {
             aiDenoiseStrength = aiDenoiseStrength,
             rawBlackLevelMode = rawBlackLevelMode,
             rawCustomBlackLevel = rawCustomBlackLevel,
+            rawDROEnabled = rawDROEnabled,
             cameraId = cameraId
         )
     }

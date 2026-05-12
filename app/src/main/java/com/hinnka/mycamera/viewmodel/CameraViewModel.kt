@@ -245,6 +245,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val rawAutoExposure: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.rawAutoExposure }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val rawDROEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.rawDROEnabled }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val rawBlackPointCorrection: StateFlow<Float> = userPreferencesRepository.userPreferences
         .map { it.rawBlackPointCorrection }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
@@ -744,6 +747,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun setRawAutoExposure(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.saveRawAutoExposure(enabled) }
+    }
+    fun setRawDROEnabled(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.updateRawDROEnabled(enabled) }
     }
     fun setRawBlackPointCorrection(value: Float) {
         viewModelScope.launch { userPreferencesRepository.saveRawBlackPointCorrection(value) }
@@ -2702,6 +2708,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
                 rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+                rawDROEnabled = userPrefs?.rawDROEnabled ?: false,
                 rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,
@@ -2966,6 +2973,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
                 rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+                rawDROEnabled = userPrefs?.rawDROEnabled ?: false,
                 rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,

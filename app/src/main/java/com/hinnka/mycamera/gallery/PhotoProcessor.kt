@@ -63,6 +63,11 @@ class PhotoProcessor(
             ?: (userPreferencesRepository.userPreferences.firstOrNull()?.rawAutoExposure ?: true)
     }
 
+    private suspend fun resolveRawDROEnabled(metadata: MediaMetadata): Boolean {
+        return metadata.rawDROEnabled
+            ?: (userPreferencesRepository.userPreferences.firstOrNull()?.rawDROEnabled ?: false)
+    }
+
     suspend fun prepareUltraHdrSource(
         context: Context,
         photoId: String,
@@ -445,6 +450,7 @@ class PhotoProcessor(
             rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
             rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(metadata),
+            rawDROEnabled = resolveRawDROEnabled(metadata),
             sharpeningValue = 0.4f,
             denoiseValue = metadata.rawDenoiseValue,
             rawDcpId = metadata.rawDcpId
@@ -506,6 +512,7 @@ class PhotoProcessor(
             rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
             rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(metadata),
+            rawDROEnabled = resolveRawDROEnabled(metadata),
             denoiseValue = metadata.rawDenoiseValue,
             rawDcpId = metadata.rawDcpId
         )

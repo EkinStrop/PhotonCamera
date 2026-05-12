@@ -137,6 +137,7 @@ fun CameraScreen(
     val rawAutoExposure by viewModel.rawAutoExposure.collectAsState()
     val rawBlackPointCorrection by viewModel.rawBlackPointCorrection.collectAsState()
     val rawWhitePointCorrection by viewModel.rawWhitePointCorrection.collectAsState()
+    val rawDROEnabled by viewModel.rawDROEnabled.collectAsState()
     val multipleExposureState = viewModel.multipleExposureState
     val canStartShutterAnimation by viewModel.canStartShutterAnimation.collectAsState()
     var previewRecipeParamsOverride by remember(currentLutId) { mutableStateOf<ColorRecipeParams?>(null) }
@@ -1184,6 +1185,7 @@ fun CameraScreen(
             rawNlmNoiseFactor = rawNlmNoiseFactor,
             rawExposureCompensation = rawExposureCompensation,
             rawAutoExposure = rawAutoExposure,
+            rawDROEnabled = rawDROEnabled,
             rawBlackPointCorrection = rawBlackPointCorrection,
             rawWhitePointCorrection = rawWhitePointCorrection,
             onSelectDcp = { viewModel.setRawDcpId(it) },
@@ -1192,6 +1194,7 @@ fun CameraScreen(
             onRawNlmNoiseFactorChange = { viewModel.setRawNlmNoiseFactor(it) },
             onRawExposureCompensationChange = { viewModel.setRawExposureCompensation(it) },
             onRawAutoExposureChange = { viewModel.setRawAutoExposure(it) },
+            onRawDROEnabledChange = { viewModel.setRawDROEnabled(it) },
             onRawBlackPointCorrectionChange = { viewModel.setRawBlackPointCorrection(it) },
             onRawWhitePointCorrectionChange = { viewModel.setRawWhitePointCorrection(it) },
             onAdjustmentStart = { },

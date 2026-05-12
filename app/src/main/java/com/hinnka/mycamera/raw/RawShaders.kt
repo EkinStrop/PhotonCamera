@@ -134,14 +134,11 @@ object RawShaders {
         
         uniform sampler2D uInputTexture;
         uniform sampler2D uCurveTexture;
-        uniform sampler2D uDcpToneCurveTexture;
         uniform sampler3D uDcpHueSatTexture;
         uniform sampler3D uDcpLookTableTexture;
         uniform mat3 uOutputTransform;
         uniform float uCurveSize;
-        uniform float uDcpToneCurveSize;
         uniform bool uCurveEnabled;
-        uniform bool uDcpToneCurveEnabled;
         uniform bool uDcpHueSatEnabled;
         uniform bool uDcpLookTableEnabled;
         uniform ivec3 uDcpHueSatDivisions;
@@ -163,23 +160,6 @@ object RawShaders {
                 sampleCurve(color.r),
                 sampleCurve(color.g),
                 sampleCurve(color.b)
-            );
-        }
-
-        float sampleDcpToneCurve(float value) {
-            if (!uDcpToneCurveEnabled || uDcpToneCurveSize <= 1.0) {
-                return value;
-            }
-            float clampedValue = clamp(value, 0.0, 1.0);
-            float coordX = clampedValue * ((uDcpToneCurveSize - 1.0) / uDcpToneCurveSize) + (0.5 / uDcpToneCurveSize);
-            return texture(uDcpToneCurveTexture, vec2(coordX, 0.5)).r;
-        }
-
-        vec3 applyDcpToneCurve(vec3 color) {
-            return vec3(
-                sampleDcpToneCurve(color.r),
-                sampleDcpToneCurve(color.g),
-                sampleDcpToneCurve(color.b)
             );
         }
 
@@ -399,7 +379,7 @@ object RawShaders {
             
             return clamp(sceneLinear * chromaScale, 0.0, 1.0);
         }
-        
+
         void main() {
             vec3 color = texture(uInputTexture, vTexCoord).rgb;
             color = reinhardLocalTonemapping(color);
@@ -410,11 +390,9 @@ object RawShaders {
             if (uDcpLookTableEnabled) {
                 color = applyDcpHsvMap(color, uDcpLookTableTexture, uDcpLookTableDivisions, uDcpLookTableEncoding);
             }
-            if (uDcpToneCurveEnabled) {
-                color = applyDcpToneCurve(color);
-            } else {
-                color = applyCurve(color);
-            }
+            
+            color = applyCurve(color);
+
             color = uOutputTransform * color;
             color = linearToSrgb(color);
 

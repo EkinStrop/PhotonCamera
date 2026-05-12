@@ -105,5 +105,6 @@ data class GalleryMediaEntity(
     val aiDenoiseStrength: Float?,
     val rawBlackLevelMode: String?,
     val rawCustomBlackLevel: Float?,
+    val rawDROEnabled: Boolean?,
     val cameraId: String?
 )

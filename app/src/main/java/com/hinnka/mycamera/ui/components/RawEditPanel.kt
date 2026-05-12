@@ -39,6 +39,7 @@ fun RawEditPanel(
     rawNlmNoiseFactor: Float,
     rawExposureCompensation: Float,
     rawAutoExposure: Boolean,
+    rawDROEnabled: Boolean,
     rawBlackPointCorrection: Float,
     rawWhitePointCorrection: Float,
     onSelectDcp: (String?) -> Unit,
@@ -47,6 +48,7 @@ fun RawEditPanel(
     onRawNlmNoiseFactorChange: (Float) -> Unit,
     onRawExposureCompensationChange: (Float) -> Unit,
     onRawAutoExposureChange: (Boolean) -> Unit,
+    onRawDROEnabledChange: (Boolean) -> Unit,
     onRawBlackPointCorrectionChange: (Float) -> Unit,
     onRawWhitePointCorrectionChange: (Float) -> Unit,
     onAdjustmentStart: () -> Unit,
@@ -80,6 +82,12 @@ fun RawEditPanel(
             description = stringResource(R.string.settings_raw_auto_exposure_description),
             checked = rawAutoExposure,
             onCheckedChange = onRawAutoExposureChange
+        )
+        RawSwitchSettingItem(
+            title = stringResource(R.string.settings_raw_dro),
+            description = stringResource(R.string.settings_raw_dro_description),
+            checked = rawDROEnabled,
+            onCheckedChange = onRawDROEnabledChange
         )
         SliderSettingItem(
             title = stringResource(R.string.settings_raw_exposure_compensation),

@@ -674,6 +674,8 @@
     <string name="settings_raw_exposure_compensation">曝光补偿</string>
     <string name="settings_raw_auto_exposure">自动曝光</string>
     <string name="settings_raw_auto_exposure_description">显影时对 RAW 线性数据自动测光并应用曝光补偿。</string>
+    <string name="settings_raw_dro">动态范围优化</string>
+    <string name="settings_raw_dro_description">在高光比场景中，智能提升阴影细节并保护高光。</string>
     <string name="settings_raw_metering_center_weight">RAW 测光中心权重</string>
     <string name="settings_raw_metering_center_weight_description">数值越低越接近评价测光，越高越接近中央重点测光。</string>
     <string name="settings_raw_black_point_correction">黑点校正</string>

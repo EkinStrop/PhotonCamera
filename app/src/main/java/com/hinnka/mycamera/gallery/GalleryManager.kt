@@ -1181,6 +1181,7 @@ object GalleryManager {
                 rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(context, metadata),
+                rawDROEnabled = metadata.rawDROEnabled ?: false,
                 sharpeningValue = 0.4f,
                 denoiseValue = metadata.rawDenoiseValue,
                 rawDcpId = metadata.rawDcpId
@@ -1740,6 +1741,7 @@ object GalleryManager {
                 rawBlackPointCorrection = metadata.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = metadata.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(context, metadata),
+                rawDROEnabled = metadata.rawDROEnabled ?: false,
                 sharpeningValue = 0.4f,
                 denoiseValue = metadata.rawDenoiseValue,
                 rawDcpId = metadata.rawDcpId
@@ -2654,6 +2656,7 @@ object GalleryManager {
                         rawBlackPointCorrection = updatedMetadata.rawBlackPointCorrection ?: 0f,
                         rawWhitePointCorrection = updatedMetadata.rawWhitePointCorrection ?: 0f,
                         rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(context, updatedMetadata),
+                        rawDROEnabled = updatedMetadata.rawDROEnabled ?: false,
                         sharpeningValue = 0.4f,
                         denoiseValue = updatedMetadata.rawDenoiseValue,
                         rawDcpId = updatedMetadata.rawDcpId,
@@ -2767,6 +2770,7 @@ object GalleryManager {
                     rawBlackPointCorrection = updatedMetadata?.rawBlackPointCorrection ?: 0f,
                     rawWhitePointCorrection = updatedMetadata?.rawWhitePointCorrection ?: 0f,
                     rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(context, updatedMetadata),
+                    rawDROEnabled = (updatedMetadata ?: metadata)?.rawDROEnabled ?: false,
                     sharpeningValue = 0.4f,
                     denoiseValue = (updatedMetadata ?: MediaMetadata()).rawDenoiseValue,
                     rawDcpId = updatedMetadata?.rawDcpId,

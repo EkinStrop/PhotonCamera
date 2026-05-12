@@ -297,6 +297,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private set
     var editRawWhitePointCorrection = MutableStateFlow(0f)
         private set
+    var editRawDROEnabled = MutableStateFlow(false)
+        private set
     var editRawDcpId = MutableStateFlow<String?>(null)
         private set
     var editRawBaselineLutId = MutableStateFlow<String?>(null)
@@ -1565,6 +1567,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editRawAutoExposure.value = metadata.rawAutoExposure ?: true
             editRawBlackPointCorrection.value = metadata.rawBlackPointCorrection ?: 0f
             editRawWhitePointCorrection.value = metadata.rawWhitePointCorrection ?: 0f
+            editRawDROEnabled.value = metadata.rawDROEnabled ?: false
             
             editComputationalAperture.value = metadata.computationalAperture
             editFocusPointX.value = metadata.focusPointX
@@ -1581,6 +1584,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editRawAutoExposure.value = true
             editRawBlackPointCorrection.value = 0f
             editRawWhitePointCorrection.value = 0f
+            editRawDROEnabled.value = false
             editRawDcpId.value = null
             editRawBaselineLutId.value = null
             editComputationalAperture.value = null
@@ -1615,6 +1619,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         editRawAutoExposure.value = true
         editRawBlackPointCorrection.value = 0f
         editRawWhitePointCorrection.value = 0f
+        editRawDROEnabled.value = false
         editRawDcpId.value = null
         editRawBaselineLutId.value = null
     }
@@ -1718,6 +1723,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val autoExposure = editRawAutoExposure.value
         val blackPoint = editRawBlackPointCorrection.value
         val whitePoint = editRawWhitePointCorrection.value
+        val droEnabled = editRawDROEnabled.value
         val dcpId = editRawDcpId.value
         val baselineLutId = editRawBaselineLutId.value
 
@@ -1730,6 +1736,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     rawAutoExposure = autoExposure,
                     rawBlackPointCorrection = blackPoint,
                     rawWhitePointCorrection = whitePoint,
+                    rawDROEnabled = droEnabled,
                     rawDcpId = dcpId,
                     baselineLutId = baselineLutId
                 )
@@ -1761,6 +1768,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun saveRawAutoExposureValue(mediaData: MediaData, enabled: Boolean) {
         editRawAutoExposure.value = enabled
+        persistRawEditMetadata(mediaData)
+    }
+
+    fun saveRawDROEnabledValue(mediaData: MediaData, enabled: Boolean) {
+        editRawDROEnabled.value = enabled
         persistRawEditMetadata(mediaData)
     }
 
