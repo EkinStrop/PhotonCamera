@@ -481,10 +481,12 @@ object Shaders {
     }
 
     float skinBandWeight(float hue, float chroma, float lightness) {
-        // Skin center aligned with Orange (52.0)
-        float hueWeight = 1.0 - smoothstep(radians(10.0), radians(24.0), abs(wrapAngle(hue - radians(52.0))));
-        float chromaWeight = smoothstep(0.015, 0.10, chroma);
-        float lightnessWeight = smoothstep(0.32, 0.52, lightness) * (1.0 - smoothstep(0.78, 0.90, lightness));
+        // Skin center around 45 degrees in Oklab
+        float dist = abs(wrapAngle(hue - radians(45.0)));
+        float hueWeight = 1.0 - smoothstep(radians(15.0), radians(35.0), dist);
+        float chromaWeight = smoothstep(0.01, 0.08, chroma);
+        // Broader lightness range to include darker and lighter skin tones
+        float lightnessWeight = smoothstep(0.20, 0.40, lightness) * (1.0 - smoothstep(0.85, 0.95, lightness));
         return hueWeight * chromaWeight * lightnessWeight;
     }
 
@@ -546,14 +548,19 @@ object Shaders {
                 chromaScale += uLchChromaAdjustments[i + 1] * weight;
                 lightnessShift += uLchLightnessAdjustments[i + 1] * weight * 0.15;
             }
+
+            // Restore the chroma fade-out that was lost during normalization
+            // This prevents harsh banding (断层) when colors transition to neutral
+            float commonChromaWeight = smoothstep(0.005, 0.03, chroma);
+            hueShift *= commonChromaWeight;
+            chromaScale = mix(1.0, chromaScale, commonChromaWeight);
+            lightnessShift *= commonChromaWeight;
         }
 
-        float yellowRatio = max(0.0, lab.z) / (abs(lab.y) + abs(lab.z) + 0.0001);
         float redDominance = max(0.0, lab.y - lab.z);
-        float lipSuppression = 1.0 - smoothstep(0.015, 0.065, redDominance);
-        float skinWeight = skinBandWeight(hue, chroma, lab.x) *
-            smoothstep(0.28, 0.52, yellowRatio) *
-            lipSuppression;
+        // Relax lip suppression slightly to avoid catching ruddy skin
+        float lipSuppression = 1.0 - smoothstep(0.02, 0.08, redDominance);
+        float skinWeight = skinBandWeight(hue, chroma, lab.x) * lipSuppression;
         if (skinWeight > 0.0001) {
             hueShift += uLchHueAdjustments[0] * skinWeight * radians(10.0);
             chromaScale += uLchChromaAdjustments[0] * skinWeight;
