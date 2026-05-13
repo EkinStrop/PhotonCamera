@@ -80,7 +80,7 @@ class FrameRenderer(
 
             FramePosition.BOTH -> {
                 outputWidth = originalBitmap.width + borderWidth * 2
-                outputHeight = originalBitmap.height + frameHeight * 2 + borderWidth * 2
+                outputHeight = originalBitmap.height + frameHeight * 2
             }
 
             FramePosition.OVERLAY -> {
@@ -89,9 +89,9 @@ class FrameRenderer(
             }
 
             FramePosition.BORDER -> {
-                // 四周边框 + 底部信息区
+                // 照片顶部/左右边框 + 底部信息区；水印侧不额外占用 border。
                 outputWidth = originalBitmap.width + borderWidth * 2
-                outputHeight = originalBitmap.height + frameHeight + borderWidth * 2
+                outputHeight = originalBitmap.height + frameHeight + borderWidth
             }
 
             FramePosition.IMAGE -> {
@@ -106,43 +106,8 @@ class FrameRenderer(
 
         // OVERLAY 模式不需要绘制整体背景
         if (layout.position != FramePosition.OVERLAY) {
-            // 首先填充整体背景色（作为边框颜色）
-            val hasBorder = layout.position == FramePosition.BORDER || (layout.position == FramePosition.BOTH && borderWidth > 0)
-            backgroundPaint.color = if (hasBorder) layout.borderColor else layout.backgroundColor
+            backgroundPaint.color = layout.backgroundColor
             canvas.drawRect(0f, 0f, outputWidth.toFloat(), outputHeight.toFloat(), backgroundPaint)
-
-            // 如果有边框，则在文字区域填充背景色
-            if (hasBorder) {
-                backgroundPaint.color = layout.backgroundColor
-                if (layout.position == FramePosition.BORDER) {
-                    val infoTop = (originalBitmap.height + borderWidth).toFloat()
-                    canvas.drawRect(
-                        borderWidth.toFloat(),
-                        infoTop,
-                        (outputWidth - borderWidth).toFloat(),
-                        (outputHeight - borderWidth).toFloat(),
-                        backgroundPaint
-                    )
-                } else if (layout.position == FramePosition.BOTH) {
-                    // 顶部信息区背景
-                    canvas.drawRect(
-                        borderWidth.toFloat(),
-                        borderWidth.toFloat(),
-                        (outputWidth - borderWidth).toFloat(),
-                        (frameHeight + borderWidth).toFloat(),
-                        backgroundPaint
-                    )
-                    // 底部信息区背景
-                    val infoTop = (originalBitmap.height + frameHeight + borderWidth).toFloat()
-                    canvas.drawRect(
-                        borderWidth.toFloat(),
-                        infoTop,
-                        (outputWidth - borderWidth).toFloat(),
-                        (outputHeight - borderWidth).toFloat(),
-                        backgroundPaint
-                    )
-                }
-            }
         }
 
         // 绘制原图
@@ -162,7 +127,7 @@ class FrameRenderer(
 
             FramePosition.BOTH -> {
                 photoLeft = borderWidth.toFloat()
-                photoTop = (frameHeight + borderWidth).toFloat()
+                photoTop = frameHeight.toFloat()
             }
 
             FramePosition.OVERLAY -> {
@@ -175,6 +140,16 @@ class FrameRenderer(
                 photoTop = borderWidth.toFloat()
             }
         }
+        drawPhotoBorder(
+            canvas = canvas,
+            layout = layout,
+            borderWidth = borderWidth,
+            photoLeft = photoLeft,
+            photoTop = photoTop,
+            photoWidth = originalBitmap.width.toFloat(),
+            photoHeight = originalBitmap.height.toFloat(),
+            outputWidth = outputWidth.toFloat()
+        )
         drawPhotoShadowIfNeeded(
             canvas = canvas,
             layout = layout,
@@ -215,19 +190,19 @@ class FrameRenderer(
                 // 顶部
                 drawFrameContent(
                     canvas, template.elementsTop ?: template.elements, metadata, template.layout,
-                    left = (borderWidth + padding).toFloat(),
-                    top = borderWidth.toFloat(),
-                    right = (outputWidth - borderWidth - padding).toFloat(),
-                    bottom = (frameHeight + borderWidth).toFloat(),
+                    left = padding.toFloat(),
+                    top = 0f,
+                    right = (outputWidth - padding).toFloat(),
+                    bottom = frameHeight.toFloat(),
                     scale = scale
                 )
                 // 底部
                 drawFrameContent(
                     canvas, template.elements, metadata, template.layout,
-                    left = (borderWidth + padding).toFloat(),
-                    top = (originalBitmap.height + frameHeight + borderWidth).toFloat(),
-                    right = (outputWidth - borderWidth - padding).toFloat(),
-                    bottom = (outputHeight - borderWidth).toFloat(),
+                    left = padding.toFloat(),
+                    top = (originalBitmap.height + frameHeight).toFloat(),
+                    right = (outputWidth - padding).toFloat(),
+                    bottom = outputHeight.toFloat(),
                     scale = scale
                 )
             }
@@ -265,16 +240,51 @@ class FrameRenderer(
                 val infoTop = (originalBitmap.height + borderWidth).toFloat()
                 drawFrameContent(
                     canvas, template.elements, metadata, template.layout,
-                    left = (borderWidth + padding).toFloat(),
+                    left = padding.toFloat(),
                     top = infoTop,
-                    right = (outputWidth - borderWidth - padding).toFloat(),
-                    bottom = (outputHeight - borderWidth).toFloat(),
+                    right = (outputWidth - padding).toFloat(),
+                    bottom = outputHeight.toFloat(),
                     scale = scale
                 )
             }
         }
 
         return output
+    }
+
+    private fun drawPhotoBorder(
+        canvas: Canvas,
+        layout: FrameLayout,
+        borderWidth: Int,
+        photoLeft: Float,
+        photoTop: Float,
+        photoWidth: Float,
+        photoHeight: Float,
+        outputWidth: Float
+    ) {
+        if (borderWidth <= 0) return
+        if (layout.position != FramePosition.BORDER && layout.position != FramePosition.BOTH) return
+
+        backgroundPaint.color = layout.borderColor
+
+        if (layout.position == FramePosition.BORDER) {
+            canvas.drawRect(0f, 0f, outputWidth, borderWidth.toFloat(), backgroundPaint)
+        }
+
+        canvas.drawRect(
+            0f,
+            photoTop,
+            photoLeft,
+            photoTop + photoHeight,
+            backgroundPaint
+        )
+        canvas.drawRect(
+            photoLeft + photoWidth,
+            photoTop,
+            outputWidth,
+            photoTop + photoHeight,
+            backgroundPaint
+        )
     }
 
     private fun drawPhotoShadowIfNeeded(
