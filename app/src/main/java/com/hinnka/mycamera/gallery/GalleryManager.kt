@@ -224,6 +224,13 @@ object GalleryManager {
         return (hdrWorkCounts[photoId] ?: 0) > 0
     }
 
+    private suspend fun awaitDetailHdrBuildIdle(photoId: String) {
+        val existingJob = detailHdrBuildJobs[photoId] ?: return
+        if (!existingJob.isActive) return
+        PLog.d(TAG, "Waiting for detail HDR build before RAW refresh: $photoId")
+        existingJob.join()
+    }
+
     fun deleteDetailHdrFile(context: Context, photoId: String) {
         val detailFile = getDetailHdrFile(context, photoId)
         val photoFile = getPhotoFile(context, photoId)
@@ -2747,6 +2754,8 @@ object GalleryManager {
     ): Bitmap? {
         return withContext(Dispatchers.IO) {
             try {
+                awaitDetailHdrBuildIdle(photoId)
+
                 val photoDir = getPhotoDir(context, photoId, true)
                 val photoFile = File(photoDir, PHOTO_FILE)
                 val tempPhotoFile = File(photoDir, "raw_refresh_temp.jpg")

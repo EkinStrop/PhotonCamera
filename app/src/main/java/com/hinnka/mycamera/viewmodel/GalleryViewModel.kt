@@ -1762,12 +1762,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         }
                         photoRefreshKeys[mediaData.id] = System.currentTimeMillis()
                     }
-                    GalleryManager.updateThumbnail(
-                        context = context,
-                        photoId = mediaData.id,
-                        photoProcessor = contentRepository.photoProcessor,
-                        metadata = updated
-                    )
                 }
             }
         }
