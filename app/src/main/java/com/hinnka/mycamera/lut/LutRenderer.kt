@@ -2414,7 +2414,7 @@ class LutRenderer : GLSurfaceView.Renderer {
     private fun runAiFocusInputCaptureInternal(sourceTextureId: Int) {
         if (onAiFocusInputAvailable == null || sourceTextureId == 0) return
         val now = System.currentTimeMillis()
-        if (now - lastRunAiFocusInputTime < 60) return
+        if (now - lastRunAiFocusInputTime < 200) return
         lastRunAiFocusInputTime = now
 
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, aiFocusInputFboId)

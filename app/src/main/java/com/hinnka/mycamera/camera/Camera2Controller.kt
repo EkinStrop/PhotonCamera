@@ -93,6 +93,7 @@ class Camera2Controller(private val context: Context) {
         private const val FOCUS_LOCK_SETTLE_FRAMES = 5        // 对焦锁定后等待镜头稳定的帧数
         private const val SCENE_CHANGE_CONFIRM_FRAMES = 3     // 连续 N 帧检测到变化才确认
         private const val AI_SUBJECT_RECENT_MS = 1800L
+        private const val AI_FOCUS_FALLBACK_FRAMES = 6
     }
 
     private val cameraManager: CameraManager by lazy {
@@ -212,6 +213,7 @@ class Camera2Controller(private val context: Context) {
     private var focusLockedReferenceDistance: Float = 0f
     private var focusLockSettleFrames = 0       // 对焦锁定后等待镜头稳定的帧数
     private var sceneChangeFrameCount = 0
+    private var aiFocusFallbackFrames = 0
     private var aiSubjectLastSeenElapsedMs: Long = 0L
     private var aiSubjectLastSeenX: Float = -1f
     private var aiSubjectLastSeenY: Float = -1f
@@ -339,13 +341,26 @@ class Camera2Controller(private val context: Context) {
             if (_state.value.isFocusing) {
                 when (afState) {
                     CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> {
+                        aiFocusFallbackFrames = 0
                         _state.value = _state.value.copy(isFocusing = false, focusSuccess = true)
                         // 只在首次锁定时记录一次，后续 AF 狩猎重新锁定不再覆盖
                         if (!isFocusLockedWaitingForSceneChange) recordFocusLockExposure(result)
                     }
 
                     CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> {
+                        aiFocusFallbackFrames = 0
                         _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
+                        if (!isFocusLockedWaitingForSceneChange) recordFocusLockExposure(result)
+                    }
+                }
+                if (_state.value.isFocusing &&
+                    _state.value.focusPointSource == FocusPointSource.AI &&
+                    aiFocusFallbackFrames > 0
+                ) {
+                    aiFocusFallbackFrames--
+                    if (aiFocusFallbackFrames == 0) {
+                        PLog.d(TAG, "AI focus fallback complete")
+                        _state.value = _state.value.copy(isFocusing = false, focusSuccess = true)
                         if (!isFocusLockedWaitingForSceneChange) recordFocusLockExposure(result)
                     }
                 }
@@ -669,7 +684,7 @@ class Camera2Controller(private val context: Context) {
     fun openCamera(surfaceTexture: SurfaceTexture, preserveVideoRecording: Boolean = false) {
         // 先关闭旧的相机和资源，防止资源泄漏
         closeCamera(preserveVideoRecording = preserveVideoRecording)
-        previewAiFocusProcessor.resetForPreviewRestart()
+        resetAiFocusForCameraOpen()
         val openGeneration = ++cameraOpenGeneration
 
         // 确保在权限已授予后才发现相机（延迟初始化）
@@ -2743,6 +2758,7 @@ class Camera2Controller(private val context: Context) {
         focusLockedReferenceExposureNs = 0L
         focusLockedReferenceDistance = 0f
         focusLockSettleFrames = 0
+        aiFocusFallbackFrames = 0
 
         previewRequestBuilder?.apply {
             set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
@@ -2758,6 +2774,27 @@ class Camera2Controller(private val context: Context) {
     fun cancelSubjectFocus(reason: String) {
         PLog.d(TAG, "Cancel subject focus: $reason")
         restoreContinuousAf()
+    }
+
+    private fun resetAiFocusForCameraOpen() {
+        PLog.d(TAG, "Reset AI focus state for camera open")
+        previewAiFocusProcessor.resetForPreviewRestart()
+        aiSubjectLastSeenElapsedMs = 0L
+        aiSubjectLastSeenX = 0.5f
+        aiSubjectLastSeenY = 0.5f
+        isFocusLockedWaitingForSceneChange = false
+        sceneChangeFrameCount = 0
+        focusLockedReferenceIso = 0
+        focusLockedReferenceExposureNs = 0L
+        focusLockedReferenceDistance = 0f
+        focusLockSettleFrames = 0
+        aiFocusFallbackFrames = 0
+        _state.value = _state.value.copy(
+            focusPoint = null,
+            focusPointSource = FocusPointSource.MANUAL,
+            isFocusing = false,
+            focusSuccess = null
+        )
     }
 
     /**
@@ -2797,6 +2834,7 @@ class Camera2Controller(private val context: Context) {
                 isFocusing = true,
                 focusSuccess = null
             )
+            aiFocusFallbackFrames = if (source == FocusPointSource.AI) AI_FOCUS_FALLBACK_FRAMES else 0
 
             // 根据传感器方向转换坐标
             // 传感器坐标系与UI坐标系可能不同，需要旋转
@@ -3524,7 +3562,6 @@ class Camera2Controller(private val context: Context) {
     fun closeCamera(preserveVideoRecording: Boolean = false) {
         try {
             cameraOpenGeneration++
-            previewAiFocusProcessor.resetForPreviewRestart()
             val keepVideoRecording = preserveVideoRecording && _state.value.videoRecordingState.isRecording
             if (keepVideoRecording) {
                 PLog.d(TAG, "Closing camera while keeping active video recording")

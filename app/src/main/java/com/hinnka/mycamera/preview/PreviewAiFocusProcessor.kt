@@ -26,7 +26,8 @@ class PreviewAiFocusProcessor(private val context: Context) {
         private const val PERSON_PRIORITY = 3
         private const val FACE_REFINEMENT_PRIORITY = 4
         private const val FACE_REFINEMENT_SMOOTHING = 0.65f
-        private const val FACE_HOLD_MS = 700L
+        private const val FACE_HOLD_MS = 250L
+        private const val FACE_WITH_PERSON_SCORE_THRESHOLD = 0.2f
         private const val PROCESSING_STALE_MS = 2_000L
     }
 
@@ -70,6 +71,8 @@ class PreviewAiFocusProcessor(private val context: Context) {
     private var lastRefinedFaceLabel = ""
     private var heldFaceCandidate: FocusCandidate? = null
     private var heldFaceTimeMs = 0L
+    private var lastFaceDetectTimeMs = 0L
+    private var lastFaceDetectorUseTimeMs = 0L
     var onFocusTarget: ((FocusTarget) -> Unit)? = null
     var onTargetSeen: ((FocusTarget) -> Unit)? = null
     var onTargetLost: (() -> Unit)? = null
@@ -81,9 +84,6 @@ class PreviewAiFocusProcessor(private val context: Context) {
             try {
                 StartupTrace.mark("PreviewAiFocusProcessor.prewarm start")
                 SharedYoloXObjectDetector.prewarm(context)
-                if (shouldDetectFaceFocus()) {
-                    SharedFaceDetLiteFocusDetector.prewarm(context)
-                }
                 isPrewarmed = true
                 StartupTrace.mark("PreviewAiFocusProcessor.prewarm end")
             } catch (e: Exception) {
@@ -158,7 +158,6 @@ class PreviewAiFocusProcessor(private val context: Context) {
     }
 
     fun release() {
-        resetForPreviewRestart()
         scope.launch {
             SharedYoloXObjectDetector.release()
             SharedFaceDetLiteFocusDetector.release()
@@ -175,6 +174,8 @@ class PreviewAiFocusProcessor(private val context: Context) {
         lastFocusX = -1f
         lastFocusY = -1f
         lastFocusTimeMs = 0L
+        lastFaceDetectTimeMs = 0L
+        lastFaceDetectorUseTimeMs = 0L
         resetFaceRefinementSmoothing()
     }
 
@@ -182,10 +183,20 @@ class PreviewAiFocusProcessor(private val context: Context) {
         bitmap: Bitmap,
         detections: List<YoloXObjectDetector.Detection>,
     ): List<FocusCandidate> {
-        val candidates = detections.map { it.toFocusCandidate() }.toMutableList()
+        val personOnlyUsesFace = shouldDetectFaceFocus()
+        val candidates = detections
+            .filterNot { personOnlyUsesFace && it.priority == PERSON_PRIORITY }
+            .map { it.toFocusCandidate() }
+            .toMutableList()
         val personDetections = detections.filter { it.priority == PERSON_PRIORITY }
-        if (shouldDetectFaceFocus() && personDetections.isNotEmpty()) {
-            val faceFocus = SharedFaceDetLiteFocusDetector.detect(context, bitmap, scoreThreshold)
+        if (personOnlyUsesFace && personDetections.isNotEmpty()) {
+            lastFaceDetectTimeMs = System.currentTimeMillis()
+            lastFaceDetectorUseTimeMs = lastFaceDetectTimeMs
+            val faceFocus = SharedFaceDetLiteFocusDetector.detect(
+                context = context,
+                bitmap = bitmap,
+                minScore = FACE_WITH_PERSON_SCORE_THRESHOLD,
+            )
             if (faceFocus != null && faceFocus.isAttachedToPerson(personDetections)) {
                 val faceCandidate = faceFocus.toFocusCandidate().smoothedFaceRefinement()
                 rememberHeldFaceCandidate(faceCandidate)
@@ -199,7 +210,8 @@ class PreviewAiFocusProcessor(private val context: Context) {
                 PLog.d(TAG, "AI face focus missing: persons=${personDetections.size} threshold=$scoreThreshold")
             }*/
             if (faceFocus == null || !faceFocus.isAttachedToPerson(personDetections)) {
-                getHeldFaceCandidate(personDetections)?.let { candidates += it }
+                val heldFace = getHeldFaceCandidate(personDetections)
+                heldFace?.let { candidates += it }
             }
         } else {
             clearHeldFaceCandidate()
