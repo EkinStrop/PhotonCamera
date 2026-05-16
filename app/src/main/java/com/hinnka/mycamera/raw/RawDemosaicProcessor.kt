@@ -618,6 +618,7 @@ class RawDemosaicProcessor {
                     context = context,
                     metadata = actualMetadata,
                     sourceTextureId = demosaicTextureId,
+                    rawDROMode = rawDROMode,
                     dcpRenderPlan = resolvedDcpRenderPlan
                 )
                 val autoExposureEv = meteringResult.meteredEv
@@ -2186,6 +2187,7 @@ class RawDemosaicProcessor {
         context: Context,
         metadata: RawMetadata,
         sourceTextureId: Int,
+        rawDROMode: DROMode,
         dcpRenderPlan: DcpRenderPlan?
     ): MeteringSystem.MeteringResult {
         val meteringWidth = minOf(metadata.width, 256).coerceAtLeast(1)
@@ -2232,7 +2234,8 @@ class RawDemosaicProcessor {
                 byteBuffer = buffer,
                 width = meteringWidth,
                 height = meteringHeight,
-                weightBuffer = weightBuffer
+                weightBuffer = weightBuffer,
+                droMode = rawDROMode
             )
 
             // Clean up temporary bitmaps

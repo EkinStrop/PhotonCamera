@@ -27,7 +27,8 @@ object MeteringSystem {
         byteBuffer: ByteBuffer,
         width: Int,
         height: Int,
-        weightBuffer: ByteBuffer? = null // Optional weight mask (e.g. depth map)
+        weightBuffer: ByteBuffer? = null, // Optional weight mask (e.g. depth map)
+        droMode: RawProcessingPreferences.DROMode = RawProcessingPreferences.DROMode.OFF
     ): MeteringResult {
         val pixelCount = width * height
         if (pixelCount == 0) return MeteringResult(0f, 0f, 0f, 0f)
@@ -63,14 +64,15 @@ object MeteringSystem {
                     }
                 }
 
-                val finalWeight = spatialWeight * depthWeight
-
                 val r = (byteBuffer.get().toInt() and 0xFF) / 255f
                 val g = (byteBuffer.get().toInt() and 0xFF) / 255f
                 val b = (byteBuffer.get().toInt() and 0xFF) / 255f
                 byteBuffer.get() // skip alpha
 
                 val luma = r * 0.2126f + g * 0.7152f + b * 0.0722f
+                val highlightWeight = calculateHighlightWeight(luma, droMode)
+                val finalWeight = spatialWeight * depthWeight * highlightWeight
+
                 val idx = y * width + x
                 lumas[idx] = luma
 
@@ -100,7 +102,7 @@ object MeteringSystem {
 
         val meteredEv = log2(adaptiveGain.coerceIn(0.25f, 4.0f))
         
-        PLog.d("MeteringSystem", "Smart AE: p998=$p998 avg=$avgLuma midToneGain=$midToneGain highlightAnchorGain=$highlightAnchorGain gain=$adaptiveGain ev=$meteredEv gap=$dynamicRangeGap")
+        PLog.d("MeteringSystem", "Smart AE: dro=$droMode p998=$p998 avg=$avgLuma midToneGain=$midToneGain highlightAnchorGain=$highlightAnchorGain gain=$adaptiveGain ev=$meteredEv gap=$dynamicRangeGap")
         
         return MeteringResult(
             meteredEv = meteredEv.coerceIn(-2f, 2f),
@@ -121,6 +123,24 @@ object MeteringSystem {
 
     private fun log2(value: Float): Float {
         return (ln(value.toDouble()) / ln(2.0)).toFloat()
+    }
+
+    private fun calculateHighlightWeight(
+        luma: Float,
+        droMode: RawProcessingPreferences.DROMode
+    ): Float {
+        if (!droMode.isEnabled) {
+            return 1f
+        }
+
+        val minWeight = when (droMode) {
+            RawProcessingPreferences.DROMode.OFF -> 1f
+            RawProcessingPreferences.DROMode.DR100 -> 0.5f
+            RawProcessingPreferences.DROMode.DR200 -> 0.25f
+            RawProcessingPreferences.DROMode.DR400 -> 0.12f
+        }
+        val highlightFraction = smoothStep(0.65f, 0.95f, luma)
+        return lerp(1f, minWeight, highlightFraction)
     }
 
     private fun lerp(start: Float, end: Float, fraction: Float): Float {
