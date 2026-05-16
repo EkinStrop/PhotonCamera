@@ -351,7 +351,11 @@
     <string name="export_lut_cube">匯出LUT</string>
     <string name="copy">複製</string>
     <string name="copy_lut_dialog_title">複製濾鏡</string>
+    <string name="copy_frame_dialog_title">複製邊框</string>
     <string name="copy_suffix"> (副本)</string>
+    <string name="export_frame_json">匯出邊框</string>
+    <string name="frame_export_success">邊框匯出成功</string>
+    <string name="frame_export_failed">邊框匯出失敗</string>
     <string name="edit_category">編輯分類</string>
     <string name="batch_edit_category">批次編輯分類</string>
     <string name="sort_categories">分類排序</string>

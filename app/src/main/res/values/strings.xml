@@ -472,7 +472,11 @@
     <string name="export_lut_cube">Export LUT</string>
     <string name="copy">Copy</string>
     <string name="copy_lut_dialog_title">Copy LUT</string>
+    <string name="copy_frame_dialog_title">Copy Frame</string>
     <string name="copy_suffix"> (Copy)</string>
+    <string name="export_frame_json">Export Frame</string>
+    <string name="frame_export_success">Frame exported successfully</string>
+    <string name="frame_export_failed">Failed to export frame</string>
     <string name="edit_category">Edit Category</string>
     <string name="batch_edit_category">Batch Edit Category</string>
     <string name="sort_categories">Sort Categories</string>

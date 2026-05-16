@@ -17,6 +17,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -262,6 +263,84 @@ class CustomImportManager(private val context: Context) {
             PLog.e(TAG, "Failed to import frame", e)
             null
         }
+    }
+
+    /**
+     * 复制边框样式。
+     *
+     * 内置边框会从 assets 读取模板，自定义边框会从私有目录读取模板。若模板引用了私有目录内的图片边框资源，
+     * 会一并复制图片文件并把 imagePath 改为副本路径。
+     */
+    fun copyFrame(frame: com.hinnka.mycamera.frame.FrameInfo, copyName: String): String? {
+        return try {
+            val frameId = "custom_${UUID.randomUUID()}"
+            val sourceTemplate = if (frame.isBuiltIn) {
+                FrameTemplateParser.parseFromAssets(context, frame.path)
+            } else {
+                FrameTemplateParser.parseFromFile(frame.path)
+            } ?: return null
+
+            val copiedLayout = sourceTemplate.layout.imagePath?.let { imagePath ->
+                copyCustomFrameImageIfNeeded(imagePath, frameId)
+            }?.let { copiedImagePath ->
+                sourceTemplate.layout.copy(imagePath = copiedImagePath)
+            } ?: sourceTemplate.layout
+
+            val copiedTemplate = sourceTemplate.copy(
+                id = frameId,
+                nameMap = mapOf("en" to copyName, "zh" to copyName),
+                layout = copiedLayout
+            )
+
+            val validationErrors = FrameTemplateParser.validateTemplate(copiedTemplate)
+            if (validationErrors.isNotEmpty()) {
+                PLog.e(TAG, "Copy frame failed, invalid fields: $validationErrors")
+                return null
+            }
+
+            val frameConfigFile = File(customFrameDir, "$frameId.json")
+            frameConfigFile.writeText(FrameTemplateParser.serializeTemplate(copiedTemplate))
+            saveFrameToConfig(frameId, copiedTemplate.nameMap, frameConfigFile.name)
+
+            PLog.d(TAG, "Frame copied successfully: $frameId ($copyName)")
+            frameId
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to copy frame", e)
+            null
+        }
+    }
+
+    fun exportFrameJson(frame: com.hinnka.mycamera.frame.FrameInfo): ByteArray? {
+        return try {
+            val json = if (frame.isBuiltIn) {
+                context.assets.open(frame.path).use { input ->
+                    input.bufferedReader().use { it.readText() }
+                }
+            } else {
+                File(frame.path).takeIf { it.exists() }?.readText() ?: return null
+            }
+            json.toByteArray(Charsets.UTF_8)
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to export frame JSON: ${frame.id}", e)
+            null
+        }
+    }
+
+    private fun copyCustomFrameImageIfNeeded(imagePath: String, frameId: String): String? {
+        val sourceFile = File(imagePath)
+        if (!sourceFile.exists() || sourceFile.parentFile != customFrameDir) {
+            return imagePath
+        }
+
+        val extension = sourceFile.extension.takeIf { it.isNotBlank() } ?: "png"
+        val imageFileName = "${frameId}_image.${extension.lowercase(Locale.US)}"
+        val copiedFile = File(customFrameDir, imageFileName)
+        sourceFile.inputStream().use { input ->
+            copiedFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        return copiedFile.absolutePath
     }
 
     fun importDcp(uri: Uri, displayName: String? = null): String? {

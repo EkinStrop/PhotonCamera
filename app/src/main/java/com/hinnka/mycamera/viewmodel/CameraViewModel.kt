@@ -2263,6 +2263,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 复制边框并把副本插入到原边框后面。
+     */
+    fun copyFrame(frame: FrameInfo, copyName: String) {
+        viewModelScope.launch {
+            val newFrameId = withContext(Dispatchers.IO) {
+                contentRepository.getCustomImportManager().copyFrame(frame, copyName)
+            }
+            if (newFrameId != null) {
+                withContext(Dispatchers.IO) {
+                    val currentOrder = userPreferencesRepository.userPreferences.first().frameOrder.toMutableList()
+                    if (currentOrder.isEmpty()) {
+                        val allIds = availableFrameList.map { it.id }.toMutableList()
+                        val index = allIds.indexOf(frame.id)
+                        if (index != -1) {
+                            allIds.add(index + 1, newFrameId)
+                        } else {
+                            allIds.add(newFrameId)
+                        }
+                        userPreferencesRepository.saveFrameOrder(allIds)
+                    } else {
+                        val index = currentOrder.indexOf(frame.id)
+                        if (index != -1) {
+                            currentOrder.add(index + 1, newFrameId)
+                        } else {
+                            currentOrder.add(newFrameId)
+                        }
+                        userPreferencesRepository.saveFrameOrder(currentOrder)
+                    }
+                    contentRepository.refreshCustomContent()
+                }
+            }
+        }
+    }
+
     fun setAiFocusTargetMode(mode: AiFocusTargetMode) {
         viewModelScope.launch {
             userPreferencesRepository.saveAiFocusTargetMode(mode)
@@ -3497,6 +3532,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val outputStream = java.io.ByteArrayOutputStream()
         LutConverter.exportToPlut(lutConfig, outputStream, recipeJson)
         outputStream.toByteArray()
+    }
+
+    suspend fun exportFrameToJson(frame: FrameInfo): ByteArray? = withContext(Dispatchers.IO) {
+        contentRepository.getCustomImportManager().exportFrameJson(frame)
     }
 
     /**
