@@ -97,6 +97,7 @@ enum class ActivePanel {
 
 private const val InitialPreviewTransitionDelayMillis = 150L
 private const val PreviewTransitionRevealDurationMillis = 800
+private const val RawCaptureTapDebounceMillis = 1000L
 
 @Composable
 fun CameraScreen(
@@ -153,6 +154,7 @@ fun CameraScreen(
     var previewTransitionAwaitingResume by remember { mutableStateOf(false) }
     var previewTransitionSawPause by remember { mutableStateOf(false) }
     var hasPlayedInitialPreviewTransition by remember { mutableStateOf(false) }
+    var rawCaptureTapLocked by remember { mutableStateOf(false) }
 
     // 标记相机是否已打开
     var cameraOpened by remember { mutableStateOf(false) }
@@ -189,6 +191,12 @@ fun CameraScreen(
     LaunchedEffect(activePanel) {
         if (activePanel == ActivePanel.FILTERS) {
             viewModel.generateThumbnail()
+        }
+    }
+
+    LaunchedEffect(useRaw, state.captureMode) {
+        if (!useRaw || state.captureMode != CaptureMode.PHOTO) {
+            rawCaptureTapLocked = false
         }
     }
 
@@ -977,6 +985,18 @@ fun CameraScreen(
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::setCaptureModeWithPreviewTransition,
                 onCaptureTap = {
+                    val shouldDebounceRawCapture = useRaw && state.captureMode == CaptureMode.PHOTO
+                    if (shouldDebounceRawCapture) {
+                        if (rawCaptureTapLocked) {
+                            return@Controls
+                        }
+                        rawCaptureTapLocked = true
+                        scope.launch {
+                            delay(RawCaptureTapDebounceMillis)
+                            rawCaptureTapLocked = false
+                        }
+                    }
+
                     if (enableDevelopAnimation && state.captureMode == CaptureMode.PHOTO) {
                         viewModel.glSurfaceView?.capturePreviewFrame { bitmap ->
                             pendingCaptureAnimationBitmap = bitmap
