@@ -337,8 +337,10 @@
     <string name="settings_restore_settings_description">從先前的備份 ZIP 檔案中還原。應用可能需要重新啟動才能生效。</string>
     <string name="backup_success">備份成功</string>
     <string name="backup_failed">備份失敗</string>
+    <string name="backup_in_progress">正在備份設定和自訂內容...</string>
     <string name="restore_success">還原成功，請重新啟動應用。</string>
     <string name="restore_failed">還原失敗</string>
+    <string name="restore_in_progress">正在還原設定和自訂內容...</string>
     <string name="filter_management_title">濾鏡管理</string>
     <string name="frame_management_title">邊框管理</string>
     <string name="category_all">所有</string>

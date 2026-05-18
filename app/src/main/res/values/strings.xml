@@ -448,8 +448,10 @@
     <string name="settings_restore_settings_description">Restore from a previous backup ZIP file. App may require a restart to apply.</string>
     <string name="backup_success">Backup completed successfully</string>
     <string name="backup_failed">Backup failed</string>
+    <string name="backup_in_progress">Backing up settings and custom content...</string>
     <string name="restore_success">Restore completed successfully. Please restart the app.</string>
     <string name="restore_failed">Restore failed</string>
+    <string name="restore_in_progress">Restoring settings and custom content...</string>
     <string name="filter_management_title">LUT Management</string>
     <string name="apply_lut_title">Apply LUT</string>
     <string name="apply_lut_processing">Applying LUT...</string>

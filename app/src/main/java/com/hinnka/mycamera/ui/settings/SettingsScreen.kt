@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.FilterNone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -122,6 +123,10 @@ import kotlin.math.roundToInt
 
 enum class SettingsTab {
     GENERAL, IMAGING, RAW, PHANTOM, ABOUT
+}
+
+private enum class BackupOperation {
+    BACKUP, RESTORE
 }
 
 private const val TELEGRAM_GROUP_URL = "https://t.me/photoncameraapp"
@@ -237,6 +242,7 @@ fun SettingsScreen(
     var rawWhitePointCorrectionUi by remember { mutableStateOf(rawWhitePointCorrection) }
     var aiFocusScoreThresholdUi by remember(aiFocusScoreThreshold) { mutableStateOf(aiFocusScoreThreshold) }
     var showAspectRatioDialog by remember { mutableStateOf(false) }
+    var backupOperation by remember { mutableStateOf<BackupOperation?>(null) }
 
     LaunchedEffect(rawNlmNoiseFactor, rawExposureCompensation, rawBlackPointCorrection, rawWhitePointCorrection) {
         if (!isRawSliderAdjusting) {
@@ -264,11 +270,16 @@ fun SettingsScreen(
     ) { uri ->
         uri?.let {
             coroutineScope.launch {
-                val success = com.hinnka.mycamera.data.BackupManager.performBackup(context, it)
-                if (success) {
-                    android.widget.Toast.makeText(context, R.string.backup_success, android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    android.widget.Toast.makeText(context, R.string.backup_failed, android.widget.Toast.LENGTH_SHORT).show()
+                backupOperation = BackupOperation.BACKUP
+                try {
+                    val success = com.hinnka.mycamera.data.BackupManager.performBackup(context, it)
+                    if (success) {
+                        android.widget.Toast.makeText(context, R.string.backup_success, android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        android.widget.Toast.makeText(context, R.string.backup_failed, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } finally {
+                    backupOperation = null
                 }
             }
         }
@@ -279,11 +290,16 @@ fun SettingsScreen(
     ) { uri ->
         uri?.let {
             coroutineScope.launch {
-                val success = com.hinnka.mycamera.data.BackupManager.performRestore(context, it)
-                if (success) {
-                    android.widget.Toast.makeText(context, R.string.restore_success, android.widget.Toast.LENGTH_LONG).show()
-                } else {
-                    android.widget.Toast.makeText(context, R.string.restore_failed, android.widget.Toast.LENGTH_SHORT).show()
+                backupOperation = BackupOperation.RESTORE
+                try {
+                    val success = com.hinnka.mycamera.data.BackupManager.performRestore(context, it)
+                    if (success) {
+                        android.widget.Toast.makeText(context, R.string.restore_success, android.widget.Toast.LENGTH_LONG).show()
+                    } else {
+                        android.widget.Toast.makeText(context, R.string.restore_failed, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } finally {
+                    backupOperation = null
                 }
             }
         }
@@ -662,7 +678,13 @@ fun SettingsScreen(
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_backup_settings),
-                            description = stringResource(R.string.settings_backup_settings_description),
+                            description = if (backupOperation == BackupOperation.BACKUP) {
+                                stringResource(R.string.backup_in_progress)
+                            } else {
+                                stringResource(R.string.settings_backup_settings_description)
+                            },
+                            enabled = backupOperation == null,
+                            showProgress = backupOperation == BackupOperation.BACKUP,
                             onClick = { backupLauncher.launch("photon_camera_backup_${System.currentTimeMillis()}.zip") }
                         )
 
@@ -673,7 +695,13 @@ fun SettingsScreen(
 
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_restore_settings),
-                            description = stringResource(R.string.settings_restore_settings_description),
+                            description = if (backupOperation == BackupOperation.RESTORE) {
+                                stringResource(R.string.restore_in_progress)
+                            } else {
+                                stringResource(R.string.settings_restore_settings_description)
+                            },
+                            enabled = backupOperation == null,
+                            showProgress = backupOperation == BackupOperation.RESTORE,
                             onClick = { restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }
                         )
                     }
@@ -2489,12 +2517,14 @@ fun NavigationSettingItem(
     title: String,
     description: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
+    showProgress: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -2502,7 +2532,7 @@ fun NavigationSettingItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = Color.White,
+                color = Color.White.copy(alpha = if (enabled || showProgress) 1f else 0.5f),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal
             )
@@ -2517,11 +2547,19 @@ fun NavigationSettingItem(
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.6f)
-        )
+        if (showProgress) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                color = Color.White.copy(alpha = 0.8f),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = if (enabled) 0.6f else 0.3f)
+            )
+        }
     }
 }
 
