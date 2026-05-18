@@ -297,6 +297,7 @@ data class CameraState(
     val multiFrameCount: Int = 0,
     val useMFSR: Boolean = false,
     val useRaw: Boolean = false,
+    val rawMinShutterSpeedNs: Long = 0L,
     val useLivePhoto: Boolean = false,
     val droMode: String = "OFF",
     // 是否正在拍摄 Live Photo (用于 UI 动画)

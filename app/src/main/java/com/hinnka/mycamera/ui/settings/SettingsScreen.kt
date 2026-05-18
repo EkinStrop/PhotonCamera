@@ -132,6 +132,16 @@ private enum class BackupOperation {
 private const val TELEGRAM_GROUP_URL = "https://t.me/photoncameraapp"
 private const val QQ_GROUP_URL = "https://qun.qq.com/universal-share/share?ac=1&authKey=SFezWP1Ub5Egb5yMc7dbc1W4BVKGzzs1Ld9RD%2BKYn%2FlXiuqD4XZCGse48v%2FNcvrq&busi_data=eyJncm91cENvZGUiOiI1Njk2MDU0NTIiLCJ0b2tlbiI6IjNTM0Z4MkN1NUpDQVU1OXJDZ0xFVlJOb0xHZHFCQ0xWc1pKQWpSVzNVT0FwaHFRcEFYR0lFTU9mNUxuNFl5TDEiLCJ1aW4iOiI0MTk3NzQ2OTYifQ%3D%3D&data=WwMa6V5hKvkhzfvOaOKz8MKqNOvSSjTxTRj6Dn-1bHP68fZuRJ66cyD5xOhydrUkF8yIA70R_yXqlFRwJGoaCQ&svctype=4&tempid=h5_group_info"
 
+private val RAW_MIN_SHUTTER_SPEED_OPTIONS = listOf(
+    0L,
+    1_000_000_000L / 30,
+    1_000_000_000L / 60,
+    1_000_000_000L / 125,
+    1_000_000_000L / 250,
+    1_000_000_000L / 500,
+    1_000_000_000L / 2000,
+)
+
 private fun openExternalUrl(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -224,6 +234,7 @@ fun SettingsScreen(
     val rawNlmNoiseFactor by viewModel.rawNlmNoiseFactor.collectAsState()
     val rawExposureCompensation by viewModel.rawExposureCompensation.collectAsState()
     val rawAutoExposure by viewModel.rawAutoExposure.collectAsState()
+    val rawMinShutterSpeedNs by viewModel.rawMinShutterSpeedNs.collectAsState()
     val droMode by viewModel.droMode.collectAsState()
     val rawBlackPointCorrection by viewModel.rawBlackPointCorrection.collectAsState()
     val rawWhitePointCorrection by viewModel.rawWhitePointCorrection.collectAsState()
@@ -1348,6 +1359,25 @@ fun SettingsScreen(
                         onRawWhitePointCorrectionChange = { rawWhitePointCorrectionUi = it },
                         onAdjustmentStart = { isRawSliderAdjusting = true },
                         onAdjustmentEnd = { commitRawSliderValues() }
+                    )
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = Color.White.copy(alpha = 0.1f)
+                    )
+
+                    QualityLevelSetting(
+                        title = stringResource(R.string.settings_raw_min_shutter_speed),
+                        description = stringResource(R.string.settings_raw_min_shutter_speed_description),
+                        levels = RAW_MIN_SHUTTER_SPEED_OPTIONS.map { value ->
+                            value to if (value == 0L) {
+                                stringResource(R.string.video_option_off)
+                            } else {
+                                "1/${(1_000_000_000L / value).toInt()}"
+                            }
+                        },
+                        currentLevel = rawMinShutterSpeedNs,
+                        onLevelSelected = { viewModel.setRawMinShutterSpeedNs(it) }
                     )
 
                     HorizontalDivider(

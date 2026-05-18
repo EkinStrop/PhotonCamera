@@ -263,6 +263,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val rawAutoExposure: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.rawAutoExposure }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val rawMinShutterSpeedNs: StateFlow<Long> = userPreferencesRepository.userPreferences
+        .map { it.rawMinShutterSpeedNs }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     val rawDROEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.rawDROEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -532,6 +535,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setEdgeLevel(it.edgeLevel)
                 // 同步 RAW 设置到相机控制器
                 cameraController.setUseRaw(it.useRaw)
+                cameraController.setRawMinShutterSpeedNs(it.rawMinShutterSpeedNs)
                 cameraController.setDroMode(it.droMode)
                 if (cameraController.state.value.meteringMode != it.meteringMode) {
                     cameraController.setMeteringMode(it.meteringMode)
@@ -759,6 +763,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun setRawAutoExposure(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.saveRawAutoExposure(enabled) }
+    }
+    fun setRawMinShutterSpeedNs(value: Long) {
+        viewModelScope.launch { userPreferencesRepository.saveRawMinShutterSpeedNs(value) }
     }
     fun setRawDROEnabled(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.updateRawDROEnabled(enabled) }
