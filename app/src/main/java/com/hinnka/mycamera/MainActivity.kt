@@ -55,6 +55,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -142,14 +145,17 @@ class MainActivity : ComponentActivity() {
         hasPermissions = result.values.all { it }
     }
 
-    private fun applyPreferredWindowColorMode() {
+    private fun applyPreferredWindowColorMode(useHdrScreenMode: Boolean, useP3ColorSpace: Boolean) {
         val configuration = resources.configuration
         when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !DeviceUtil.isHarmonyOS && configuration.isScreenHdr -> {
+            useHdrScreenMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !DeviceUtil.isHarmonyOS && configuration.isScreenHdr -> {
                 window.colorMode = ActivityInfo.COLOR_MODE_HDR
             }
-            configuration.isScreenWideColorGamut -> {
+            useP3ColorSpace && configuration.isScreenWideColorGamut -> {
                 window.colorMode = ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
+            }
+            else -> {
+                window.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
             }
         }
     }
@@ -168,8 +174,20 @@ class MainActivity : ComponentActivity() {
         }
         hideSystemUI()
         StartupTrace.mark("MainActivity.hideSystemUI applied")
-        applyPreferredWindowColorMode()
-        StartupTrace.mark("MainActivity.applyPreferredWindowColorMode applied")
+        
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    cameraViewModel.useHdrScreenMode,
+                    cameraViewModel.useP3ColorSpace
+                ) { useHdrScreen, useP3 ->
+                    useHdrScreen to useP3
+                }.collect { (useHdrScreen, useP3) ->
+                    applyPreferredWindowColorMode(useHdrScreen, useP3)
+                    StartupTrace.mark("MainActivity.applyPreferredWindowColorMode applied: useHdrScreen=$useHdrScreen, useP3=$useP3")
+                }
+            }
+        }
 
         OrientationObserver.observe(this)
         StartupTrace.mark("MainActivity.OrientationObserver.observe applied")
@@ -254,7 +272,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        applyPreferredWindowColorMode()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

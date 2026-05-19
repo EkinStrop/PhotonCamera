@@ -151,6 +151,7 @@ data class UserPreferences(
     val openAIModel: String? = null,
     val useBuiltInAiService: Boolean = false,
     val phantomSaveAsNew: Boolean = false,
+    val useHdrScreenMode: Boolean = true,
     val defaultVirtualAperture: Float = 0f, // 默认虚化光圈，0表示关闭
     val customFocalLengths: List<Float> = emptyList(), // 自定义焦段 (35mm等效)，最多8个
     val customLensIds: List<String> = emptyList(), // 自定义镜头 ID，逗号分隔存储
@@ -268,6 +269,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val CUSTOM_FOCAL_LENGTHS = stringPreferencesKey("custom_focal_lengths")
         private val CUSTOM_LENS_IDS = stringPreferencesKey("custom_lens_ids")
         private val HIDDEN_FOCAL_LENGTHS = stringPreferencesKey("hidden_focal_lengths")
+        private val USE_HDR_SCREEN_MODE = booleanPreferencesKey("use_hdr_screen_mode")
     }
 
     /**
@@ -410,7 +412,8 @@ class UserPreferencesRepository(private val context: Context) {
                 hiddenFocalLengths = preferences[HIDDEN_FOCAL_LENGTHS]
                     ?.split(",")?.filter { it.isNotEmpty() }
                     ?.mapNotNull { it.toFloatOrNull() }
-                    ?: emptyList()
+                    ?: emptyList(),
+                useHdrScreenMode = preferences[USE_HDR_SCREEN_MODE] ?: true
             )
         }
 
@@ -819,6 +822,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveMeteringMode(mode: MeteringMode) {
         context.dataStore.edit { preferences ->
             preferences[METERING_MODE] = mode.name
+        }
+    }
+
+    suspend fun saveUseHdrScreenMode(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[USE_HDR_SCREEN_MODE] = enabled
         }
     }
 

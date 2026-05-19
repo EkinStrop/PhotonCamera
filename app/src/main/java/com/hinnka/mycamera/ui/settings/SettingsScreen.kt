@@ -163,6 +163,7 @@ private fun AiFocusTargetMode.displayName(): String {
     }
 }
 
+
 /**
  * 设置页面
  */
@@ -212,6 +213,7 @@ fun SettingsScreen(
     val hlgHardwareCompatibilityEnabled by viewModel.hlgHardwareCompatibilityEnabled.collectAsState()
     val useP3ColorSpace by viewModel.useP3ColorSpace.collectAsState()
     val autoEnableHdr by viewModel.autoEnableHdr.collectAsState()
+    val useHdrScreenMode by viewModel.useHdrScreenMode.collectAsState()
     val isPurchased by viewModel.isPurchased.collectAsState()
     val phantomMode by viewModel.phantomMode.collectAsState()
     val phantomButtonHidden by viewModel.phantomButtonHidden.collectAsState()
@@ -1240,7 +1242,20 @@ fun SettingsScreen(
                                 checked = autoEnableHdr,
                                 onCheckedChange = { viewModel.setAutoEnableHdrForHdrCapture(it) }
                             )
+
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.1f),
+                                modifier = Modifier.padding(vertical = 12.dp)
+                            )
+
+                            SwitchSettingItem(
+                                title = stringResource(R.string.settings_screen_hdr),
+                                description = stringResource(R.string.settings_screen_hdr_description),
+                                checked = useHdrScreenMode,
+                                onCheckedChange = { viewModel.setUseHdrScreenMode(it) }
+                            )
                         }
+
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))

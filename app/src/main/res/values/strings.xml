@@ -729,6 +729,8 @@
     <string name="settings_auto_enable_hdr_for_hdr_capture_description">Enable HDR display by default.</string>
     <string name="settings_auto_enable_hdr_for_sdr_photos">Generate HDR by default for standard JPG</string>
     <string name="settings_auto_enable_hdr_for_sdr_photos_description">Generate and enable estimated HDR by default in the detail page for standard JPG captures and imports.</string>
+    <string name="settings_screen_hdr">HDR Display</string>
+    <string name="settings_screen_hdr_description">Enable High Dynamic Range (HDR) for the screen window. Turn off if screen causes yellowing or dimming.</string>
     <string name="hdr_label">HDR</string>
     <string name="hdr_strength_label">HDR Strength</string>
     <string name="hdr_toggle_failed">Failed to update HDR switch</string>

@@ -370,6 +370,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         .map { it.autoEnableHdr }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    val useHdrScreenMode: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.useHdrScreenMode }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     val phantomMode: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.phantomMode }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -743,6 +747,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             PLog.e(TAG, "Failed to list raw luts", e)
         }
         return emptyList()
+    }
+
+    fun setUseHdrScreenMode(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveUseHdrScreenMode(enabled)
+        }
     }
 
     fun setRawDcpId(dcpId: String?) {
