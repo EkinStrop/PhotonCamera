@@ -1,8 +1,8 @@
 #include "vulkan_raw_stacker.h"
 #include "align_lk.comp.h"
 #include "common.h"
-#include "color_scatter_raw.comp.h"
-#include "green_scatter_raw.comp.h"
+#include "color_gather_raw.comp.h"
+#include "green_gather_raw.comp.h"
 #include "normalize_color_hr.comp.h"
 #include "normalize_green_hr.comp.h"
 #include "reference_preprocess_raw.comp.h"
@@ -110,7 +110,7 @@ struct RawSuperResPerfStats {
   double tileAlignmentLkStage2Ms = 0.0;
   double tileAlignmentRegularize2Ms = 0.0;
   double tileRobustness2Ms = 0.0;
-  double scatterMs = 0.0;
+  double gatherMs = 0.0;
   double normalizeMs = 0.0;
 
   double outputReadbackMs = 0.0;
@@ -162,12 +162,12 @@ struct RawSuperResPerfStats {
     if (tilesProcessed > 0) {
       LOGI(
           "RawSuperResPerf tile-detail: clearOut=%.3f clearTile=%.3f "
-          "maskUpload=%.3f refinedUpload=%.3f scatter=%.3f normalize=%.3f "
-          "avgTile=%.3f avgScatterFrame=%.3f avgNonRefFramePrep=%.3f",
+          "maskUpload=%.3f refinedUpload=%.3f gather=%.3f normalize=%.3f "
+          "avgTile=%.3f avgGatherFrame=%.3f avgNonRefFramePrep=%.3f",
           outputClearMs, tileClearMs, localMaskUploadMs,
-          tileRefinedStateUploadMs, scatterMs,
+          tileRefinedStateUploadMs, gatherMs,
           normalizeMs, averageMillis(tileProcessingMs, tilesProcessed),
-          averageMillis(scatterMs, tileScatterFrameInstances),
+          averageMillis(gatherMs, tileScatterFrameInstances),
           averageMillis(tileRefinedStateUploadMs, tileAlignedFrameInstances));
     }
   }
@@ -421,18 +421,18 @@ void VulkanRawStacker::initVulkanResources() {
     gInfo.usage =
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     gInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VK_CHECK(vkCreateBuffer(device, &gInfo, nullptr, &rbScatterAccumBuffers[c]));
+    VK_CHECK(vkCreateBuffer(device, &gInfo, nullptr, &rbGatherAccumBuffers[c]));
 
     VkMemoryRequirements gReqs;
-    vkGetBufferMemoryRequirements(device, rbScatterAccumBuffers[c], &gReqs);
+    vkGetBufferMemoryRequirements(device, rbGatherAccumBuffers[c], &gReqs);
     VkMemoryAllocateInfo gAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     gAlloc.allocationSize = gReqs.size;
     gAlloc.memoryTypeIndex = vm.findMemoryType(
         gReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VK_CHECK(
-        vkAllocateMemory(device, &gAlloc, nullptr, &rbScatterAccumMemories[c]));
-    vkBindBufferMemory(device, rbScatterAccumBuffers[c],
-                       rbScatterAccumMemories[c], 0);
+        vkAllocateMemory(device, &gAlloc, nullptr, &rbGatherAccumMemories[c]));
+    vkBindBufferMemory(device, rbGatherAccumBuffers[c],
+                       rbGatherAccumMemories[c], 0);
   }
 
   VkDeviceSize priorBufferSize =
@@ -498,13 +498,13 @@ void VulkanRawStacker::initVulkanResources() {
                          &barrier, 0, nullptr);
   }
   for (int c = 0; c < 2; ++c) {
-    vkCmdFillBuffer(cb, rbScatterAccumBuffers[c], 0, greenAccumSize, 0);
+    vkCmdFillBuffer(cb, rbGatherAccumBuffers[c], 0, greenAccumSize, 0);
     VkBufferMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask =
         VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.buffer = rbScatterAccumBuffers[c];
+    barrier.buffer = rbGatherAccumBuffers[c];
     barrier.size = greenAccumSize;
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1,
@@ -772,7 +772,7 @@ void VulkanRawStacker::createPipelines() {
                                              robustness_raw_comp_spv,
                                              robustness_raw_comp_spv_size);
 
-  // --- 4. Green HR Scatter Pipeline ---
+  // --- 4. Green HR Gather Pipeline ---
   VkDescriptorSetLayoutBinding gsBindings[9] = {};
   gsBindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                    VK_SHADER_STAGE_COMPUTE_BIT, nullptr}; // Input RAW
@@ -798,22 +798,22 @@ void VulkanRawStacker::createPipelines() {
   gsLayoutInfo.bindingCount = 9;
   gsLayoutInfo.pBindings = gsBindings;
   vkCreateDescriptorSetLayout(device, &gsLayoutInfo, nullptr,
-                              &greenScatterSetLayout);
+                              &greenGatherSetLayout);
 
   VkPipelineLayoutCreateInfo gsPLInfo{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   gsPLInfo.setLayoutCount = 1;
-  gsPLInfo.pSetLayouts = &greenScatterSetLayout;
+  gsPLInfo.pSetLayouts = &greenGatherSetLayout;
   gsPLInfo.pushConstantRangeCount = 1;
   gsPLInfo.pPushConstantRanges = &pushConstantRange;
   vkCreatePipelineLayout(device, &gsPLInfo, nullptr,
-                         &greenScatterPipelineLayout);
+                         &greenGatherPipelineLayout);
 
-  greenScatterPipeline = createComputePipeline(
-      device, greenScatterPipelineLayout, green_scatter_raw_comp_spv,
-      green_scatter_raw_comp_spv_size);
+  greenGatherPipeline = createComputePipeline(
+      device, greenGatherPipelineLayout, green_gather_raw_comp_spv,
+      green_gather_raw_comp_spv_size);
 
-  // --- 5. Color Scatter Pipeline (R/B) ---
+  // --- 5. Color Gather Pipeline (R/B) ---
   VkDescriptorSetLayoutBinding csBindings[9] = {};
   csBindings[0] = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                    VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
@@ -839,20 +839,20 @@ void VulkanRawStacker::createPipelines() {
   csLayoutInfo.bindingCount = 9;
   csLayoutInfo.pBindings = csBindings;
   vkCreateDescriptorSetLayout(device, &csLayoutInfo, nullptr,
-                              &colorScatterSetLayout);
+                              &colorGatherSetLayout);
 
   VkPipelineLayoutCreateInfo csPLInfo{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   csPLInfo.setLayoutCount = 1;
-  csPLInfo.pSetLayouts = &colorScatterSetLayout;
+  csPLInfo.pSetLayouts = &colorGatherSetLayout;
   csPLInfo.pushConstantRangeCount = 1;
   csPLInfo.pPushConstantRanges = &pushConstantRange;
   vkCreatePipelineLayout(device, &csPLInfo, nullptr,
-                         &colorScatterPipelineLayout);
+                         &colorGatherPipelineLayout);
 
-  colorScatterPipeline = createComputePipeline(
-      device, colorScatterPipelineLayout, color_scatter_raw_comp_spv,
-      color_scatter_raw_comp_spv_size);
+  colorGatherPipeline = createComputePipeline(
+      device, colorGatherPipelineLayout, color_gather_raw_comp_spv,
+      color_gather_raw_comp_spv_size);
 
   // --- 6. Reference Normalize Pipeline ---
   VkDescriptorSetLayoutBinding rnBindings[3] = {};
@@ -2711,11 +2711,11 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
   VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &robustnessSets[0]));
   VkDescriptorSet robustSet = robustnessSets[0];
 
-  allocInfo.pSetLayouts = &greenScatterSetLayout;
-  VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &greenScatterSet));
+  allocInfo.pSetLayouts = &greenGatherSetLayout;
+  VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &greenGatherSet));
 
-  allocInfo.pSetLayouts = &colorScatterSetLayout;
-  VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &colorScatterSets[0]));
+  allocInfo.pSetLayouts = &colorGatherSetLayout;
+  VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &colorGatherSets[0]));
 
   allocInfo.pSetLayouts = &referenceNormalizeSetLayout;
   VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &referenceNormalizeSet));
@@ -2745,36 +2745,36 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
                             3);
   updateBufferDescriptorSet(device, robustSet, flowVarianceBuffer,
                             VK_WHOLE_SIZE, 4);
-  updateBufferDescriptorSet(device, greenScatterSet, alignmentBuffer,
+  updateBufferDescriptorSet(device, greenGatherSet, alignmentBuffer,
                             VK_WHOLE_SIZE, 1);
-  updateBufferDescriptorSet(device, greenScatterSet, kernelBuffer,
+  updateBufferDescriptorSet(device, greenGatherSet, kernelBuffer,
                             VK_WHOLE_SIZE, 2);
-  updateBufferDescriptorSet(device, greenScatterSet, robustnessBuffer,
+  updateBufferDescriptorSet(device, greenGatherSet, robustnessBuffer,
                             VK_WHOLE_SIZE, 3);
-  updateBufferDescriptorSet(device, greenScatterSet, flowVarianceBuffer,
+  updateBufferDescriptorSet(device, greenGatherSet, flowVarianceBuffer,
                             VK_WHOLE_SIZE, 4);
-  updateBufferDescriptorSet(device, greenScatterSet, greenPhaseAccumBuffers[0],
+  updateBufferDescriptorSet(device, greenGatherSet, greenPhaseAccumBuffers[0],
                             VK_WHOLE_SIZE, 5);
-  updateBufferDescriptorSet(device, greenScatterSet, greenPhaseAccumBuffers[1],
+  updateBufferDescriptorSet(device, greenGatherSet, greenPhaseAccumBuffers[1],
                             VK_WHOLE_SIZE, 6);
-  updateImageDescriptorSet(device, greenScatterSet, lscView, lscSampler, 7);
-  updateBufferDescriptorSet(device, greenScatterSet, localTileMaskBuffer,
+  updateImageDescriptorSet(device, greenGatherSet, lscView, lscSampler, 7);
+  updateBufferDescriptorSet(device, greenGatherSet, localTileMaskBuffer,
                             VK_WHOLE_SIZE, 8);
-  updateBufferDescriptorSet(device, colorScatterSets[0], alignmentBuffer,
+  updateBufferDescriptorSet(device, colorGatherSets[0], alignmentBuffer,
                             VK_WHOLE_SIZE, 1);
-  updateBufferDescriptorSet(device, colorScatterSets[0], kernelBuffer,
+  updateBufferDescriptorSet(device, colorGatherSets[0], kernelBuffer,
                             VK_WHOLE_SIZE, 2);
-  updateBufferDescriptorSet(device, colorScatterSets[0], robustnessBuffer,
+  updateBufferDescriptorSet(device, colorGatherSets[0], robustnessBuffer,
                             VK_WHOLE_SIZE, 3);
-  updateBufferDescriptorSet(device, colorScatterSets[0],
-                            rbScatterAccumBuffers[0], VK_WHOLE_SIZE, 4);
-  updateBufferDescriptorSet(device, colorScatterSets[0],
-                            rbScatterAccumBuffers[1], VK_WHOLE_SIZE, 5);
-  updateBufferDescriptorSet(device, colorScatterSets[0], flowVarianceBuffer,
+  updateBufferDescriptorSet(device, colorGatherSets[0],
+                            rbGatherAccumBuffers[0], VK_WHOLE_SIZE, 4);
+  updateBufferDescriptorSet(device, colorGatherSets[0],
+                            rbGatherAccumBuffers[1], VK_WHOLE_SIZE, 5);
+  updateBufferDescriptorSet(device, colorGatherSets[0], flowVarianceBuffer,
                             VK_WHOLE_SIZE, 6);
-  updateImageDescriptorSet(device, colorScatterSets[0], lscView, lscSampler,
+  updateImageDescriptorSet(device, colorGatherSets[0], lscView, lscSampler,
                            7);
-  updateBufferDescriptorSet(device, colorScatterSets[0], localTileMaskBuffer,
+  updateBufferDescriptorSet(device, colorGatherSets[0], localTileMaskBuffer,
                             VK_WHOLE_SIZE, 8);
   updateBufferDescriptorSet(device, referenceNormalizeSet,
                             normalizedReferenceBuffer, VK_WHOLE_SIZE, 1);
@@ -3364,7 +3364,7 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
                           greenAccumBufferSize, 0);
         }
         for (int c = 0; c < 2; ++c) {
-          vkCmdFillBuffer(cb, rbScatterAccumBuffers[c], 0,
+          vkCmdFillBuffer(cb, rbGatherAccumBuffers[c], 0,
                           greenAccumBufferSize, 0);
         }
         VkMemoryBarrier memBarrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
@@ -3409,9 +3409,9 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
         pc.frameWeight = isRef ? 1.0f : frameFusionWeights[i];
 
         const auto localMaskUploadStart = PerfClock::now();
-        updateBufferDescriptorSet(device, greenScatterSet,
+        updateBufferDescriptorSet(device, greenGatherSet,
                                   frameMaskBuffers[i].buffer, VK_WHOLE_SIZE, 8);
-        updateBufferDescriptorSet(device, colorScatterSets[0],
+        updateBufferDescriptorSet(device, colorGatherSets[0],
                                   frameMaskBuffers[i].buffer, VK_WHOLE_SIZE, 8);
         perf.localMaskUploadMs += elapsedMillis(localMaskUploadStart);
         if (!kFastPath && !isRef &&
@@ -3652,66 +3652,66 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
 
         // Accumulate this frame's contribution for this tile's 3 channels
         {
-          const auto scatterStart = PerfClock::now();
+          const auto gatherStart = PerfClock::now();
           VkCommandBuffer cb = vm.beginSingleTimeCommands();
-          VkBufferMemoryBarrier preScatterBarriers[4]{};
-          uint32_t preScatterBarrierCount = 0;
+          VkBufferMemoryBarrier preGatherBarriers[4]{};
+          uint32_t preGatherBarrierCount = 0;
 
-          preScatterBarriers[preScatterBarrierCount].sType =
+          preGatherBarriers[preGatherBarrierCount].sType =
               VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-          preScatterBarriers[preScatterBarrierCount].srcAccessMask =
+          preGatherBarriers[preGatherBarrierCount].srcAccessMask =
               VK_ACCESS_HOST_WRITE_BIT;
-          preScatterBarriers[preScatterBarrierCount].dstAccessMask =
+          preGatherBarriers[preGatherBarrierCount].dstAccessMask =
               VK_ACCESS_SHADER_READ_BIT;
-          preScatterBarriers[preScatterBarrierCount].buffer =
+          preGatherBarriers[preGatherBarrierCount].buffer =
               frameMaskBuffers[i].buffer;
-          preScatterBarriers[preScatterBarrierCount].size = VK_WHOLE_SIZE;
-          ++preScatterBarrierCount;
+          preGatherBarriers[preGatherBarrierCount].size = VK_WHOLE_SIZE;
+          ++preGatherBarrierCount;
 
           if (kFastPath ? !isRef : refinedCache != nullptr) {
-            preScatterBarriers[preScatterBarrierCount].sType =
+            preGatherBarriers[preGatherBarrierCount].sType =
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-            preScatterBarriers[preScatterBarrierCount].srcAccessMask =
+            preGatherBarriers[preGatherBarrierCount].srcAccessMask =
                 VK_ACCESS_HOST_WRITE_BIT;
-            preScatterBarriers[preScatterBarrierCount].dstAccessMask =
+            preGatherBarriers[preGatherBarrierCount].dstAccessMask =
                 VK_ACCESS_SHADER_READ_BIT;
-            preScatterBarriers[preScatterBarrierCount].buffer = alignmentBuffer;
-            preScatterBarriers[preScatterBarrierCount].size = VK_WHOLE_SIZE;
-            ++preScatterBarrierCount;
+            preGatherBarriers[preGatherBarrierCount].buffer = alignmentBuffer;
+            preGatherBarriers[preGatherBarrierCount].size = VK_WHOLE_SIZE;
+            ++preGatherBarrierCount;
 
-            preScatterBarriers[preScatterBarrierCount].sType =
+            preGatherBarriers[preGatherBarrierCount].sType =
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-            preScatterBarriers[preScatterBarrierCount].srcAccessMask =
+            preGatherBarriers[preGatherBarrierCount].srcAccessMask =
                 VK_ACCESS_HOST_WRITE_BIT;
-            preScatterBarriers[preScatterBarrierCount].dstAccessMask =
+            preGatherBarriers[preGatherBarrierCount].dstAccessMask =
                 VK_ACCESS_SHADER_READ_BIT;
-            preScatterBarriers[preScatterBarrierCount].buffer = robustnessBuffer;
-            preScatterBarriers[preScatterBarrierCount].size = VK_WHOLE_SIZE;
-            ++preScatterBarrierCount;
+            preGatherBarriers[preGatherBarrierCount].buffer = robustnessBuffer;
+            preGatherBarriers[preGatherBarrierCount].size = VK_WHOLE_SIZE;
+            ++preGatherBarrierCount;
 
-            preScatterBarriers[preScatterBarrierCount].sType =
+            preGatherBarriers[preGatherBarrierCount].sType =
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-            preScatterBarriers[preScatterBarrierCount].srcAccessMask =
+            preGatherBarriers[preGatherBarrierCount].srcAccessMask =
                 VK_ACCESS_HOST_WRITE_BIT;
-            preScatterBarriers[preScatterBarrierCount].dstAccessMask =
+            preGatherBarriers[preGatherBarrierCount].dstAccessMask =
                 VK_ACCESS_SHADER_READ_BIT;
-            preScatterBarriers[preScatterBarrierCount].buffer =
+            preGatherBarriers[preGatherBarrierCount].buffer =
                 flowVarianceBuffer;
-            preScatterBarriers[preScatterBarrierCount].size = VK_WHOLE_SIZE;
-            ++preScatterBarrierCount;
+            preGatherBarriers[preGatherBarrierCount].size = VK_WHOLE_SIZE;
+            ++preGatherBarrierCount;
           }
           vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_HOST_BIT,
                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-                               nullptr, preScatterBarrierCount,
-                               preScatterBarriers, 0, nullptr);
+                               nullptr, preGatherBarrierCount,
+                               preGatherBarriers, 0, nullptr);
 
-          updateImageDescriptorSet(device, greenScatterSet,
+          updateImageDescriptorSet(device, greenGatherSet,
                                    uploadedFrames[i].view, sampler, 0);
           vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            greenScatterPipeline);
+                            greenGatherPipeline);
           vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                  greenScatterPipelineLayout, 0, 1,
-                                  &greenScatterSet, 0, nullptr);
+                                  greenGatherPipelineLayout, 0, 1,
+                                  &greenGatherSet, 0, nullptr);
 
           PlaneTileRange greenRange0 = computePlaneTileRange(
               frame.cfaPattern, 1, tileOriginX, tileOriginY, currentTileW,
@@ -3742,7 +3742,7 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
             pc.tileW = greenEndX - greenStartX;
             pc.tileH = greenEndY - greenStartY;
 
-            vkCmdPushConstants(cb, greenScatterPipelineLayout,
+            vkCmdPushConstants(cb, greenGatherPipelineLayout,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc),
                                &pc);
             vkCmdDispatch(cb, (pc.tileW + 15) / 16, (pc.tileH + 15) / 16, 1);
@@ -3762,12 +3762,12 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
                                nullptr, 2, greenBarriers, 0, nullptr);
 
           vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            colorScatterPipeline);
-          updateImageDescriptorSet(device, colorScatterSets[0],
+                            colorGatherPipeline);
+          updateImageDescriptorSet(device, colorGatherSets[0],
                                    uploadedFrames[i].view, sampler, 0);
           vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                  colorScatterPipelineLayout, 0, 1,
-                                  &colorScatterSets[0], 0, nullptr);
+                                  colorGatherPipelineLayout, 0, 1,
+                                  &colorGatherSets[0], 0, nullptr);
 
           PlaneTileRange redRange = computePlaneTileRange(
               frame.cfaPattern, 0, tileOriginX, tileOriginY, currentTileW,
@@ -3795,7 +3795,7 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
             pc.tileY = colorStartY;
             pc.tileW = colorEndX - colorStartX;
             pc.tileH = colorEndY - colorStartY;
-            vkCmdPushConstants(cb, colorScatterPipelineLayout,
+            vkCmdPushConstants(cb, colorGatherPipelineLayout,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc),
                                &pc);
             vkCmdDispatch(cb, (pc.tileW + 15) / 16, (pc.tileH + 15) / 16, 1);
@@ -3806,7 +3806,7 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
             colorBarriers[c].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
             colorBarriers[c].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
             colorBarriers[c].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            colorBarriers[c].buffer = rbScatterAccumBuffers[c];
+            colorBarriers[c].buffer = rbGatherAccumBuffers[c];
             colorBarriers[c].size = VK_WHOLE_SIZE;
           }
           vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -3814,7 +3814,8 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
                                nullptr, 2, colorBarriers, 0, nullptr);
 
           vm.endSingleTimeCommands(cb);
-          perf.scatterMs += elapsedMillis(scatterStart);
+          perf.gatherMs += elapsedMillis(gatherStart);
+          ++perf.tileScatterFrameInstances; // Keep stats count unchanged for simplicity
         }
       } // end for each frame
 
@@ -3951,7 +3952,7 @@ bool VulkanRawStacker::processStack(uint16_t *outBuffer, size_t bufferSize) {
           updateBufferDescriptorSet(device, colorNormalizeSets[colorIdx],
                                     fusedBayerBuffer, VK_WHOLE_SIZE, 0);
           updateBufferDescriptorSet(device, colorNormalizeSets[colorIdx],
-                                    rbScatterAccumBuffers[colorIdx],
+                                    rbGatherAccumBuffers[colorIdx],
                                     VK_WHOLE_SIZE, 1);
           updateBufferDescriptorSet(device, colorNormalizeSets[colorIdx],
                                     priorBayerBuffer, VK_WHOLE_SIZE, 2);
@@ -4151,19 +4152,19 @@ void VulkanRawStacker::releaseVulkanResources() {
   if (robustnessPipeline)
     vkDestroyPipeline(device, robustnessPipeline, nullptr);
 
-  if (greenScatterSetLayout)
-    vkDestroyDescriptorSetLayout(device, greenScatterSetLayout, nullptr);
-  if (greenScatterPipelineLayout)
-    vkDestroyPipelineLayout(device, greenScatterPipelineLayout, nullptr);
-  if (greenScatterPipeline)
-    vkDestroyPipeline(device, greenScatterPipeline, nullptr);
+  if (greenGatherSetLayout)
+    vkDestroyDescriptorSetLayout(device, greenGatherSetLayout, nullptr);
+  if (greenGatherPipelineLayout)
+    vkDestroyPipelineLayout(device, greenGatherPipelineLayout, nullptr);
+  if (greenGatherPipeline)
+    vkDestroyPipeline(device, greenGatherPipeline, nullptr);
 
-  if (colorScatterSetLayout)
-    vkDestroyDescriptorSetLayout(device, colorScatterSetLayout, nullptr);
-  if (colorScatterPipelineLayout)
-    vkDestroyPipelineLayout(device, colorScatterPipelineLayout, nullptr);
-  if (colorScatterPipeline)
-    vkDestroyPipeline(device, colorScatterPipeline, nullptr);
+  if (colorGatherSetLayout)
+    vkDestroyDescriptorSetLayout(device, colorGatherSetLayout, nullptr);
+  if (colorGatherPipelineLayout)
+    vkDestroyPipelineLayout(device, colorGatherPipelineLayout, nullptr);
+  if (colorGatherPipeline)
+    vkDestroyPipeline(device, colorGatherPipeline, nullptr);
 
   if (referenceNormalizeSetLayout)
     vkDestroyDescriptorSetLayout(device, referenceNormalizeSetLayout, nullptr);
@@ -4228,10 +4229,10 @@ void VulkanRawStacker::releaseVulkanResources() {
       vkFreeMemory(device, greenPhaseAccumMemories[phase], nullptr);
   }
   for (int c = 0; c < 2; ++c) {
-    if (rbScatterAccumBuffers[c])
-      vkDestroyBuffer(device, rbScatterAccumBuffers[c], nullptr);
-    if (rbScatterAccumMemories[c])
-      vkFreeMemory(device, rbScatterAccumMemories[c], nullptr);
+    if (rbGatherAccumBuffers[c])
+      vkDestroyBuffer(device, rbGatherAccumBuffers[c], nullptr);
+    if (rbGatherAccumMemories[c])
+      vkFreeMemory(device, rbGatherAccumMemories[c], nullptr);
   }
   if (priorBayerBuffer)
     vkDestroyBuffer(device, priorBayerBuffer, nullptr);

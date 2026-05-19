@@ -58,16 +58,16 @@ private:
   VkDescriptorSetLayout robustnessSetLayout = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> robustnessSets; // Per-frame sets
 
-  // Green HR scatter/splat path
-  VkPipelineLayout greenScatterPipelineLayout = VK_NULL_HANDLE;
-  VkPipeline greenScatterPipeline = VK_NULL_HANDLE;
-  VkDescriptorSetLayout greenScatterSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSet greenScatterSet = VK_NULL_HANDLE;
+  // Green HR gather/splat path
+  VkPipelineLayout greenGatherPipelineLayout = VK_NULL_HANDLE;
+  VkPipeline greenGatherPipeline = VK_NULL_HANDLE;
+  VkDescriptorSetLayout greenGatherSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSet greenGatherSet = VK_NULL_HANDLE;
 
-  VkPipelineLayout colorScatterPipelineLayout = VK_NULL_HANDLE;
-  VkPipeline colorScatterPipeline = VK_NULL_HANDLE;
-  VkDescriptorSetLayout colorScatterSetLayout = VK_NULL_HANDLE;
-  VkDescriptorSet colorScatterSets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkPipelineLayout colorGatherPipelineLayout = VK_NULL_HANDLE;
+  VkPipeline colorGatherPipeline = VK_NULL_HANDLE;
+  VkDescriptorSetLayout colorGatherSetLayout = VK_NULL_HANDLE;
+  VkDescriptorSet colorGatherSets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
   VkDescriptorSetLayout referenceNormalizeSetLayout = VK_NULL_HANDLE;
   VkPipelineLayout referenceNormalizePipelineLayout = VK_NULL_HANDLE;
@@ -107,8 +107,8 @@ private:
 
   VkBuffer greenPhaseAccumBuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
   VkDeviceMemory greenPhaseAccumMemories[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-  VkBuffer rbScatterAccumBuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-  VkDeviceMemory rbScatterAccumMemories[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkBuffer rbGatherAccumBuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkDeviceMemory rbGatherAccumMemories[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
   VkBuffer priorBayerBuffer = VK_NULL_HANDLE;
   VkDeviceMemory priorBayerMemory = VK_NULL_HANDLE;

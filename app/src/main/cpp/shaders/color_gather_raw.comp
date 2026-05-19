@@ -161,64 +161,88 @@ float sampleLocalTileWeight(ivec2 planePos) {
     return clamp(localTileMask.weights[ty * tilesX + tx], 0.0, 1.0);
 }
 
-void processPlane(ivec2 samplePlane, uint planeIndex) {
+void processPlaneGather(ivec2 outPos, uint planeIndex) {
     ivec2 sampleOffset = getBayerOffset(int(pc.cfaPattern), int(planeIndex));
-    if (samplePlane.x < 0 || samplePlane.y < 0 ||
-        samplePlane.x >= int(pc.planeWidth) || samplePlane.y >= int(pc.planeHeight)) {
-        return;
-    }
 
-    ivec2 samplePos = sampleOffset + samplePlane * 2;
-    if (samplePos.x < 0 || samplePos.y < 0 ||
-        samplePos.x >= int(pc.sensorWidth) || samplePos.y >= int(pc.sensorHeight)) {
-        return;
-    }
+    // 1. Map outPos to the reference plane coordinate:
+    vec2 refPlanePos = outputToSourcePlaneCenter(vec2(outPos), sampleOffset);
 
-    int lscIdx = -1;
-    if (!sampleMatchesPlane(samplePos, planeIndex, lscIdx)) return;
-
-    vec2 samplePlanePos = vec2(samplePlane);
-    vec2 flow = (pc.isFirstFrame == 0u) ? sampleFlow(samplePlanePos) : vec2(0.0);
-    vec2 refPlanePos = samplePlanePos - flow;
-    vec2 outCenter = sourceToOutputPlaneCenter(refPlanePos, sampleOffset);
-    ivec2 base = ivec2(floor(outCenter));
-
-    float raw = texelFetch(inputRawSampler, samplePos, 0).r;
-    int bayerIndex = getBayerIndex(int(pc.cfaPattern), samplePos);
-    float val = max(0.0, raw * 65535.0 - pc.blackLevel[bayerIndex]);
-    vec2 lscUV = (vec2(samplePos) + 0.5) / vec2(pc.sensorWidth, pc.sensorHeight);
-    vec4 lscGains = texture(uLensShadingMap, lscUV);
-    float lscGain = (lscIdx == 0) ? lscGains.r : lscGains.a;
-    val = (val * lscGain) / 65535.0;
-    float highlightSuppression = 1.0 - 0.55 * smoothstep(0.78, 0.98, val);
-
-    int rX = clamp(samplePos.x / 2, 0, int(pc.planeWidth) - 1);
-    int rY = clamp(samplePos.y / 2, 0, int(pc.planeHeight) - 1);
-    float pInlier = 1.0;
-    float flowVar = 0.03;
+    // 2. Sample the flow at refPlanePos:
+    vec2 flow = vec2(0.0);
     if (pc.isFirstFrame == 0u) {
-        uint confidenceIdx = rY * int(pc.planeWidth) + rX;
-        pInlier = outRobustness.data[confidenceIdx] * highlightSuppression;
-        flowVar = flowVarianceBuffer.data[confidenceIdx];
-        pInlier *= sampleLocalTileWeight(ivec2(rX, rY));
+        flow = sampleFlow(refPlanePos);
     }
 
-    vec2 planeRef = clamp(refPlanePos, vec2(0.0), vec2(float(pc.planeWidth - 1u), float(pc.planeHeight - 1u)));
-    ivec2 planeIdx = ivec2(round(planeRef));
-    vec4 kParams = kernelParams.data[planeIdx.y * int(pc.planeWidth) + planeIdx.x];
-    vec3 OmegaInv = getKernelMatrix(kParams);
+    // 3. Target plane position:
+    vec2 targetPlanePos = refPlanePos + flow;
 
-    for (int oy = -1; oy <= 2; ++oy) {
-        for (int ox = -1; ox <= 2; ++ox) {
-            ivec2 outPos = base + ivec2(ox, oy);
-            if (outPos.x < int(pc.tileX) || outPos.y < int(pc.tileY) ||
-                outPos.x >= int(pc.tileX + pc.tileW) || outPos.y >= int(pc.tileY + pc.tileH) ||
-                outPos.x < 0 || outPos.y < 0) continue;
+    // 4. Neighborhood search in the target plane:
+    ivec2 targetPlaneCenter = ivec2(round(targetPlanePos));
 
+    for (int oy = -2; oy <= 2; ++oy) {
+        for (int ox = -2; ox <= 2; ++ox) {
+            ivec2 targetPlaneNeighbor = targetPlaneCenter + ivec2(ox, oy);
+
+            // Boundary checks for the target plane coordinate
+            if (targetPlaneNeighbor.x < 0 || targetPlaneNeighbor.y < 0 ||
+                targetPlaneNeighbor.x >= int(pc.planeWidth) || targetPlaneNeighbor.y >= int(pc.planeHeight)) {
+                continue;
+            }
+
+            // Target sensor position:
+            ivec2 samplePos = sampleOffset + targetPlaneNeighbor * 2;
+            if (samplePos.x < 0 || samplePos.y < 0 ||
+                samplePos.x >= int(pc.sensorWidth) || samplePos.y >= int(pc.sensorHeight)) {
+                continue;
+            }
+
+            // Verify if this sensor pixel matches the requested plane channel
+            int lscIdx = -1;
+            if (!sampleMatchesPlane(samplePos, planeIndex, lscIdx)) continue;
+
+            // Fetch target raw value and compute normalized value
+            float raw = texelFetch(inputRawSampler, samplePos, 0).r;
+            int bayerIndex = getBayerIndex(int(pc.cfaPattern), samplePos);
+            float val = max(0.0, raw * 65535.0 - pc.blackLevel[bayerIndex]);
+
+            // Lens Shading correction
+            vec2 lscUV = (vec2(samplePos) + 0.5) / vec2(pc.sensorWidth, pc.sensorHeight);
+            vec4 lscGains = texture(uLensShadingMap, lscUV);
+            float lscGain = (lscIdx == 0) ? lscGains.r : lscGains.a;
+            val = (val * lscGain) / 65535.0;
+            float highlightSuppression = 1.0 - 0.55 * smoothstep(0.78, 0.98, val);
+
+            // Robustness and flow variance lookups at targetPlaneNeighbor
+            int rX = clamp(targetPlaneNeighbor.x, 0, int(pc.planeWidth) - 1);
+            int rY = clamp(targetPlaneNeighbor.y, 0, int(pc.planeHeight) - 1);
+            float pInlier = 1.0;
+            float flowVar = 0.03;
+            if (pc.isFirstFrame == 0u) {
+                uint confidenceIdx = uint(rY) * pc.planeWidth + uint(rX);
+                pInlier = outRobustness.data[confidenceIdx] * highlightSuppression;
+                flowVar = flowVarianceBuffer.data[confidenceIdx];
+                pInlier *= sampleLocalTileWeight(ivec2(rX, rY));
+            }
+
+            // Target pixel's aligned reference position:
+            vec2 refPos = vec2(targetPlaneNeighbor) - flow;
+
+            // Kernel matrix (OmegaInv) lookup at refPos:
+            vec2 kernelPlanePos = clamp(refPos, vec2(0.0), vec2(float(pc.planeWidth - 1u), float(pc.planeHeight - 1u)));
+            ivec2 planeIdx = ivec2(round(kernelPlanePos));
+            vec4 kParams = kernelParams.data[planeIdx.y * int(pc.planeWidth) + planeIdx.x];
+            vec3 OmegaInv = getKernelMatrix(kParams);
+
+            // Output center of target pixel on HR plane:
+            vec2 outCenter = sourceToOutputPlaneCenter(refPos, sampleOffset);
+
+            // Distance in HR plane space:
             vec2 d_hr = vec2(outPos) - outCenter;
             float reconWeight = cubicWeight(d_hr.x) * cubicWeight(d_hr.y);
             if (reconWeight <= 0.0) continue;
-            vec2 d = outputToSourcePlaneCenter(vec2(outPos), sampleOffset) - refPlanePos;
+
+            // Mahalanobis distance calculation:
+            vec2 d = outputToSourcePlaneCenter(vec2(outPos), sampleOffset) - refPos;
             float mahalanobis = OmegaInv.x * d.x * d.x + 2.0 * OmegaInv.y * d.x * d.y + OmegaInv.z * d.y * d.y;
             float effectiveSigma2 = 1.0 + 4.0 * flowVar;
             float geometricLikelihood =
@@ -248,11 +272,7 @@ void main() {
     uint localY = gl_GlobalInvocationID.y;
     if (localX >= pc.tileW || localY >= pc.tileH) return;
 
-    ivec2 sourceStart = ivec2(int(pc.tileX), int(pc.tileY));
-    if (pc.scale > 1.001) {
-        sourceStart = ivec2(floor(vec2(float(pc.tileX), float(pc.tileY)) / pc.scale)) - ivec2(2);
-    }
-    ivec2 samplePlane = sourceStart + ivec2(int(localX), int(localY));
-    processPlane(samplePlane, 0u);
-    processPlane(samplePlane, 3u);
+    ivec2 outPos = ivec2(int(pc.tileX + localX), int(pc.tileY + localY));
+    processPlaneGather(outPos, 0u);
+    processPlaneGather(outPos, 3u);
 }
