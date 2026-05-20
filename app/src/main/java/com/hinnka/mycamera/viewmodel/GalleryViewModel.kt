@@ -1727,6 +1727,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
      */
     fun setNoiseReduction(value: Float) {
         editNoiseReduction.value = value
+        editChromaNoiseReduction.value = value
     }
 
     /**
@@ -2054,7 +2055,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         colorRecipeParams = recipeParamsOverride ?: editPhotoRecipeParams.value ?: editLutRecipeParams.value,
                         sharpening = editSharpening.value,
                         noiseReduction = editNoiseReduction.value,
-                        chromaNoiseReduction = editChromaNoiseReduction.value,
+                        chromaNoiseReduction = editNoiseReduction.value,
                         rawDenoiseValue = editRawDenoise.value,
                         rawExposureCompensation = editRawExposureCompensation.value,
                         rawAutoExposure = editRawAutoExposure.value,
@@ -2086,7 +2087,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                     finalS = editSharpening.value
                     finalNR = editNoiseReduction.value
-                    finalCNR = editChromaNoiseReduction.value
+                    finalCNR = editNoiseReduction.value
                 } else {
                     finalMetadata = metadata
 
@@ -2346,7 +2347,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         colorRecipeParams = editPhotoRecipeParams.value,
                         sharpening = editSharpening.value,
                         noiseReduction = editNoiseReduction.value,
-                        chromaNoiseReduction = editChromaNoiseReduction.value,
+                        chromaNoiseReduction = editNoiseReduction.value,
                         rawDenoiseValue = editRawDenoise.value,
                         rawExposureCompensation = editRawExposureCompensation.value,
                         rawAutoExposure = editRawAutoExposure.value,

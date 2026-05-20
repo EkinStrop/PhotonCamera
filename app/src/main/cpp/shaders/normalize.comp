@@ -112,7 +112,7 @@ void main() {
         // ── Y-guided spatial chroma denoising ──
         // Chroma noise is LOW-FREQUENCY (large color blobs), so we must sample
         // widely spaced pixels to break the spatial correlation.
-        // Matches BM3D PASS0 approach: 5×5 window with large step scale.
+        // 5×5 guided window with large step scale.
         {
             int cx = int(floor(localFx));
             int cy = int(floor(localFy));
