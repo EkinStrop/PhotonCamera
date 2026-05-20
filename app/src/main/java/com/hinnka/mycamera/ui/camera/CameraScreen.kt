@@ -752,6 +752,7 @@ fun CameraScreen(
 
                     // 相机预览
                     CameraPreviewGL(
+                        isAiFocusBusy = viewModel.isAiFocusBusy,
                         aspectRatio = previewAspectRatio,
                         previewSize = previewSize,
                         captureMode = state.captureMode,

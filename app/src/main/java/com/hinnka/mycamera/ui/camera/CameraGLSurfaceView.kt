@@ -195,6 +195,11 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         requestRender()
     }
 
+    fun setAiFocusBusy(busy: Boolean) {
+        renderer.isAiFocusBusy = busy
+        requestRender()
+    }
+
     /**
      * 获取当前 LUT 强度
      */

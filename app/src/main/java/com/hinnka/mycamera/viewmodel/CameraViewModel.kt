@@ -201,6 +201,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     var isExpanded by mutableStateOf(false)
 
+    var isAiFocusBusy by mutableStateOf(false)
+
     // 新增设置项 StateFlow
     val showLevelIndicator: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.showLevelIndicator }
     val focusPeakingEnabled: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.focusPeakingEnabled }
@@ -732,6 +734,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             cameraController.previewDepthProcessor.latestDepthMap.collect { depth ->
                 glSurfaceView?.setDepthMap(depth)
+            }
+        }
+
+        cameraController.previewAiFocusProcessor.onBusyStateChanged = { busy ->
+            viewModelScope.launch(Dispatchers.Main) {
+                isAiFocusBusy = busy
             }
         }
 
@@ -2035,6 +2043,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun handleAiFocusInputUpdate(bitmap: android.graphics.Bitmap) {
+        if (isAiFocusBusy) return
         if (!state.value.isAutoFocus || state.value.isFocusing) return
         cameraController.previewAiFocusProcessor.targetMode = aiFocusTargetMode.value
         cameraController.previewAiFocusProcessor.scoreThreshold = aiFocusScoreThreshold.value

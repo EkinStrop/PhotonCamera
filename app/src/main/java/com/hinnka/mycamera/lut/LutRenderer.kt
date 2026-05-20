@@ -137,7 +137,10 @@ class LutRenderer : GLSurfaceView.Renderer {
     var onDepthInputAvailable: ((Bitmap) -> Unit)? = null
     private var aiFocusInputFboId: Int = 0
     private var aiFocusInputTextureId: Int = 0
-    private var aiFocusInputPboId: Int = 0
+    private val aiFocusInputPboIds = IntArray(2)
+    private var aiFocusInputPboIndex = 0
+    @Volatile
+    var isAiFocusBusy = false
     private val AI_FOCUS_INPUT_SIZE = 640
     private val aiFocusInputBuffer = ByteBuffer.allocateDirect(AI_FOCUS_INPUT_SIZE * AI_FOCUS_INPUT_SIZE * 4)
     private var lastRunAiFocusInputTime: Long = 0
@@ -585,7 +588,10 @@ class LutRenderer : GLSurfaceView.Renderer {
         depthInputPboId = 0
         aiFocusInputFboId = 0
         aiFocusInputTextureId = 0
-        aiFocusInputPboId = 0
+        aiFocusInputPboIds[0] = 0
+        aiFocusInputPboIds[1] = 0
+        aiFocusInputPboIndex = 0
+        isAiFocusBusy = false
         fboId = 0
         fboTextureId = 0
         stackFboId = 0
@@ -954,7 +960,7 @@ class LutRenderer : GLSurfaceView.Renderer {
         val halationEnabled = redHalation > 0.001f
         val postProcessEffectEnabled = hdfEnabled || halationEnabled
         val bokehNeeded = aperture > 0f && depthMap != null
-        val aiFocusInputNeeded = onAiFocusInputAvailable != null && isAutoFocus
+        val aiFocusInputNeeded = onAiFocusInputAvailable != null && isAutoFocus && !isAiFocusBusy
         val suppressBaselineLayerForVideoLog = videoLogProfile.isEnabled
         val hasBaselineLayer = hasBaselineLayer() && !suppressBaselineLayerForVideoLog
         val hasCreativeLayer = hasCreativeLayer()
@@ -2437,7 +2443,7 @@ class LutRenderer : GLSurfaceView.Renderer {
     private fun runAiFocusInputCaptureInternal(sourceTextureId: Int) {
         if (onAiFocusInputAvailable == null || sourceTextureId == 0) return
         val now = System.currentTimeMillis()
-        if (now - lastRunAiFocusInputTime < 200) return
+        if (now - lastRunAiFocusInputTime < 300) return
         lastRunAiFocusInputTime = now
 
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, aiFocusInputFboId)
@@ -2470,31 +2476,41 @@ class LutRenderer : GLSurfaceView.Renderer {
 
         GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, indexBufferId)
         GLES30.glDrawElements(GLES30.GL_TRIANGLES, 6, GLES30.GL_UNSIGNED_SHORT, 0)
-        GLES30.glFinish()
 
         val pixelSize = AI_FOCUS_INPUT_SIZE * AI_FOCUS_INPUT_SIZE * 4
-        if (aiFocusInputPboId == 0) {
-            val pbos = IntArray(1)
-            GLES30.glGenBuffers(1, pbos, 0)
-            aiFocusInputPboId = pbos[0]
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboId)
-            GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, pixelSize, null, GLES30.GL_STREAM_READ)
-        } else {
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboId)
+        val writeIndex = aiFocusInputPboIndex % 2
+        val readIndex = (aiFocusInputPboIndex + 1) % 2
+
+        if (aiFocusInputPboIds[0] == 0) {
+            GLES30.glGenBuffers(2, aiFocusInputPboIds, 0)
+            for (i in 0 until 2) {
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboIds[i])
+                GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, pixelSize, null, GLES30.GL_STREAM_READ)
+            }
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
         }
 
+        // 异步将当前帧读取到 writeIndex PBO
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboIds[writeIndex])
         GLES30.glReadPixels(0, 0, AI_FOCUS_INPUT_SIZE, AI_FOCUS_INPUT_SIZE, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, 0)
-        val mappedBuffer = GLES30.glMapBufferRange(GLES30.GL_PIXEL_PACK_BUFFER, 0, pixelSize, GLES30.GL_MAP_READ_BIT) as? ByteBuffer
-        if (mappedBuffer != null) {
-            aiFocusInputBuffer.rewind()
-            aiFocusInputBuffer.put(mappedBuffer)
-            GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER)
 
-            val bitmap = Bitmap.createBitmap(AI_FOCUS_INPUT_SIZE, AI_FOCUS_INPUT_SIZE, Bitmap.Config.ARGB_8888)
-            aiFocusInputBuffer.rewind()
-            bitmap.copyPixelsFromBuffer(aiFocusInputBuffer)
-            onAiFocusInputAvailable?.invoke(bitmap)
+        // 提取上一帧已经传输完成的 readIndex PBO 的像素
+        if (aiFocusInputPboIndex > 0) {
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboIds[readIndex])
+            val mappedBuffer = GLES30.glMapBufferRange(GLES30.GL_PIXEL_PACK_BUFFER, 0, pixelSize, GLES30.GL_MAP_READ_BIT) as? ByteBuffer
+            if (mappedBuffer != null) {
+                aiFocusInputBuffer.rewind()
+                aiFocusInputBuffer.put(mappedBuffer)
+                GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER)
+
+                val bitmap = Bitmap.createBitmap(AI_FOCUS_INPUT_SIZE, AI_FOCUS_INPUT_SIZE, Bitmap.Config.ARGB_8888)
+                aiFocusInputBuffer.rewind()
+                bitmap.copyPixelsFromBuffer(aiFocusInputBuffer)
+                onAiFocusInputAvailable?.invoke(bitmap)
+            }
         }
+
+        aiFocusInputPboIndex++
 
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
@@ -2705,9 +2721,10 @@ class LutRenderer : GLSurfaceView.Renderer {
             GLES30.glDeleteBuffers(1, intArrayOf(depthInputPboId), 0)
             depthInputPboId = 0
         }
-        if (aiFocusInputPboId != 0) {
-            GLES30.glDeleteBuffers(1, intArrayOf(aiFocusInputPboId), 0)
-            aiFocusInputPboId = 0
+        if (aiFocusInputPboIds[0] != 0) {
+            GLES30.glDeleteBuffers(2, aiFocusInputPboIds, 0)
+            aiFocusInputPboIds[0] = 0
+            aiFocusInputPboIds[1] = 0
         }
 
         if (meteringFboId != 0) {

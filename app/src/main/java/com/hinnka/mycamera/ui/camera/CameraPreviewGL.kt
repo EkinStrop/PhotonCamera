@@ -63,6 +63,7 @@ fun CameraPreviewGL(
     videoRecorder: VideoRecorder? = null,
     videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     isHlgInput: Boolean = false,
+    isAiFocusBusy: Boolean = false,
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
     aperture: Float = 0f,
     isAutoFocus: Boolean = true,
@@ -252,6 +253,7 @@ fun CameraPreviewGL(
                         glSurfaceView.setIsHlgInput(isHlgInput)
                         glSurfaceView.setAutoFocus(isAutoFocus)
                         glSurfaceView.setFocusPeakingEnabled(focusPeakingEnabled)
+                        glSurfaceView.setAiFocusBusy(isAiFocusBusy)
                     },
                     modifier = Modifier.fillMaxSize()
                 )

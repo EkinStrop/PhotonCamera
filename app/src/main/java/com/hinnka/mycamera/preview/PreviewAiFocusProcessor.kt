@@ -55,6 +55,16 @@ class PreviewAiFocusProcessor(private val context: Context) {
     private var isPrewarmed = false
     @Volatile
     private var isProcessing = false
+        set(value) {
+            field = value
+            onBusyStateChanged?.invoke(value)
+        }
+
+    var onBusyStateChanged: ((Boolean) -> Unit)? = null
+
+    fun isBusy(): Boolean {
+        return isProcessing
+    }
     @Volatile
     private var processingStartTimeMs = 0L
     @Volatile

@@ -49,6 +49,7 @@ class YoloXObjectDetector(context: Context) {
     private val scoresBuffer = ByteBuffer.allocateDirect(DETECTION_COUNT).order(ByteOrder.nativeOrder())
     private val classIdxBuffer = ByteBuffer.allocateDirect(DETECTION_COUNT).order(ByteOrder.nativeOrder())
     private val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
+    private val byteBufferArray = ByteArray(INPUT_SIZE * INPUT_SIZE * 3)
     private val outputs = mapOf(0 to boxesBuffer, 1 to scoresBuffer, 2 to classIdxBuffer)
 
     @Volatile
@@ -169,11 +170,13 @@ class YoloXObjectDetector(context: Context) {
         }
         scaled.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
         inputBuffer.rewind()
+        var byteIdx = 0
         for (pixel in pixels) {
-            inputBuffer.put(((pixel shr 16) and 0xFF).toByte())
-            inputBuffer.put(((pixel shr 8) and 0xFF).toByte())
-            inputBuffer.put((pixel and 0xFF).toByte())
+            byteBufferArray[byteIdx++] = ((pixel shr 16) and 0xFF).toByte()
+            byteBufferArray[byteIdx++] = ((pixel shr 8) and 0xFF).toByte()
+            byteBufferArray[byteIdx++] = (pixel and 0xFF).toByte()
         }
+        inputBuffer.put(byteBufferArray)
         inputBuffer.rewind()
         return inputBuffer
     }
