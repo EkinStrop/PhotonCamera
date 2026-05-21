@@ -63,6 +63,7 @@ import com.hinnka.mycamera.ui.camera.LutEditorTarget
 import com.hinnka.mycamera.ui.camera.RecipeScope
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.ui.components.RawEditPanel
+import com.hinnka.mycamera.ui.components.RawBaselineColorCorrectionBottomSheet
 import com.hinnka.mycamera.ui.theme.AccentOrange
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -143,8 +144,9 @@ fun PhotoEditScreen(
     val lutScrollState = rememberLazyListState()
     val frameScrollState = rememberLazyListState()
     var showLutEditDialog by remember { mutableStateOf(false) }
-    var showBaselineLutEditDialog by remember { mutableStateOf(false) }
+    var showBaselineLutEditSheet by remember { mutableStateOf(false) }
     var baselineLutEditId by remember { mutableStateOf<String?>(null) }
+    var showRawBaselineLutSelectorSheet by remember { mutableStateOf(false) }
     var previewRecipeParamsOverride by remember(editLutId) { mutableStateOf<ColorRecipeParams?>(null) }
 
     BackHandler {
@@ -193,9 +195,15 @@ fun PhotoEditScreen(
     var isZoomed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val refreshKey = currentPhoto?.id?.let { viewModel.photoRefreshKeys[it] } ?: 0L
+    val isBaselineLutEditSheetVisible = showBaselineLutEditSheet && baselineLutEditId != null
+    val isLutEditSheetVisible = showLutEditDialog && editLutId != null
+    val shouldShowEditControls = showControls &&
+        !isLutEditSheetVisible &&
+        !isBaselineLutEditSheetVisible &&
+        !showRawBaselineLutSelectorSheet
 
     val animatePaddingBottom by animateDpAsState(
-        if (showControls) 160.dp else 0.dp
+        if (shouldShowEditControls) 160.dp else 0.dp
     )
     var previewRenderRequestId by remember { mutableLongStateOf(0L) }
 
@@ -267,7 +275,11 @@ fun PhotoEditScreen(
         scope.launch {
             val importedDcps = viewModel.importRawDcps(uris)
             val failedCount = uris.size - importedDcps.size
-            importedDcps.lastOrNull()?.let { viewModel.saveRawDcpSelection(photo, it.id) }
+            importedDcps.lastOrNull()?.let {
+                viewModel.saveRawDcpSelection(photo, it.id) {
+                    viewModel.refreshRawPreview(photo)
+                }
+            }
             when {
                 importedDcps.size == 1 && failedCount == 0 -> {
                     Toast.makeText(context, context.getString(R.string.raw_dcp_import_success, importedDcps.first().getName()), Toast.LENGTH_SHORT).show()
@@ -340,6 +352,37 @@ fun PhotoEditScreen(
             onBack()
         }
         return
+    }
+
+    var pendingRawPreviewRefresh by remember(currentPhoto.id) { mutableStateOf(false) }
+    val isRefreshingRawPreview = viewModel.refreshingPhotos.contains(currentPhoto.id)
+
+    fun refreshRawPreview(showResultToast: Boolean = false) {
+        viewModel.refreshRawPreview(currentPhoto) { success ->
+            if (showResultToast) {
+                Toast.makeText(
+                    context,
+                    if (success) R.string.refresh_success else R.string.refresh_failed,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    fun requestRawPreviewRefresh(showResultToast: Boolean = false) {
+        if (!isRaw) return
+        if (viewModel.refreshingPhotos.contains(currentPhoto.id)) {
+            pendingRawPreviewRefresh = true
+            return
+        }
+        refreshRawPreview(showResultToast)
+    }
+
+    LaunchedEffect(isRefreshingRawPreview, pendingRawPreviewRefresh, currentPhoto.id) {
+        if (!isRefreshingRawPreview && pendingRawPreviewRefresh) {
+            pendingRawPreviewRefresh = false
+            refreshRawPreview()
+        }
     }
 
     Scaffold(
@@ -603,7 +646,7 @@ fun PhotoEditScreen(
                 // 显示预览
                 ZoomableEditImage(
                     previewBitmap = previewBitmap,
-                    isLutEditing = showLutEditDialog,
+                    isLutEditing = isLutEditSheetVisible || isBaselineLutEditSheetVisible,
                     contentDescription = stringResource(R.string.edit),
                     onZoomChange = {
                         isZoomed = it
@@ -654,7 +697,6 @@ fun PhotoEditScreen(
                     },
                     actions = {
                         if (isRaw) {
-                            val isRefreshing = viewModel.refreshingPhotos.contains(currentPhoto.id)
                             val infiniteTransition = rememberInfiniteTransition(label = "refresh")
                             val rotation by infiniteTransition.animateFloat(
                                 initialValue = 0f,
@@ -668,22 +710,16 @@ fun PhotoEditScreen(
 
                             IconButton(
                                 onClick = {
-                                    viewModel.refreshRawPreview(currentPhoto) { success ->
-                                        if (success) {
-                                            Toast.makeText(context, R.string.refresh_success, Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(context, R.string.refresh_failed, Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
+                                    requestRawPreviewRefresh(showResultToast = true)
                                 },
-                                enabled = !isRefreshing
+                                enabled = !isRefreshingRawPreview
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = stringResource(R.string.refresh),
-                                    tint = if (isRefreshing) Color.White.copy(alpha = 0.5f) else Color.White,
+                                    tint = if (isRefreshingRawPreview) Color.White.copy(alpha = 0.5f) else Color.White,
                                     modifier = Modifier.graphicsLayer {
-                                        if (isRefreshing) {
+                                        if (isRefreshingRawPreview) {
                                             rotationZ = rotation
                                         }
                                     }
@@ -732,7 +768,7 @@ fun PhotoEditScreen(
 
             // 编辑控制区域
             AnimatedVisibility(
-                visible = showControls && !showLutEditDialog && !showBaselineLutEditDialog,
+                visible = shouldShowEditControls,
                 enter = slideInVertically(initialOffsetY = { it }) + expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
@@ -1013,7 +1049,7 @@ fun PhotoEditScreen(
                                         },
                                         onEditBaselineRecipe = { lutId ->
                                             baselineLutEditId = lutId
-                                            showBaselineLutEditDialog = true
+                                            showBaselineLutEditSheet = true
                                         },
                                         availableLuts = availableLuts,
                                         thumbnail = previewBitmap,
@@ -1024,18 +1060,24 @@ fun PhotoEditScreen(
                                         rawBlackPointCorrection = editRawBlackPointCorrection,
                                         rawWhitePointCorrection = editRawWhitePointCorrection,
                                         onSelectDcp = { dcpId ->
-                                            viewModel.saveRawDcpSelection(currentPhoto, dcpId)
+                                            viewModel.saveRawDcpSelection(currentPhoto, dcpId) {
+                                                requestRawPreviewRefresh()
+                                            }
                                         },
                                         onImportDcp = {
                                             rawDcpLauncher.launch(arrayOf("application/octet-stream", "*/*"))
                                         },
                                         onDeleteDcp = { dcp ->
+                                            val isDeletingSelectedDcp = editRawDcpId == dcp.id
                                             viewModel.deleteRawDcp(currentPhoto, dcp.id) { success ->
                                                 Toast.makeText(
                                                     context,
                                                     if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
                                                     Toast.LENGTH_SHORT
                                                 ).show()
+                                                if (success && isDeletingSelectedDcp) {
+                                                    requestRawPreviewRefresh()
+                                                }
                                             }
                                         },
                                         onRawNlmNoiseFactorChange = {
@@ -1045,9 +1087,15 @@ fun PhotoEditScreen(
                                             viewModel.saveRawExposureCompensationValue(currentPhoto, it)
                                         },
                                         onRawAutoExposureChange = {
-                                            viewModel.saveRawAutoExposureValue(currentPhoto, it)
+                                            viewModel.saveRawAutoExposureValue(currentPhoto, it) {
+                                                requestRawPreviewRefresh()
+                                            }
                                         },
-                                        onRawDROModeChange = { viewModel.saveRawDROModeValue(currentPhoto, it) },
+                                        onRawDROModeChange = {
+                                            viewModel.saveRawDROModeValue(currentPhoto, it) {
+                                                requestRawPreviewRefresh()
+                                            }
+                                        },
                                         onRawBlackPointCorrectionChange = {
                                             viewModel.saveRawBlackPointCorrectionValue(currentPhoto, it)
                                         },
@@ -1055,7 +1103,14 @@ fun PhotoEditScreen(
                                             viewModel.saveRawWhitePointCorrectionValue(currentPhoto, it)
                                         },
                                         onAdjustmentStart = { },
-                                        onAdjustmentEnd = { },
+                                        onAdjustmentEnd = {
+                                            viewModel.persistCurrentRawEditMetadata(currentPhoto) {
+                                                requestRawPreviewRefresh()
+                                            }
+                                        },
+                                        onOpenBaselineLutSheet = {
+                                            showRawBaselineLutSelectorSheet = true
+                                        },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
@@ -1096,15 +1151,35 @@ fun PhotoEditScreen(
         )
     }
 
-    if (showBaselineLutEditDialog && baselineLutEditId != null) {
+    if (isBaselineLutEditSheetVisible) {
         LutEditBottomSheet(
             lutId = baselineLutEditId!!,
             editorTarget = LutEditorTarget.BASELINE_RAW,
             onDismiss = {
-                showBaselineLutEditDialog = false
-                baselineLutEditId = null
+                showBaselineLutEditSheet = false
+                showRawBaselineLutSelectorSheet = true
             },
             containerColor = Color(0x151A1A1A)
+        )
+    }
+
+    if (showRawBaselineLutSelectorSheet) {
+        RawBaselineColorCorrectionBottomSheet(
+            selectedLutId = editRawBaselineLutId,
+            availableLuts = availableLuts,
+            thumbnail = thumbnailBitmap,
+            containerColor = Color(0x151A1A1A),
+            onSelectLut = { lutId ->
+                viewModel.saveRawBaselineLutSelection(currentPhoto, lutId)
+            },
+            onEditRecipe = { lutId ->
+                baselineLutEditId = lutId
+                showRawBaselineLutSelectorSheet = false
+                showBaselineLutEditSheet = true
+            },
+            onDismiss = {
+                showRawBaselineLutSelectorSheet = false
+            }
         )
     }
 

@@ -1746,7 +1746,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun persistRawEditMetadata(mediaData: MediaData) {
+    private fun persistRawEditMetadata(
+        mediaData: MediaData,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
         val denoise = editRawDenoise.value
         val exposure = editRawExposureCompensation.value
         val autoExposure = editRawAutoExposure.value
@@ -1763,7 +1766,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 TAG,
                 "persist RAW edit metadata: ${mediaData.id}, dro=$droMode, denoise=$denoise"
             )
-            GalleryManager.updateMetadata(context, mediaData.id) { current ->
+            val updated = GalleryManager.updateMetadata(context, mediaData.id) { current ->
                 current.copy(
                     rawDenoiseValue = denoise,
                     rawExposureCompensation = exposure,
@@ -1776,66 +1779,70 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     baselineLutId = baselineLutId,
                     baselineColorRecipeParams = baselineRecipeParams
                 )
-            }.let { updated ->
+            }
+            withContext(Dispatchers.Main) {
                 if (updated != null) {
-                    withContext(Dispatchers.Main) {
-                        if (currentPhotoMetadataId == mediaData.id || currentMediaMetadata != null) {
-                            currentMediaMetadata = updated
-                            currentPhotoMetadataId = mediaData.id
-                        }
-                        mediaData.metadata = updated
-                        _photos.value = _photos.value.map { photo ->
-                            if (photo.id == mediaData.id) photo.copy(metadata = updated) else photo
-                        }
-                        if (_latestPhoto.value?.id == mediaData.id) {
-                            _latestPhoto.value = _latestPhoto.value?.copy(metadata = updated)
-                        }
-                        photoRefreshKeys[mediaData.id] = System.currentTimeMillis()
+                    if (currentPhotoMetadataId == mediaData.id || currentMediaMetadata != null) {
+                        currentMediaMetadata = updated
+                        currentPhotoMetadataId = mediaData.id
                     }
+                    mediaData.metadata = updated
+                    _photos.value = _photos.value.map { photo ->
+                        if (photo.id == mediaData.id) photo.copy(metadata = updated) else photo
+                    }
+                    if (_latestPhoto.value?.id == mediaData.id) {
+                        _latestPhoto.value = _latestPhoto.value?.copy(metadata = updated)
+                    }
+                    photoRefreshKeys[mediaData.id] = System.currentTimeMillis()
                 }
+                onComplete?.invoke(updated != null)
             }
         }
     }
 
-    fun saveRawDenoiseValue(mediaData: MediaData, value: Float) {
+    fun persistCurrentRawEditMetadata(mediaData: MediaData, onComplete: ((Boolean) -> Unit)? = null) {
+        persistRawEditMetadata(mediaData, onComplete)
+    }
+
+    fun saveRawDenoiseValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawDenoise.value = value
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawExposureCompensationValue(mediaData: MediaData, value: Float) {
+    fun saveRawExposureCompensationValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawExposureCompensation.value = value
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawAutoExposureValue(mediaData: MediaData, enabled: Boolean) {
+    fun saveRawAutoExposureValue(mediaData: MediaData, enabled: Boolean, onComplete: ((Boolean) -> Unit)? = null) {
         editRawAutoExposure.value = enabled
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawDROModeValue(mediaData: MediaData, mode: String) {
+    fun saveRawDROModeValue(mediaData: MediaData, mode: String, onComplete: ((Boolean) -> Unit)? = null) {
         val resolvedMode = RawProcessingPreferences.DROMode.fromPersistedName(mode)
         editRawDROMode.value = resolvedMode.name
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawBlackPointCorrectionValue(mediaData: MediaData, value: Float) {
+    fun saveRawBlackPointCorrectionValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawBlackPointCorrection.value = value
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawWhitePointCorrectionValue(mediaData: MediaData, value: Float) {
+    fun saveRawWhitePointCorrectionValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawWhitePointCorrection.value = value
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawDcpSelection(mediaData: MediaData, dcpId: String?) {
+    fun saveRawDcpSelection(mediaData: MediaData, dcpId: String?, onComplete: ((Boolean) -> Unit)? = null) {
         editRawDcpId.value = dcpId
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
-    fun saveRawBaselineLutSelection(mediaData: MediaData, lutId: String?) {
+    fun saveRawBaselineLutSelection(mediaData: MediaData, lutId: String?, onComplete: ((Boolean) -> Unit)? = null) {
         editRawBaselineLutId.value = lutId
-        persistRawEditMetadata(mediaData)
+        persistRawEditMetadata(mediaData, onComplete)
     }
 
     suspend fun importRawDcp(uri: Uri): DcpInfo? {

@@ -905,6 +905,7 @@
     <string name="reference_photo_set_success">Set as reference photo. It will display in next edit!</string>
     <string name="zoom_in">Enlarge</string>
     <string name="zoom_out">Shrink</string>
+    <string name="close">Close</string>
 
     <!-- LUT Synthesis -->
     <string name="lut_synthesis_title">LUT Synthesis</string>

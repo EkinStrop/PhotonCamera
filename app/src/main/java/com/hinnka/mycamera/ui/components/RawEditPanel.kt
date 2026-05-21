@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -55,6 +56,7 @@ fun RawEditPanel(
     onRawWhitePointCorrectionChange: (Float) -> Unit,
     onAdjustmentStart: () -> Unit,
     onAdjustmentEnd: () -> Unit,
+    onOpenBaselineLutSheet: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -76,7 +78,8 @@ fun RawEditPanel(
             availableLuts = availableLuts,
             thumbnail = thumbnail,
             onSelectLut = onSelectBaselineLut,
-            onEditRecipe = onEditBaselineRecipe
+            onEditRecipe = onEditBaselineRecipe,
+            onOpenSheet = onOpenBaselineLutSheet
         )
         Spacer(modifier = Modifier.height(16.dp))
         RawSwitchSettingItem(
@@ -436,17 +439,27 @@ private fun DcpItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RawBaselineColorCorrectionSelector(
     selectedLutId: String?,
     availableLuts: List<LutInfo>,
     thumbnail: Bitmap?,
     onSelectLut: (String?) -> Unit,
-    onEditRecipe: (String) -> Unit
+    onEditRecipe: (String) -> Unit,
+    onOpenSheet: (() -> Unit)? = null
 ) {
-    var showDialog by remember { mutableStateOf(false) }
+    var showSheet by remember { mutableStateOf(false) }
     val selectedLut = availableLuts.find { it.id == selectedLutId }
     val selectedName = selectedLut?.getName() ?: stringResource(R.string.none)
+
+    fun openSheet() {
+        if (onOpenSheet != null) {
+            onOpenSheet()
+        } else {
+            showSheet = true
+        }
+    }
 
     Row(
         modifier = Modifier
@@ -458,7 +471,7 @@ fun RawBaselineColorCorrectionSelector(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .clickable { showDialog = true }
+                .clickable { openSheet() }
         ) {
             Text(
                 text = stringResource(R.string.settings_baseline_raw_title),
@@ -480,53 +493,99 @@ fun RawBaselineColorCorrectionSelector(
         Spacer(modifier = Modifier.width(16.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (selectedLutId != null) {
-                IconButton(onClick = { onEditRecipe(selectedLutId) }) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = stringResource(R.string.settings_baseline_edit_recipe),
-                        tint = Color.White.copy(alpha = 0.6f)
-                    )
-                }
-            }
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.clickable { showDialog = true }
+                modifier = Modifier.clickable { openSheet() }
             )
         }
     }
 
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = {
-                Text(text = stringResource(R.string.settings_baseline_raw_title))
-            },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_baseline_dialog_description),
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-                    LutSelector(
-                        availableLuts = availableLuts,
-                        currentLutId = selectedLutId,
-                        thumbnail = thumbnail,
-                        onLutSelected = { selected ->
-                            onSelectLut(selected)
-                            showDialog = false
-                        }
+    if (showSheet) {
+        RawBaselineColorCorrectionBottomSheet(
+            selectedLutId = selectedLutId,
+            availableLuts = availableLuts,
+            thumbnail = thumbnail,
+            onSelectLut = onSelectLut,
+            onEditRecipe = onEditRecipe,
+            onDismiss = { showSheet = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RawBaselineColorCorrectionBottomSheet(
+    selectedLutId: String?,
+    availableLuts: List<LutInfo>,
+    thumbnail: Bitmap?,
+    containerColor: Color = Color(0xFF1E1E1E),
+    onSelectLut: (String?) -> Unit,
+    onEditRecipe: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = containerColor,
+        scrimColor = Color.Transparent,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_baseline_raw_title),
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.close),
+                        tint = Color.White.copy(alpha = 0.8f)
                     )
                 }
-            },
-            confirmButton = {
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.settings_baseline_dialog_description),
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 13.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            LutSelector(
+                availableLuts = availableLuts,
+                currentLutId = selectedLutId,
+                thumbnail = thumbnail,
+                onLutSelected = { selected ->
+                    onSelectLut(selected)
+                }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 TextButton(
                     onClick = {
-                        showDialog = false
+                        onSelectLut(null)
+                    }
+                ) {
+                    Text(stringResource(R.string.settings_baseline_clear))
+                }
+                TextButton(
+                    onClick = {
                         if (selectedLutId != null) {
                             onEditRecipe(selectedLutId)
                         }
@@ -535,22 +594,7 @@ fun RawBaselineColorCorrectionSelector(
                 ) {
                     Text(stringResource(R.string.settings_baseline_edit_recipe))
                 }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        onClick = {
-                            onSelectLut(null)
-                            showDialog = false
-                        }
-                    ) {
-                        Text(stringResource(R.string.settings_baseline_clear))
-                    }
-                    TextButton(onClick = { showDialog = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
             }
-        )
+        }
     }
 }

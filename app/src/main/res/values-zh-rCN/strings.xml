@@ -905,6 +905,7 @@
     <string name="reference_photo_set_success">已设为编辑参考图。下次进入编辑界面时将显示该悬浮图片！</string>
     <string name="zoom_in">放大</string>
     <string name="zoom_out">缩小</string>
+    <string name="close">关闭</string>
 
     <!-- LUT Synthesis -->
     <string name="lut_synthesis_title">LUT 合成</string>
