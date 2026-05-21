@@ -150,6 +150,10 @@ fun FilterManagementScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deletingLut by remember { mutableStateOf<LutInfo?>(null) }
 
+    // 导出预设对话框状态
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportingLut by remember { mutableStateOf<LutInfo?>(null) }
+
     // 导入状态
     var isImporting by remember { mutableStateOf(false) }
     var importProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }  // 当前进度和总数
@@ -658,14 +662,8 @@ fun FilterManagementScreen(
                             } else null,
                             onExport = if (!isSelectionMode) {
                                 {
-                                    scope.launch {
-                                        val bytes = viewModel.exportLutToPlut(lutInfo.id)
-                                        if (bytes != null) {
-                                            pendingExportBytes = bytes
-                                            pendingExportName = "${lutInfo.getName()}.plut"
-                                            exportLauncher.launch(pendingExportName)
-                                        }
-                                    }
+                                    exportingLut = lutInfo
+                                    showExportDialog = true
                                 }
                             } else null,
                             onEditCategory = if (!isSelectionMode) {
@@ -810,6 +808,128 @@ fun FilterManagementScreen(
                         Text(stringResource(R.string.cancel))
                     }
                 }
+            )
+        }
+
+        // 导出选项对话框
+        if (showExportDialog && exportingLut != null) {
+            val lut = exportingLut!!
+            AlertDialog(
+                onDismissRequest = {
+                    showExportDialog = false
+                    exportingLut = null
+                },
+                title = {
+                    Text(
+                        text = stringResource(R.string.export_lut_title),
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val bytes = viewModel.exportLutToCube(lut.id)
+                                    if (bytes != null) {
+                                        pendingExportBytes = bytes
+                                        pendingExportName = "${lut.getName()}.cube"
+                                        exportLauncher.launch(pendingExportName)
+                                    }
+                                    showExportDialog = false
+                                    exportingLut = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2C2C2C),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.export_mode_raw_cube),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val bytes = viewModel.exportLutToPlut(lut.id)
+                                    if (bytes != null) {
+                                        pendingExportBytes = bytes
+                                        pendingExportName = "${lut.getName()}.plut"
+                                        exportLauncher.launch(pendingExportName)
+                                    }
+                                    showExportDialog = false
+                                    exportingLut = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2C2C2C),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.export_mode_plut),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val bytes = viewModel.exportBakedLutToCube(lut.id)
+                                    if (bytes != null) {
+                                        pendingExportBytes = bytes
+                                        pendingExportName = "${lut.getName()}_baked.cube"
+                                        exportLauncher.launch(pendingExportName)
+                                    }
+                                    showExportDialog = false
+                                    exportingLut = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF6B35),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.export_mode_baked_cube),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showExportDialog = false
+                            exportingLut = null
+                        }
+                    ) {
+                        Text(
+                            text = stringResource(R.string.cancel),
+                            color = Color.LightGray
+                        )
+                    }
+                },
+                containerColor = Color(0xFF1E1E1E),
+                shape = RoundedCornerShape(12.dp)
             )
         }
 

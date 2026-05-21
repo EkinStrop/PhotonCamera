@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.FilterFrames
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ data class ToolboxItem(
 fun ToolboxScreen(
     onBack: () -> Unit,
     onLutCreatorClick: () -> Unit,
+    onLutSynthesisClick: () -> Unit,
     onColorWalkClick: () -> Unit,
     onFilmLibraryClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -48,6 +50,12 @@ fun ToolboxScreen(
             descriptionRes = R.string.lut_creator_desc,
             icon = Icons.Default.Palette,
             onClick = onLutCreatorClick
+        ),
+        ToolboxItem(
+            titleRes = R.string.lut_synthesis_title,
+            descriptionRes = R.string.lut_synthesis_desc,
+            icon = Icons.Default.Layers,
+            onClick = onLutSynthesisClick
         ),
         ToolboxItem(
             titleRes = R.string.color_walk_title,

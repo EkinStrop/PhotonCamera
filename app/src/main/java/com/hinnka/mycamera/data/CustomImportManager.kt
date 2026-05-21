@@ -175,7 +175,7 @@ class CustomImportManager(private val context: Context) {
             val plutFile = File(customLutDir, plutFileName)
 
             // 读取 .cube / .png / .xmp / .plut 文件并转换（或复制）为内部 .plut (v3)
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 FileOutputStream(plutFile).use { outputStream ->
                     val success = when {
                         fileName.endsWith(".xmp", ignoreCase = true) ->
@@ -278,7 +278,7 @@ class CustomImportManager(private val context: Context) {
             val frameConfigFile = File(customFrameDir, "$frameId.json")
 
             // 复制配置文件
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 FileOutputStream(frameConfigFile).use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -391,7 +391,7 @@ class CustomImportManager(private val context: Context) {
             val normalizedFileName = "$dcpId.dcp"
             val dcpFile = File(customDcpDir, normalizedFileName)
 
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 FileOutputStream(dcpFile).use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -424,7 +424,7 @@ class CustomImportManager(private val context: Context) {
             val frameConfigFile = File(customFrameDir, "$frameId.json")
 
             // 复制图片文件
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 FileOutputStream(imageFile).use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -473,7 +473,7 @@ class CustomImportManager(private val context: Context) {
             val imageFileName = (frameIdHint ?: "frame_${UUID.randomUUID()}") + "_image.$extension"
             val imageFile = File(customFrameDir, imageFileName)
 
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 imageFile.outputStream().use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -523,7 +523,7 @@ class CustomImportManager(private val context: Context) {
             val fileName = getFileName(uri) ?: "font_${UUID.randomUUID()}.ttf"
             val fontFile = File(customFontDir, fileName)
 
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 fontFile.outputStream().use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -544,7 +544,7 @@ class CustomImportManager(private val context: Context) {
             val fileName = getFileName(uri) ?: "logo_${UUID.randomUUID()}.png"
             val logoFile = File(customLogoDir, fileName)
 
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            openInputStream(uri)?.use { inputStream ->
                 logoFile.outputStream().use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
@@ -1094,6 +1094,9 @@ class CustomImportManager(private val context: Context) {
      * 从 URI 获取文件名
      */
     private fun getFileName(uri: Uri): String? {
+        if (uri.scheme == "file") {
+            return uri.lastPathSegment
+        }
         return try {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
@@ -1101,6 +1104,20 @@ class CustomImportManager(private val context: Context) {
                 cursor.getString(nameIndex)
             }
         } catch (e: Exception) {
+            uri.lastPathSegment
+        }
+    }
+
+    private fun openInputStream(uri: Uri): java.io.InputStream? {
+        return try {
+            if (uri.scheme == "file") {
+                val path = uri.path ?: return null
+                java.io.FileInputStream(path)
+            } else {
+                context.contentResolver.openInputStream(uri)
+            }
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to open input stream for $uri", e)
             null
         }
     }

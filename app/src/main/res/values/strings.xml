@@ -481,6 +481,10 @@
     <string name="delete_dcp_confirm_message">Delete DCP \"%s\"?</string>
     <string name="rename_dialog_title">Rename</string>
     <string name="export_lut_cube">Export LUT</string>
+    <string name="export_lut_title">Export Filter Preset</string>
+    <string name="export_mode_raw_cube">Export original .cube</string>
+    <string name="export_mode_plut">Export lossless .plut</string>
+    <string name="export_mode_baked_cube">Export baked .cube</string>
     <string name="copy">Copy</string>
     <string name="copy_lut_dialog_title">Copy LUT</string>
     <string name="copy_frame_dialog_title">Copy Frame</string>
@@ -901,4 +905,21 @@
     <string name="reference_photo_set_success">Set as reference photo. It will display in next edit!</string>
     <string name="zoom_in">Enlarge</string>
     <string name="zoom_out">Shrink</string>
+
+    <!-- LUT Synthesis -->
+    <string name="lut_synthesis_title">LUT Synthesis</string>
+    <string name="lut_synthesis_desc">Blend multiple LUTs and color recipes to generate a premium custom LUT.</string>
+    <string name="lut_synthesis_save_success">Synthesized LUT imported successfully!</string>
+    <string name="lut_synthesis_save_failed">Failed to synthesize and import LUT</string>
+    <string name="lut_synthesis_add_lut">Add LUT Layer</string>
+    <string name="lut_synthesis_layer_weight">Intensity</string>
+    <string name="lut_synthesis_bake_params">Color Baking</string>
+    <string name="lut_synthesis_empty_layers">No LUT layers added yet. Click plus below to add.</string>
+    <string name="lut_synthesis_enter_name">Enter LUT Details</string>
+    <string name="lut_synthesis_saving">Synthesizing and exporting LUT...</string>
+    <string name="lut_synthesis_default_preview">Default Preview</string>
+    <string name="lut_synthesis_select_gallery">Select Gallery Image</string>
+    <string name="lut_synthesis_compare_tip">Long press image to compare with original</string>
+    <string name="lut_synthesis_category_label">Category</string>
+    <string name="lut_synthesis_name_label">LUT Name</string>
 </resources>

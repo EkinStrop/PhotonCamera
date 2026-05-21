@@ -476,6 +476,10 @@
     <string name="delete_dcp_confirm_message">删除 DCP "%s"？</string>
     <string name="rename_dialog_title">重命名</string>
     <string name="export_lut_cube">导出LUT</string>
+    <string name="export_lut_title">导出滤镜预设</string>
+    <string name="export_mode_raw_cube">导出原版 .cube</string>
+    <string name="export_mode_plut">导出无损配方 .plut</string>
+    <string name="export_mode_baked_cube">导出烘焙合成 .cube</string>
     <string name="copy">复制</string>
     <string name="copy_lut_dialog_title">复制滤镜</string>
     <string name="copy_frame_dialog_title">复制边框</string>
@@ -901,4 +905,21 @@
     <string name="reference_photo_set_success">已设为编辑参考图。下次进入编辑界面时将显示该悬浮图片！</string>
     <string name="zoom_in">放大</string>
     <string name="zoom_out">缩小</string>
+
+    <!-- LUT Synthesis -->
+    <string name="lut_synthesis_title">LUT 合成</string>
+    <string name="lut_synthesis_desc">将多个已有的 LUT 图层与色彩调色配方融合成一个新的高精度自定义 LUT。</string>
+    <string name="lut_synthesis_save_success">合成的 LUT 导入成功！</string>
+    <string name="lut_synthesis_save_failed">合成并导入 LUT 失败</string>
+    <string name="lut_synthesis_add_lut">添加 LUT 图层</string>
+    <string name="lut_synthesis_layer_weight">强度</string>
+    <string name="lut_synthesis_bake_params">调色参数烘焙</string>
+    <string name="lut_synthesis_empty_layers">暂无叠加的 LUT 图层。点击下方“+”号添加。</string>
+    <string name="lut_synthesis_enter_name">输入 LUT 信息</string>
+    <string name="lut_synthesis_saving">正在合成并导出 LUT...</string>
+    <string name="lut_synthesis_default_preview">默认预览图</string>
+    <string name="lut_synthesis_select_gallery">相册选择预览图</string>
+    <string name="lut_synthesis_compare_tip">长按预览图对比原图</string>
+    <string name="lut_synthesis_category_label">分类名称</string>
+    <string name="lut_synthesis_name_label">LUT 名称</string>
 </resources>

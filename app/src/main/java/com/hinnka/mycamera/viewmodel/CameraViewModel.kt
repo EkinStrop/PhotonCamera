@@ -3571,6 +3571,99 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         outputStream.toByteArray()
     }
 
+    /**
+     * 导出原始无损 .cube 字节数组
+     */
+    suspend fun exportLutToCube(lutId: String): ByteArray? = withContext(Dispatchers.IO) {
+        getLutCubeString(lutId)?.toByteArray(Charsets.UTF_8)
+    }
+
+    /**
+     * 将 LUT 和色彩配方永久烘焙并导出为标准 .cube 字节数组
+     */
+    suspend fun exportBakedLutToCube(lutId: String): ByteArray? = withContext(Dispatchers.IO) {
+        val lutConfig = contentRepository.lutManager.loadLut(lutId) ?: return@withContext null
+        val recipe = contentRepository.lutManager.loadColorRecipeParams(lutId)
+        
+        // 如果配方是默认的，其实不需要烘焙，直接导出原版 .cube 即可
+        if (recipe.isDefault()) {
+            return@withContext getLutCubeString(lutId)?.toByteArray(Charsets.UTF_8)
+        }
+        
+        // 需要烘焙合成
+        val imageProcessor = com.hinnka.mycamera.lut.LutImageProcessor()
+        try {
+            // 1. 创建 Identity CLUT Bitmap (1089x33)
+            val width = 1089
+            val height = 33
+            val clutBitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+            val pixels = IntArray(width * height)
+            for (b in 0 until 33) {
+                for (g in 0 until 33) {
+                    for (r in 0 until 33) {
+                        val x = b * 33 + r
+                        val y = g
+                        val red = (r / 32f * 255f).toInt().coerceIn(0, 255)
+                        val green = (g / 32f * 255f).toInt().coerceIn(0, 255)
+                        val blue = (b / 32f * 255f).toInt().coerceIn(0, 255)
+                        pixels[y * width + x] = (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
+                    }
+                }
+            }
+            clutBitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+            
+            // 2. 应用原始 LUT
+            // 3. 应用去除空间类后的调色烘焙配方
+            val processedBitmap = imageProcessor.applyLut(
+                bitmap = clutBitmap,
+                lutConfig = lutConfig,
+                colorRecipeParams = recipe.copy(
+                    filmGrain = 0f,
+                    vignette = 0f,
+                    halation = 0f,
+                    redHalation = 0f,
+                    chromaticAberration = 0f,
+                    noise = 0f,
+                    lowRes = 0f
+                )
+            )
+            
+            // 4. 将 processedBitmap 转换为 3D LUT Float 数组
+            val lutSize = 33
+            val floatArray = FloatArray(lutSize * lutSize * lutSize * 3)
+            val outPixels = IntArray(width * height)
+            processedBitmap.getPixels(outPixels, 0, width, 0, 0, width, height)
+            
+            for (b in 0 until lutSize) {
+                for (g in 0 until lutSize) {
+                    for (r in 0 until lutSize) {
+                        val x = b * lutSize + r
+                        val y = g
+                        val pixel = outPixels[y * width + x]
+                        val red = ((pixel shr 16) and 0xFF) / 255f
+                        val green = ((pixel shr 8) and 0xFF) / 255f
+                        val blue = (pixel and 0xFF) / 255f
+                        
+                        val index = (b * lutSize * lutSize + g * lutSize + r) * 3
+                        floatArray[index] = red
+                        floatArray[index + 1] = green
+                        floatArray[index + 2] = blue
+                    }
+                }
+            }
+            
+            val lutInfo = contentRepository.lutManager.getLutInfo(lutId)
+            val name = lutInfo?.getName() ?: "BakedLUT"
+            val cubeString = LutGenerator.exportToCubeString(floatArray, lutSize, name)
+            cubeString?.toByteArray(Charsets.UTF_8)
+        } catch (e: Exception) {
+            PLog.e("CameraViewModel", "Failed to bake LUT to cube", e)
+            null
+        } finally {
+            imageProcessor.release()
+        }
+    }
+
     suspend fun exportFrameToJson(frame: FrameInfo): ByteArray? = withContext(Dispatchers.IO) {
         contentRepository.getCustomImportManager().exportFrameJson(frame)
     }

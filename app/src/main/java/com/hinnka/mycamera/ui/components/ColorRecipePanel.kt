@@ -47,8 +47,19 @@ fun ColorRecipePanel(
     onParamsChange: (ColorRecipeParams) -> Unit,
     onRemarksChange: (String) -> Unit,
     onCurveChange: (CurveChannel, FloatArray?) -> Unit = { _, _ -> },
+    hideNonBakeable: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val isBakeable: (RecipeParam) -> Boolean = { param ->
+        param != RecipeParam.VIGNETTE &&
+        param != RecipeParam.FILM_GRAIN &&
+        param != RecipeParam.HDF &&
+        param != RecipeParam.HALATION &&
+        param != RecipeParam.CHROMATIC_ABERRATION &&
+        param != RecipeParam.NOISE &&
+        param != RecipeParam.LOW_RES
+    }
+
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var selectedLchTabIndex by remember { mutableIntStateOf(0) }
     var selectedCalibrationTabIndex by remember { mutableIntStateOf(0) }
@@ -185,7 +196,8 @@ fun ColorRecipePanel(
             5 -> onParamsChange(resetParams(currentParams, lchGroups.flatMap { it.second }))
             8 -> Unit
             else -> {
-                val params = parameterGroups.getOrNull(tabIndex).orEmpty()
+                val allParams = parameterGroups.getOrNull(tabIndex).orEmpty()
+                val params = if (hideNonBakeable) allParams.filter(isBakeable) else allParams
                 if (params.isNotEmpty()) {
                     onParamsChange(resetParams(currentParams, params))
                 }
@@ -288,7 +300,15 @@ fun ColorRecipePanel(
                                 }
                             }
                             else -> {
-                                parameterGroups[selectedTabIndex].forEach { param ->
+                                val allParams = parameterGroups.getOrNull(selectedTabIndex).orEmpty()
+                                val visibleParams = remember(selectedTabIndex, hideNonBakeable) {
+                                    if (hideNonBakeable) {
+                                        allParams.filter(isBakeable)
+                                    } else {
+                                        allParams
+                                    }
+                                }
+                                visibleParams.forEach { param ->
                                     key(param) {
                                         ColorRecipeSlider(
                                             param = param,
@@ -328,6 +348,9 @@ fun ColorRecipePanel(
         ) {
             Row(modifier = Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
                 tabs.forEachIndexed { index, title ->
+                    if (hideNonBakeable && (title == R.string.recipe_tab_lens || title == R.string.recipe_tab_remarks)) {
+                        return@forEachIndexed
+                    }
                     val isSelected = selectedTabIndex == index && isExpanded
                     val backgroundColor by animateColorAsState(
                         if (isSelected) Color.White.copy(alpha = 0.2f) else Color.Transparent,

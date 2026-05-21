@@ -108,6 +108,7 @@ object Routes {
     const val FRAME_MANAGEMENT = "frame_management"
     const val FRAME_EDITOR = "frame_editor?frameId={frameId}&imageFrame={imageFrame}"
     const val LUT_CREATOR = "lut_creator"
+    const val LUT_SYNTHESIS = "lut_synthesis"
     const val TOOLBOX = "toolbox"
     const val PHANTOM_PIP_CROP = "phantom_pip_crop"
     const val COLOR_WALK = "color_walk"
@@ -707,10 +708,20 @@ fun NavigationHost(
                 )
             }
 
+            composable(Routes.LUT_SYNTHESIS) {
+                com.hinnka.mycamera.lut.synthesis.LutSynthesisScreen(
+                    onNavigateBack = {
+                        cameraViewModel.refreshCustomContent()
+                        navController.popBackStack()
+                    }
+                )
+            }
+
             composable(Routes.TOOLBOX) {
                 ToolboxScreen(
                     onBack = { navController.popBackStack() },
                     onLutCreatorClick = { navController.navigate(Routes.LUT_CREATOR) },
+                    onLutSynthesisClick = { navController.navigate(Routes.LUT_SYNTHESIS) },
                     onColorWalkClick = { navController.navigate(Routes.COLOR_WALK) },
                     onFilmLibraryClick = { navController.navigate(Routes.FILM_LIBRARY) }
                 )
