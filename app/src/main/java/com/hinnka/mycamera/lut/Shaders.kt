@@ -458,6 +458,17 @@ object Shaders {
         ) * lms3;
     }
 
+    vec3 linearRgbToCieLab(vec3 linearRgb) {
+        vec3 xyz = mat3(
+            0.4124564, 0.2126729, 0.0193339,
+            0.3575761, 0.7151522, 0.1191920,
+            0.1804375, 0.0721750, 0.9503041
+        ) * clamp(linearRgb, 0.0, 1.0);
+        xyz /= vec3(0.95047, 1.0, 1.08883);
+        vec3 f = mix(7.787037 * xyz + vec3(16.0 / 116.0), pow(max(xyz, vec3(0.0)), vec3(1.0 / 3.0)), step(vec3(0.008856), xyz));
+        return vec3(116.0 * f.y - 16.0, 500.0 * (f.x - f.y), 200.0 * (f.y - f.z));
+    }
+
     float wrapAngle(float angle) {
         return mod(angle + PI, 2.0 * PI) - PI;
     }
@@ -478,14 +489,56 @@ object Shaders {
         return hueWeight * chromaWeight;
     }
 
-    float skinBandWeight(float hue, float chroma, float lightness) {
-        // Skin center around 45 degrees in Oklab
-        float dist = abs(wrapAngle(hue - radians(45.0)));
-        float hueWeight = 1.0 - smoothstep(radians(15.0), radians(35.0), dist);
-        float chromaWeight = smoothstep(0.01, 0.08, chroma);
-        // Broader lightness range to include darker and lighter skin tones
-        float lightnessWeight = smoothstep(0.20, 0.40, lightness) * (1.0 - smoothstep(0.85, 0.95, lightness));
-        return hueWeight * chromaWeight * lightnessWeight;
+    float rtRange(float value, float minValue, float maxValue) {
+        return step(minValue, value) * (1.0 - step(maxValue, value));
+    }
+
+    float rtSkinCase(float l, float h, float c, float lMin, float lMax, float hMin, float hMax, float cMin, float cMax, float weight) {
+        return rtRange(l, lMin, lMax) * rtRange(h, hMin, hMax) * rtRange(c, cMin, cMax) * weight;
+    }
+
+    float skinBandWeight(vec3 linearColor) {
+        // Direct port of RawTherapee Color::SkinSat ranges in CIELAB LCh.
+        // Weights only rank RT's real / extended / transition categories.
+        vec3 lab = linearRgbToCieLab(linearColor);
+        float l = lab.x;
+        float h = atan(lab.z, lab.y);
+        float c = length(lab.yz);
+        float core = 1.0;
+        float extended = 0.67;
+        float transition = 0.33;
+        float w = 0.0;
+
+        w = max(w, rtSkinCase(l, h, c, 85.0, 100.0, 0.73, 1.23, 8.0, 22.0, core));
+        w = max(w, rtSkinCase(l, h, c, 92.0, 100.0, 0.80, 1.65, 7.0, 15.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 92.0, 100.0, -0.10, 1.65, 7.0, 18.0, transition));
+        w = max(w, rtSkinCase(l, h, c, 85.0, 92.0, 0.70, 1.40, 7.0, 34.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 85.0, 92.0, 0.00, 1.65, 7.0, 43.0, transition));
+
+        w = max(w, rtSkinCase(l, h, c, 70.0, 85.0, 0.40, 1.29, 8.0, 50.0, core));
+        w = max(w, rtSkinCase(l, h, c, 70.0, 85.0, -0.18, 1.50, 7.0, 56.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 70.0, 85.0, -0.18, 1.65, 7.0, 63.0, transition));
+
+        w = max(w, rtSkinCase(l, h, c, 52.0, 70.0, 0.30, 1.37, 11.0, 47.0, core));
+        w = max(w, rtSkinCase(l, h, c, 52.0, 70.0, -0.18, 1.50, 7.0, 56.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 52.0, 70.0, -0.18, 1.65, 7.0, 63.0, transition));
+
+        w = max(w, rtSkinCase(l, h, c, 35.0, 52.0, 0.30, 1.27, 13.0, 44.0, core));
+        w = max(w, rtSkinCase(l, h, c, 35.0, 52.0, -0.18, 1.50, 7.0, 56.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 35.0, 52.0, -0.18, 1.65, 7.0, 63.0, transition));
+
+        w = max(w, rtSkinCase(l, h, c, 20.0, 35.0, 0.30, 1.22, 7.0, 40.0, core));
+        w = max(w, rtSkinCase(l, h, c, 20.0, 35.0, -0.18, 1.50, 7.0, 56.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 20.0, 35.0, -0.18, 1.65, 7.0, 63.0, transition));
+
+        w = max(w, rtSkinCase(l, h, c, 10.0, 20.0, -0.20, 1.05, 8.0, 28.0, core));
+        w = max(w, rtSkinCase(l, h, c, 10.0, 20.0, -0.18, 1.00, 7.0, 40.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 10.0, 20.0, -0.18, 1.60, 7.0, 50.0, transition));
+
+        w = max(w, rtSkinCase(l, h, c, 0.0, 10.0, -0.18, 1.00, 8.0, 28.0, core));
+        w = max(w, rtSkinCase(l, h, c, 0.0, 10.0, -0.18, 1.00, 7.0, 40.0, extended));
+        w = max(w, rtSkinCase(l, h, c, 0.0, 10.0, -0.18, 1.60, 7.0, 50.0, transition));
+        return w;
     }
 
     vec3 applyOklchDensity(vec3 srgbColor, float density) {
@@ -555,10 +608,7 @@ object Shaders {
             lightnessShift *= commonChromaWeight;
         }
 
-        float redDominance = max(0.0, lab.y - lab.z);
-        // Relax lip suppression slightly to avoid catching ruddy skin
-        float lipSuppression = 1.0 - smoothstep(0.02, 0.08, redDominance);
-        float skinWeight = skinBandWeight(hue, chroma, lab.x) * lipSuppression;
+        float skinWeight = skinBandWeight(linearColor);
         if (skinWeight > 0.0001) {
             hueShift += uLchHueAdjustments[0] * skinWeight * radians(10.0);
             chromaScale += uLchChromaAdjustments[0] * skinWeight;
