@@ -198,6 +198,7 @@ fun SettingsScreen(
     // 软件处理参数
     val sharpening by viewModel.sharpening.collectAsState(initial = 0f)
     val noiseReduction by viewModel.noiseReduction.collectAsState(initial = 0f)
+    val chromaNoiseReduction by viewModel.chromaNoiseReduction.collectAsState(initial = 0f)
     val defaultFocalLength by viewModel.defaultFocalLength.collectAsState(initial = 0f)
     val customLensIds by viewModel.customLensIds.collectAsState(initial = emptyList())
     val multiFrameCount by viewModel.multiFrameCount.collectAsState()
@@ -1289,6 +1290,17 @@ fun SettingsScreen(
                             valueRange = 0f..1f,
                             resetValue = 0f,
                             onValueChange = { viewModel.setNoiseReduction(it) }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        SliderSettingItem(
+                            title = stringResource(R.string.settings_chroma_noise_reduction),
+                            description = stringResource(R.string.settings_chroma_noise_reduction_description),
+                            value = chromaNoiseReduction,
+                            valueRange = 0f..1f,
+                            resetValue = 0f,
+                            onValueChange = { viewModel.setChromaNoiseReduction(it) }
                         )
                     }
 

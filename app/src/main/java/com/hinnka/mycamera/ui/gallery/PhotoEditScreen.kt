@@ -92,6 +92,7 @@ private data class PreviewRenderSignature(
     val editFrameCustomProperties: Map<String, String>,
     val editSharpening: Float,
     val editNoiseReduction: Float,
+    val editChromaNoiseReduction: Float,
     val editRawDenoise: Float,
     val editRawExposureCompensation: Float,
     val editRawAutoExposure: Boolean,
@@ -165,6 +166,7 @@ fun PhotoEditScreen(
 
     val editSharpening by viewModel.editSharpening.collectAsState()
     val editNoiseReduction by viewModel.editNoiseReduction.collectAsState()
+    val editChromaNoiseReduction by viewModel.editChromaNoiseReduction.collectAsState()
     val editRawNlmNoiseFactor by viewModel.editRawDenoise.collectAsState()
     val editRawExposureCompensation by viewModel.editRawExposureCompensation.collectAsState()
     val editRawAutoExposure by viewModel.editRawAutoExposure.collectAsState()
@@ -221,6 +223,7 @@ fun PhotoEditScreen(
             editFrameCustomProperties = editFrameCustomProperties.toMap(),
             editSharpening = editSharpening,
             editNoiseReduction = editNoiseReduction,
+            editChromaNoiseReduction = editChromaNoiseReduction,
             editRawDenoise = editRawNlmNoiseFactor,
             editRawExposureCompensation = editRawExposureCompensation,
             editRawAutoExposure = editRawAutoExposure,
@@ -1037,6 +1040,14 @@ fun PhotoEditScreen(
                                         valueRange = 0f..1f,
                                         resetValue = 0f,
                                         onValueChange = { viewModel.setNoiseReduction(it) },
+                                        onValueChangeFinished = { }
+                                    )
+                                    SliderSettingItem(
+                                        title = stringResource(R.string.settings_chroma_noise_reduction),
+                                        value = editChromaNoiseReduction,
+                                        valueRange = 0f..1f,
+                                        resetValue = 0f,
+                                        onValueChange = { viewModel.setChromaNoiseReduction(it) },
                                         onValueChangeFinished = { }
                                     )
                                 }

@@ -11,6 +11,7 @@ import android.opengl.GLES30
 import android.opengl.GLES31
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.model.ColorPaletteMapper
+import com.hinnka.mycamera.lut.ChromaDenoiseShaders
 import com.hinnka.mycamera.raw.DenoiseProfileShaders
 import com.hinnka.mycamera.utils.PLog
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -62,6 +63,7 @@ class LutImageProcessor {
     private var bitmapDenoiseReduceSecondProgram = 0
     private var bitmapDenoiseBacktransformProgram = 0
     private var bitmapDenoisePassthroughProgram = 0
+    private var bitmapChromaDenoiseProgram = 0
 
     private val bitmapDenoiseTexId = IntArray(2)
     private val bitmapDenoiseFboId = IntArray(2)
@@ -230,7 +232,7 @@ class LutImageProcessor {
      * @param colorRecipeParams 色彩配方参数
      * @param sharpeningValue 锐化强度
      * @param noiseReductionValue 降噪强度
-     * @param chromaNoiseReductionValue 兼容旧元数据，bitmap denoiseprofile 使用 noiseReductionValue 统一控制亮度和色度
+     * @param chromaNoiseReductionValue 减少杂色强度
      */
     suspend fun applyLut(
         argbData: ShortBuffer,
@@ -261,6 +263,7 @@ class LutImageProcessor {
         // 后期处理参数
         val sharpening: Float = sharpeningValue
         val noiseReduction: Float = noiseReductionValue
+        val chromaNoiseReduction: Float = chromaNoiseReductionValue
 
         // 激活上下文
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
@@ -273,8 +276,14 @@ class LutImageProcessor {
         uploadImageTextureFromArgb(argbData, width, height)
         currentCoroutineContext().ensureActive()
 
+        if (chromaNoiseReduction > 0) {
+            renderBitmapChromaDenoise(imageTextureId, width, height, chromaNoiseReduction)
+            currentCoroutineContext().ensureActive()
+        }
+
+        val chromaDenoisedTexId = if (chromaNoiseReduction > 0) bitmapDenoiseTexId[0] else imageTextureId
         if (noiseReduction > 0) {
-            renderBitmapDenoiseProfile(imageTextureId, width, height, noiseReduction)
+            renderBitmapDenoiseProfile(chromaDenoisedTexId, width, height, noiseReduction)
             currentCoroutineContext().ensureActive()
         }
 
@@ -283,7 +292,11 @@ class LutImageProcessor {
             uploadLutTexture(lutConfig)
         }
 
-        val inputTexId = if (noiseReduction > 0) bitmapDenoiseTexId[1] else imageTextureId
+        val inputTexId = if (noiseReduction > 0) {
+            bitmapDenoiseTexId[1]
+        } else {
+            chromaDenoisedTexId
+        }
 
         // HDF 光晕效果预处理（在主 shader 之前，需要模糊的光晕纹理）
         if (halation > 0f) {
@@ -379,7 +392,7 @@ class LutImageProcessor {
      * @param colorRecipeParams 色彩配方参数
      * @param sharpeningValue 锐化强度
      * @param noiseReductionValue 降噪强度
-     * @param chromaNoiseReductionValue 兼容旧元数据，bitmap denoiseprofile 使用 noiseReductionValue 统一控制亮度和色度
+     * @param chromaNoiseReductionValue 减少杂色强度
      */
     suspend fun applyLut(
         bitmap: Bitmap,
@@ -406,6 +419,7 @@ class LutImageProcessor {
         // 后期处理参数（仅在软件处理模式下生效）
         val sharpening: Float = sharpeningValue
         val noiseReduction: Float = noiseReductionValue
+        val chromaNoiseReduction: Float = chromaNoiseReductionValue
 
         // 确保上下文激活
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
@@ -421,8 +435,14 @@ class LutImageProcessor {
         uploadImageTexture(bitmap)
         currentCoroutineContext().ensureActive()
 
+        if (chromaNoiseReduction > 0) {
+            renderBitmapChromaDenoise(imageTextureId, width, height, chromaNoiseReduction)
+            currentCoroutineContext().ensureActive()
+        }
+
+        val chromaDenoisedTexId = if (chromaNoiseReduction > 0) bitmapDenoiseTexId[0] else imageTextureId
         if (noiseReduction > 0) {
-            renderBitmapDenoiseProfile(imageTextureId, width, height, noiseReduction)
+            renderBitmapDenoiseProfile(chromaDenoisedTexId, width, height, noiseReduction)
             currentCoroutineContext().ensureActive()
         }
 
@@ -431,7 +451,11 @@ class LutImageProcessor {
             uploadLutTexture(lutConfig)
         }
 
-        val inputTexId = if (noiseReduction > 0) bitmapDenoiseTexId[1] else imageTextureId
+        val inputTexId = if (noiseReduction > 0) {
+            bitmapDenoiseTexId[1]
+        } else {
+            chromaDenoisedTexId
+        }
 
         // HDF 光晕效果预处理
         if (halation > 0f) {
@@ -522,8 +546,8 @@ class LutImageProcessor {
         setupFramebuffer(width, height)
         uploadImageTexture(bitmap)
 
-        renderBitmapDenoiseProfile(imageTextureId, width, height, strength)
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, bitmapDenoiseFboId[1])
+        renderBitmapChromaDenoise(imageTextureId, width, height, strength)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, bitmapDenoiseFboId[0])
 
         val pixelSize = width * height * 4
         val pixelBuffer = com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())?.order(ByteOrder.nativeOrder())
@@ -1001,12 +1025,14 @@ class LutImageProcessor {
         bitmapDenoiseReduceSecondProgram = compileComputeProgram(DenoiseProfileShaders.REDUCE_SECOND, "BitmapDenoise_ReduceSecond")
         bitmapDenoiseBacktransformProgram = compileComputeProgram(DenoiseProfileShaders.BACKTRANSFORM_Y0U0V0, "BitmapDenoise_Backtransform")
         bitmapDenoisePassthroughProgram = createFragmentProgram(IMAGE_VERTEX_SHADER, TEXTURE_PASSTHROUGH_SHADER, "BitmapDenoise_Passthrough")
+        bitmapChromaDenoiseProgram = createFragmentProgram(IMAGE_VERTEX_SHADER, ChromaDenoiseShaders.PASS_CHROMA_DENOISE, "BitmapChromaDenoise_BM3DPass0")
         PLog.d(
             TAG,
             "Bitmap denoiseprofile programs initialized: pre=$bitmapDenoisePreconditionProgram " +
                 "decompose=$bitmapDenoiseDecomposeProgram synth=$bitmapDenoiseSynthesizeProgram " +
                 "reduce1=$bitmapDenoiseReduceFirstProgram reduce2=$bitmapDenoiseReduceSecondProgram " +
-                "back=$bitmapDenoiseBacktransformProgram pass=$bitmapDenoisePassthroughProgram"
+                "back=$bitmapDenoiseBacktransformProgram pass=$bitmapDenoisePassthroughProgram " +
+                "chroma=$bitmapChromaDenoiseProgram"
         )
     }
 
@@ -1123,6 +1149,52 @@ class LutImageProcessor {
         }
         dispatchBitmapDenoiseBacktransform(finalInput, bitmapDenoiseTexId[1], width, height, params)
         checkGlError("renderBitmapDenoiseProfile")
+    }
+
+    private fun renderBitmapChromaDenoise(
+        sourceTextureId: Int,
+        width: Int,
+        height: Int,
+        chromaNoiseReduction: Float
+    ) {
+        setupBitmapDenoiseFramebuffers(width, height)
+
+        val strength = chromaNoiseReduction.coerceIn(0f, 1f)
+        if (strength <= 0f || bitmapChromaDenoiseProgram == 0) {
+            renderTexturePassthrough(sourceTextureId, bitmapDenoiseFboId[0], width, height)
+            return
+        }
+
+        val identityMatrix = FloatArray(16)
+        android.opengl.Matrix.setIdentityM(identityMatrix, 0)
+        val h = strength * strength * ChromaDenoiseShaders.SIGMA_STRENGTH_AT_SLIDER_ONE
+
+        GLES30.glUseProgram(bitmapChromaDenoiseProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, bitmapDenoiseFboId[0])
+        GLES30.glViewport(0, 0, width, height)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(bitmapChromaDenoiseProgram, "uInputTexture"), 0)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(bitmapChromaDenoiseProgram, "uTexelSize"),
+            1.0f / width,
+            1.0f / height
+        )
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(bitmapChromaDenoiseProgram, "uMVPMatrix"),
+            1,
+            false,
+            identityMatrix,
+            0
+        )
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(bitmapChromaDenoiseProgram, "uH"), h)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(bitmapChromaDenoiseProgram, "uNoiseModel"),
+            BITMAP_DENOISE_A * 2f,
+            BITMAP_DENOISE_B * 2f
+        )
+        drawQuad(bitmapChromaDenoiseProgram)
+        checkGlError("renderBitmapChromaDenoise")
     }
 
     private fun renderTexturePassthrough(sourceTextureId: Int, targetFboId: Int, width: Int, height: Int) {
@@ -1767,6 +1839,7 @@ class LutImageProcessor {
         if (bitmapDenoiseReduceSecondProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseReduceSecondProgram)
         if (bitmapDenoiseBacktransformProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseBacktransformProgram)
         if (bitmapDenoisePassthroughProgram != 0) GLES30.glDeleteProgram(bitmapDenoisePassthroughProgram)
+        if (bitmapChromaDenoiseProgram != 0) GLES30.glDeleteProgram(bitmapChromaDenoiseProgram)
         for (i in 0..1) {
             if (bitmapDenoiseTexId[i] != 0) GLES30.glDeleteTextures(1, intArrayOf(bitmapDenoiseTexId[i]), 0)
             if (bitmapDenoiseFboId[i] != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(bitmapDenoiseFboId[i]), 0)
