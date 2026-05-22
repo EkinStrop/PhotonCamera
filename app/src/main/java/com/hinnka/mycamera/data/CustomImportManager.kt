@@ -277,28 +277,24 @@ class CustomImportManager(private val context: Context) {
             val frameId = "custom_${UUID.randomUUID()}"
             val frameConfigFile = File(customFrameDir, "$frameId.json")
 
-            // 复制配置文件
-            openInputStream(uri)?.use { inputStream ->
-                FileOutputStream(frameConfigFile).use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
+            val importedJson = openInputStream(uri)?.use { inputStream ->
+                inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             } ?: return null
 
-            // 验证并解析配置
-            val configJson = frameConfigFile.readText()
-            val frameConfig = JSONObject(configJson)
-
-            // 提取边框名称
-            val nameObj = frameConfig.getJSONObject("name")
-            val nameMap = mutableMapOf<String, String>()
-            nameObj.keys().forEach { lang ->
-                nameMap[lang] = nameObj.getString(lang)
+            val importedTemplate = FrameTemplateParser.parseTemplate(importedJson)
+            val templateToSave = importedTemplate.copy(id = frameId)
+            val validationErrors = FrameTemplateParser.validateTemplate(templateToSave)
+            if (validationErrors.isNotEmpty()) {
+                PLog.e(TAG, "Failed to import frame, invalid fields: $validationErrors")
+                return null
             }
 
-            // 保存到配置文件
-            saveFrameToConfig(frameId, nameMap, "$frameId.json")
+            frameConfigFile.writeText(FrameTemplateParser.serializeTemplate(templateToSave))
 
-            PLog.d(TAG, "Frame imported successfully: $frameId")
+            // 保存到配置文件
+            saveFrameToConfig(frameId, templateToSave.nameMap, "$frameId.json")
+
+            PLog.d(TAG, "Frame imported successfully: $frameId source=${importedTemplate.id}")
             frameId
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to import frame", e)

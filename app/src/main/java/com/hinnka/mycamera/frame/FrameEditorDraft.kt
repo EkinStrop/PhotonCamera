@@ -139,9 +139,10 @@ data class FrameEditorDraft(
         ): FrameEditorDraft {
             val elements = template.elements.map { FrameElementDraft.fromElement(it) }
             val elementsTop = template.elementsTop?.map { FrameElementDraft.fromElement(it) }
+            val editableFrameId = frameInfo?.id?.takeIf { frameInfo.isBuiltIn == false }
             return FrameEditorDraft(
-                sourceFrameId = template.id,
-                editableFrameId = template.id.takeIf { frameInfo?.isBuiltIn == false },
+                sourceFrameId = editableFrameId ?: template.id,
+                editableFrameId = editableFrameId,
                 isBuiltInSource = frameInfo?.isBuiltIn ?: false,
                 name = template.getName(),
                 layout = FrameLayoutDraft.fromLayout(template.layout),
