@@ -136,6 +136,7 @@ class LutRenderer : GLSurfaceView.Renderer {
     private var aiFocusInputFboId: Int = 0
     private var aiFocusInputTextureId: Int = 0
     private val aiFocusInputPboIds = IntArray(2)
+    private val aiFocusInputPboFences = LongArray(2)
     private var aiFocusInputPboIndex = 0
     @Volatile
     var isAiFocusBusy = false
@@ -311,6 +312,8 @@ class LutRenderer : GLSurfaceView.Renderer {
 
     // 标记 Surface 是否已创建（GL 上下文是否可用）
     private var surfaceReady = false
+    @Volatile
+    private var renderingPaused = false
 
     // 待处理的 LUT 配置（Surface 创建前设置的 LUT）
     private var pendingLutConfig: LutConfig? = null
@@ -586,6 +589,8 @@ class LutRenderer : GLSurfaceView.Renderer {
         aiFocusInputTextureId = 0
         aiFocusInputPboIds[0] = 0
         aiFocusInputPboIds[1] = 0
+        aiFocusInputPboFences[0] = 0L
+        aiFocusInputPboFences[1] = 0L
         aiFocusInputPboIndex = 0
         isAiFocusBusy = false
         fboId = 0
@@ -909,6 +914,7 @@ class LutRenderer : GLSurfaceView.Renderer {
      * 绘制帧
      */
     override fun onDrawFrame(gl: GL10?) {
+        if (renderingPaused) return
         if (viewportWidth <= 0 || viewportHeight <= 0) return
 
         // 更新 SurfaceTexture
@@ -2417,7 +2423,8 @@ class LutRenderer : GLSurfaceView.Renderer {
     }
 
     private fun runAiFocusInputCaptureInternal(sourceTextureId: Int) {
-        if (onAiFocusInputAvailable == null || sourceTextureId == 0) return
+        if (renderingPaused || onAiFocusInputAvailable == null || sourceTextureId == 0) return
+        if (aiFocusInputFboId == 0 || copyProgramId == 0) return
         val now = System.currentTimeMillis()
         if (now - lastRunAiFocusInputTime < 300) return
         lastRunAiFocusInputTime = now
@@ -2469,9 +2476,11 @@ class LutRenderer : GLSurfaceView.Renderer {
         // 异步将当前帧读取到 writeIndex PBO
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboIds[writeIndex])
         GLES30.glReadPixels(0, 0, AI_FOCUS_INPUT_SIZE, AI_FOCUS_INPUT_SIZE, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, 0)
+        deleteAiFocusInputFence(writeIndex)
+        aiFocusInputPboFences[writeIndex] = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
 
-        // 提取上一帧已经传输完成的 readIndex PBO 的像素
-        if (aiFocusInputPboIndex > 0) {
+        // 只在上一帧 PBO 已完成时读取，避免 GL 线程在暂停流程中被同步等待卡住。
+        if (aiFocusInputPboIndex > 0 && isAiFocusInputFenceReady(readIndex)) {
             GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, aiFocusInputPboIds[readIndex])
             val mappedBuffer = GLES30.glMapBufferRange(GLES30.GL_PIXEL_PACK_BUFFER, 0, pixelSize, GLES30.GL_MAP_READ_BIT) as? ByteBuffer
             if (mappedBuffer != null) {
@@ -2484,6 +2493,7 @@ class LutRenderer : GLSurfaceView.Renderer {
                 bitmap.copyPixelsFromBuffer(aiFocusInputBuffer)
                 onAiFocusInputAvailable?.invoke(bitmap)
             }
+            deleteAiFocusInputFence(readIndex)
         }
 
         aiFocusInputPboIndex++
@@ -2491,6 +2501,25 @@ class LutRenderer : GLSurfaceView.Renderer {
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, viewportWidth, viewportHeight)
+    }
+
+    private fun isAiFocusInputFenceReady(index: Int): Boolean {
+        val fence = aiFocusInputPboFences[index]
+        if (fence == 0L) return false
+        val result = GLES30.glClientWaitSync(fence, 0, 0)
+        return result == GLES30.GL_ALREADY_SIGNALED || result == GLES30.GL_CONDITION_SATISFIED
+    }
+
+    private fun deleteAiFocusInputFence(index: Int) {
+        val fence = aiFocusInputPboFences[index]
+        if (fence != 0L) {
+            GLES30.glDeleteSync(fence)
+            aiFocusInputPboFences[index] = 0L
+        }
+    }
+
+    fun setRenderingPaused(paused: Boolean) {
+        renderingPaused = paused
     }
 
     private fun calculateMeteringResults(meteringBytes: ByteArray, focus: PointF?, mode: MeteringMode) {
@@ -2698,6 +2727,8 @@ class LutRenderer : GLSurfaceView.Renderer {
             depthInputPboId = 0
         }
         if (aiFocusInputPboIds[0] != 0) {
+            deleteAiFocusInputFence(0)
+            deleteAiFocusInputFence(1)
             GLES30.glDeleteBuffers(2, aiFocusInputPboIds, 0)
             aiFocusInputPboIds[0] = 0
             aiFocusInputPboIds[1] = 0

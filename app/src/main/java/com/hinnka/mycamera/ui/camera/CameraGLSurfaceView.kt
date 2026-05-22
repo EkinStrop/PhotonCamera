@@ -313,11 +313,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     }
 
     override fun onPause() {
+        renderer.setRenderingPaused(true)
         super.onPause()
         PLog.d(TAG, "onPause")
     }
 
     override fun onResume() {
+        renderer.setRenderingPaused(false)
         super.onResume()
         PLog.d(TAG, "onResume")
     }
