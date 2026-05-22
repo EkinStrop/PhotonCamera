@@ -137,6 +137,50 @@ object RawShaders {
             return clamp(color * scale, 0.0, 1.0);
         }
 
+        void adobeRgbTone(inout float maxValue, inout float midValue, inout float minValue) {
+            float oldMax = maxValue;
+            float oldMid = midValue;
+            float oldMin = minValue;
+            maxValue = sampleCurve(oldMax);
+            minValue = sampleCurve(oldMin);
+            if (abs(oldMax - oldMin) < 1e-6) {
+                midValue = minValue;
+            } else {
+                midValue = minValue + ((maxValue - minValue) * (oldMid - oldMin) / (oldMax - oldMin));
+            }
+        }
+
+        vec3 applyAdobeCurve(vec3 color) {
+            vec3 clipped = clamp(color, 0.0, 1.0);
+            float r = clipped.r;
+            float g = clipped.g;
+            float b = clipped.b;
+
+            if (r >= g) {
+                if (g > b) {
+                    adobeRgbTone(r, g, b);
+                } else if (b > r) {
+                    adobeRgbTone(b, r, g);
+                } else if (b > g) {
+                    adobeRgbTone(r, b, g);
+                } else {
+                    r = sampleCurve(r);
+                    g = sampleCurve(g);
+                    b = g;
+                }
+            } else {
+                if (r >= b) {
+                    adobeRgbTone(g, r, b);
+                } else if (b > g) {
+                    adobeRgbTone(b, g, r);
+                } else {
+                    adobeRgbTone(g, b, r);
+                }
+            }
+
+            return clamp(vec3(r, g, b), 0.0, 1.0);
+        }
+
         vec3 linearToSrgb(vec3 color) {
             vec3 clampedColor = max(color, vec3(0.0));
             vec3 low = clampedColor * 12.92;
@@ -280,23 +324,29 @@ object RawShaders {
         }
 
         vec3 applyDcpHsvMap(vec3 color, sampler3D tableTexture, ivec3 divisions, int encoding) {
-            vec3 workColor = color;
-            if (encoding == 1) {
-                workColor = linearToSrgb(workColor);
+            if (min(color.r, min(color.g, color.b)) < 0.0) {
+                return color;
             }
-            
-            vec3 hsv = rgbToDcpHsv(workColor);
-            vec3 modify = sampleDcpMap(tableTexture, divisions, hsv);
+
+            vec3 hsv = rgbToDcpHsv(color);
+            vec3 tableHsv = hsv;
+            if (encoding == 1 && divisions.z > 1) {
+                tableHsv.z = linearToSrgb(vec3(hsv.z)).r;
+            }
+
+            vec3 modify = sampleDcpMap(tableTexture, divisions, tableHsv);
             hsv.x = mod(hsv.x + (modify.x * 6.0 / 360.0), 6.0);
-            hsv.y = min(hsv.y * modify.y, 1.0);
-            hsv.z = clamp(hsv.z * modify.z, 0.0, 1.0);
-            
-            vec3 result = dcpHsvToRgb(hsv);
-            
+            hsv.y = hsv.y * modify.y;
             if (encoding == 1) {
-                result = srgbToLinear(result);
+                float encodedValue = clamp(tableHsv.z * modify.z, 0.0, 1.0);
+                hsv.z = srgbToLinear(vec3(encodedValue)).r;
+            } else {
+                hsv.z = hsv.z * modify.z;
             }
-            return result;
+            hsv.y = clamp(hsv.y, 0.0, 1.0);
+            hsv.z = clamp(hsv.z, 0.0, 1.0);
+
+            return dcpHsvToRgb(hsv);
         }
 
         float sampleLuma(vec2 uv) {
@@ -353,7 +403,6 @@ object RawShaders {
         void main() {
             vec3 color = texture(uInputTexture, vTexCoord).rgb;
             color = applyLensShading(color);
-            color = reinhardLocalTonemapping(color);
 
             if (uDcpHueSatEnabled) {
                 color = applyDcpHsvMap(color, uDcpHueSatTexture, uDcpHueSatDivisions, uDcpHueSatEncoding);
@@ -361,8 +410,10 @@ object RawShaders {
             if (uDcpLookTableEnabled) {
                 color = applyDcpHsvMap(color, uDcpLookTableTexture, uDcpLookTableDivisions, uDcpLookTableEncoding);
             }
+
+            color = reinhardLocalTonemapping(color);
             
-            color = applyCurve(color);
+            color = applyAdobeCurve(color);
 
             color = uOutputTransform * color;
             color = linearToSrgb(color);
