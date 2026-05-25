@@ -16,6 +16,7 @@ import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupTrace
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -83,6 +84,7 @@ object GalleryMediaStore {
                     .upsert(buildEntity(context.applicationContext, photoId, metadata))
                 true
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 PLog.e(TAG, "Failed to save metadata to DB for photo: $photoId", e)
                 false
             }

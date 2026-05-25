@@ -502,6 +502,9 @@ class LivePhotoRecorder(
                         }
                         encoderRef.releaseOutputBuffer(outputBufferIndex, false)
                     }
+                } catch (e: IllegalStateException) {
+                    PLog.w(TAG, "Error draining audio encoder", e)
+                    break
                 } catch (e: Exception) {
                     PLog.e(TAG, "Error draining audio encoder", e)
                     break

@@ -1385,7 +1385,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     batchDeletePendingIntent = pendingIntent
                     PLog.d(TAG, "Set batch delete pending intent for ${toDelete.size} photos")
                 } catch (e: Exception) {
-                    PLog.e(TAG, "Failed to create batch delete request", e)
+                    PLog.w(TAG, "Failed to create batch delete request", e)
                     // 创建请求失败，直接删除应用内照片
                     deleteBatchPhotosOnlyInternal(toDelete)
                 }
@@ -2253,6 +2253,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             result.onFailure { PLog.e(TAG, "AI photo evaluation request failed", it) }
             result
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             PLog.e(TAG, "Failed to evaluate photo with AI", e)
             Result.failure(e)
         }

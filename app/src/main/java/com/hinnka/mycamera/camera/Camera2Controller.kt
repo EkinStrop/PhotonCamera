@@ -114,6 +114,7 @@ class Camera2Controller(private val context: Context) {
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
+    private var previewSessionGeneration: Long = 0L
 
     private var previewSurface: Surface? = null
     private var imageReader: ImageReader? = null
@@ -1159,6 +1160,7 @@ class Camera2Controller(private val context: Context) {
         val surface = previewSurface ?: return
         val captureMode = _state.value.captureMode
         val reader = imageReader
+        val sessionGeneration = ++previewSessionGeneration
 
         try {
             previewRequestBuilder = device.createCaptureRequest(
@@ -1194,9 +1196,9 @@ class Camera2Controller(private val context: Context) {
                     Executors.newSingleThreadExecutor(),
                     object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(session: CameraCaptureSession) {
-                            if (openGeneration != cameraOpenGeneration) {
+                            if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
                                 PLog.w(TAG, "Closing stale video preview session")
-                                session.close()
+                                safeCloseCaptureSession(session, "stale video preview session")
                                 return
                             }
                             if (useHlgCapture) {
@@ -1204,12 +1206,12 @@ class Camera2Controller(private val context: Context) {
                             } else if (_state.value.currentDynamicRangeProfile != "STANDARD") {
                                 _state.value = _state.value.copy(currentDynamicRangeProfile = "STANDARD")
                             }
-                            onSessionConfigured(session, openGeneration)
+                            onSessionConfigured(session, openGeneration, sessionGeneration)
                         }
 
                         override fun onConfigureFailed(session: CameraCaptureSession) {
-                            if (openGeneration != cameraOpenGeneration) {
-                                session.close()
+                            if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
+                                safeCloseCaptureSession(session, "stale video configure failure")
                                 return
                             }
                             PLog.e(TAG, "Video session configuration failed: useHlgCapture=$useHlgCapture")
@@ -1253,9 +1255,9 @@ class Camera2Controller(private val context: Context) {
                 Executors.newSingleThreadExecutor(),
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
-                        if (openGeneration != cameraOpenGeneration) {
+                        if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
                             PLog.w(TAG, "Closing stale preview session")
-                            session.close()
+                            safeCloseCaptureSession(session, "stale preview session")
                             return
                         }
                         if (useHlgCapture) {
@@ -1263,12 +1265,12 @@ class Camera2Controller(private val context: Context) {
                         } else if (_state.value.currentDynamicRangeProfile != "STANDARD") {
                             _state.value = _state.value.copy(currentDynamicRangeProfile = "STANDARD")
                         }
-                        onSessionConfigured(session, openGeneration)
+                        onSessionConfigured(session, openGeneration, sessionGeneration)
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
-                        if (openGeneration != cameraOpenGeneration) {
-                            session.close()
+                        if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
+                            safeCloseCaptureSession(session, "stale configure failure")
                             return
                         }
                         PLog.e(
@@ -1291,15 +1293,21 @@ class Camera2Controller(private val context: Context) {
                 }
             }
             device.createCaptureSession(sessionConfig)
+        } catch (e: IllegalStateException) {
+            PLog.w(TAG, "Failed to create preview session", e)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to create preview session", e)
         }
     }
 
-    private fun onSessionConfigured(session: CameraCaptureSession, openGeneration: Long = cameraOpenGeneration) {
-        if (openGeneration != cameraOpenGeneration) {
+    private fun onSessionConfigured(
+        session: CameraCaptureSession,
+        openGeneration: Long = cameraOpenGeneration,
+        sessionGeneration: Long = previewSessionGeneration
+    ) {
+        if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
             PLog.w(TAG, "Ignoring stale configured session")
-            session.close()
+            safeCloseCaptureSession(session, "stale configured session")
             return
         }
         captureSession = session
@@ -3644,7 +3652,7 @@ class Camera2Controller(private val context: Context) {
                 _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
             }
 
-            captureSession?.close()
+            safeCloseCaptureSession(captureSession, "closeCamera")
             captureSession = null
 
             cameraDevice?.close()
@@ -3679,6 +3687,16 @@ class Camera2Controller(private val context: Context) {
             PLog.d(TAG, "Camera closed")
         } catch (e: Exception) {
             PLog.e(TAG, "Error closing camera", e)
+        }
+    }
+
+    private fun safeCloseCaptureSession(session: CameraCaptureSession?, reason: String) {
+        try {
+            session?.close()
+        } catch (e: SecurityException) {
+            PLog.w(TAG, "Ignoring SecurityException while closing capture session ($reason): ${e.message}")
+        } catch (e: Exception) {
+            PLog.e(TAG, "Error closing capture session ($reason)", e)
         }
     }
 
