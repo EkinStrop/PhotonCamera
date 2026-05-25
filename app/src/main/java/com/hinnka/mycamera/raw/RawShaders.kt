@@ -98,6 +98,7 @@ object RawShaders {
         uniform float uCurveSize;
         uniform bool uCurveEnabled;
         uniform float uHighlightWhitePoint;
+        uniform float uHighlightExposureGain;
         uniform bool uHighlightBaseEnabled;
         uniform bool uLensShadingEnabled;
         uniform float uLensShadingPower;
@@ -352,34 +353,6 @@ object RawShaders {
             return dcpHsvToRgb(hsv);
         }
 
-        float sampleLuma(vec2 uv) {
-            return luminance(texture(uInputTexture, uv).rgb);
-        }
-
-        float localAverageLuma(vec2 uv, vec2 texelSize, float radius) {
-            vec2 dx = vec2(texelSize.x * radius, 0.0);
-            vec2 dy = vec2(0.0, texelSize.y * radius);
-
-            float center = sampleLuma(uv) * 0.28;
-            float axial =
-                sampleLuma(clamp(uv + dx, vec2(0.0), vec2(1.0))) +
-                sampleLuma(clamp(uv - dx, vec2(0.0), vec2(1.0))) +
-                sampleLuma(clamp(uv + dy, vec2(0.0), vec2(1.0))) +
-                sampleLuma(clamp(uv - dy, vec2(0.0), vec2(1.0)));
-            float diagonal =
-                sampleLuma(clamp(uv + dx + dy, vec2(0.0), vec2(1.0))) +
-                sampleLuma(clamp(uv + dx - dy, vec2(0.0), vec2(1.0))) +
-                sampleLuma(clamp(uv - dx + dy, vec2(0.0), vec2(1.0))) +
-                sampleLuma(clamp(uv - dx - dy, vec2(0.0), vec2(1.0)));
-
-            return center + axial * 0.12 + diagonal * 0.06;
-        }
-
-        const float HALO_THRESHOLD_MIN = 0.1;
-        const float HALO_THRESHOLD_MAX = 0.4;
-        const float RADIUS_SMALL = 1.5;
-        const float RADIUS_LARGE = 8.0;
-
         float highlightRolloffLuma(float luma) {
             if (uHighlightWhitePoint <= 1.0) return luma;
 
@@ -396,19 +369,6 @@ object RawShaders {
                        smoothstep(start, uHighlightWhitePoint, luma));
         }
         
-        float localAdaptationLuma() {
-            vec2 texelSize = 1.0 / vec2(textureSize(uInputTexture, 0));
-
-            // 1. 获取两个尺度的局部亮度
-            float localSmall = localAverageLuma(vTexCoord, texelSize, RADIUS_SMALL);
-            float localLarge = localAverageLuma(vTexCoord, texelSize, RADIUS_LARGE);
-            
-            // 2. 计算边缘对比度，决定混合权重
-            float scaleContrast = abs(log2(localSmall + 1e-4) - log2(localLarge + 1e-4));
-            return mix(localLarge, localSmall, smoothstep(HALO_THRESHOLD_MIN, HALO_THRESHOLD_MAX, scaleContrast));
-        }
-        
-        
         vec3 highlightRolloff(vec3 color) {
             if (uHighlightWhitePoint <= 1.0) return color;
         
@@ -420,26 +380,37 @@ object RawShaders {
 
         vec3 combinedLocalToneMapping(vec3 sceneLinear, float originalLuma) {
             float toneInputLuma = luminance(sceneLinear);
-            float localAdaptation = localAdaptationLuma();
-
-            // Local Reinhard-equivalent floor: this preserves the current acceptable baseline.
-            float compressionFloor = toneInputLuma / (1.0 + localAdaptation);
-
             float baseLuma = uHighlightBaseEnabled
                 ? max(texture(uHighlightBaseTexture, vTexCoord).r, 1e-4)
-                : max(localAdaptation, 1e-4);
+                : max(toneInputLuma, 1e-4);
+
             float localContrast = originalLuma / baseLuma;
-            float highlightMask = smoothstep(0.4, 0.95, max(originalLuma, toneInputLuma));
+            float highlightAnchor = max(originalLuma, toneInputLuma);
+            float gainMask = smoothstep(1.05, 1.35, uHighlightExposureGain);
+            float highlightMask = smoothstep(0.4, 0.75, highlightAnchor) * gainMask;
 
-            // 独立 tone map: 局部适应量负责压缩，高光里亮于低频 base 的结构减少压缩。
-            // 暗于 base 的像素不参与负向恢复，避免窗景整体发灰。
-            float brightContrast = max(localContrast - 1.0, 0.0);
-            float compressionRelease = min(brightContrast, 0.85) * 0.8 * highlightMask;
-            float mappedLuma = compressionFloor * (1.0 + compressionRelease);
+            // Broad-base compression only belongs to the highlight range; otherwise window base bleeds into interiors.
+            float compressionFloor = mix(
+                toneInputLuma,
+                toneInputLuma / (1.0 + baseLuma),
+                highlightMask
+            );
 
-            // 保证不会比原始局部 Reinhard 更暗，也不会超过 tone 输入亮度或 SDR 白。
-            mappedLuma = max(mappedLuma, compressionFloor);
-            mappedLuma = min(mappedLuma, min(toneInputLuma, 1.0));
+            // 单调高光曲线：从 pivot 往上按曝光增益回退，避免 mask 混合造成亮度排序反转。
+            float exposureGain = max(uHighlightExposureGain, 1.0);
+            float exposureCancel = 1.0 / exposureGain;
+            float pivot = 0.35;
+            float monotonicRecoveredLuma = highlightAnchor <= pivot
+                ? toneInputLuma
+                : pivot + (toneInputLuma - pivot) * exposureCancel;
+
+            float detailContrast = max(localContrast, 1e-4);
+            float recoveredLuma = monotonicRecoveredLuma * mix(1.0, detailContrast, highlightMask);
+            float mappedLuma = mix(compressionFloor, recoveredLuma, highlightMask);
+
+            // 保留一点 Reinhard 底线，避免高光边缘被压成脏灰；最终仍限制在 SDR 白内。
+            mappedLuma = max(mappedLuma, compressionFloor * mix(1.0, 0.82, highlightMask));
+            mappedLuma = min(mappedLuma, 1.0);
 
             return clamp(sceneLinear * (mappedLuma / max(toneInputLuma, 1e-5)), 0.0, 1.0);
         }

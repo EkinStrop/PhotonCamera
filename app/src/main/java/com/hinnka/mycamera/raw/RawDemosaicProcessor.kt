@@ -843,6 +843,7 @@ class RawDemosaicProcessor {
                 inputTextureId = outputTexture,
                 dcpRenderPlan = resolvedDcpRenderPlan,
                 highlightWhitePoint = highlightWhitePoint,
+                highlightExposureGain = if (highlightWhitePoint > 1f) 2.0f.pow(effectiveExposureCompensation) else 1f,
                 highlightBaseTextureId = highlightBaseTextureId
             )
             PLog.d(TAG, "Combined Pass took: ${System.currentTimeMillis() - combinedStart}ms")
@@ -2514,6 +2515,7 @@ class RawDemosaicProcessor {
         viewportWidth: Int = metadata.width,
         viewportHeight: Int = metadata.height,
         highlightWhitePoint: Float = 0f,
+        highlightExposureGain: Float = 1f,
         highlightBaseTextureId: Int = 0
     ) {
         val baseCurve = dcpRenderPlan?.toneCurveLut ?: ACR3Curve.samples()
@@ -2547,6 +2549,10 @@ class RawDemosaicProcessor {
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(combinedProgram, "uHighlightWhitePoint"),
             highlightWhitePoint
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(combinedProgram, "uHighlightExposureGain"),
+            highlightExposureGain.coerceAtLeast(1f)
         )
         GLES30.glActiveTexture(GLES30.GL_TEXTURE5)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, highlightBaseTextureId)
