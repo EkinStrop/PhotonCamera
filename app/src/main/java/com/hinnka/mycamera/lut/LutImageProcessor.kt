@@ -50,7 +50,11 @@ class LutImageProcessor {
     private var lutTextureId = 0
     private var framebufferId = 0
     private var outputTextureId = 0
+    private var outputFramebufferWidth = 0
+    private var outputFramebufferHeight = 0
     private var pboId = 0
+    private var readbackBuffer: ByteBuffer? = null
+    private var readbackBufferSize = 0
 
     private var vertexBuffer: FloatBuffer? = null
     private var texCoordBuffer: FloatBuffer? = null
@@ -550,24 +554,19 @@ class LutImageProcessor {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, bitmapDenoiseFboId[0])
 
         val pixelSize = width * height * 4
-        val pixelBuffer = com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())?.order(ByteOrder.nativeOrder())
-            ?: throw OutOfMemoryError("Failed to allocate native direct buffer")
-        try {
-            GLES30.glReadPixels(
-                0, 0, width, height,
-                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, pixelBuffer
-            )
-            pixelBuffer.position(0)
-            
-            val tempBitmap = createBitmap(width, height, colorSpace = bitmap.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB))
-            tempBitmap.copyPixelsFromBuffer(pixelBuffer)
-            
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-            
-            tempBitmap
-        } finally {
-            com.hinnka.mycamera.utils.DirectBufferAllocator.freeNative(pixelBuffer)
-        }
+        val pixelBuffer = obtainReadbackBuffer(pixelSize)
+        GLES30.glReadPixels(
+            0, 0, width, height,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, pixelBuffer
+        )
+        pixelBuffer.position(0)
+
+        val tempBitmap = createBitmap(width, height, colorSpace = bitmap.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB))
+        tempBitmap.copyPixelsFromBuffer(pixelBuffer)
+
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+        tempBitmap
     }
 
     private fun buildLchAdjustmentArrays(params: ColorRecipeParams?): Triple<FloatArray, FloatArray, FloatArray> {
@@ -802,48 +801,46 @@ class LutImageProcessor {
         if (texCoordHandle >= 0) GLES30.glDisableVertexAttribArray(texCoordHandle)
 
         val pixelSize = width * height * 4
-        val pixelBuffer = com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())?.order(ByteOrder.nativeOrder())
-            ?: throw OutOfMemoryError("Failed to allocate native direct buffer")
-        
-        try {
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
-            GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
-            GLES30.glReadPixels(
-                0,
-                0,
-                width,
-                height,
-                GLES30.GL_RGBA,
-                GLES30.GL_UNSIGNED_BYTE,
-                pixelBuffer
-            )
-            pixelBuffer.position(0)
+        val pixelBuffer = obtainReadbackBuffer(pixelSize)
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
+        GLES30.glReadPixels(
+            0,
+            0,
+            width,
+            height,
+            GLES30.GL_RGBA,
+            GLES30.GL_UNSIGNED_BYTE,
+            pixelBuffer
+        )
+        pixelBuffer.position(0)
 
-            // 创建临时 Bitmap
-            val tempBitmap = createBitmap(width, height, colorSpace = inputColorSpace)
-            tempBitmap.copyPixelsFromBuffer(pixelBuffer)
+        // 创建临时 Bitmap
+        val tempBitmap = createBitmap(width, height, colorSpace = inputColorSpace)
+        tempBitmap.copyPixelsFromBuffer(pixelBuffer)
 
-            // 翻转 Y 轴（glReadPixels 从左下角开始读取，需要翻转）
+        // 翻转 Y 轴（glReadPixels 从左下角开始读取，需要翻转）
 //        val matrix = android.graphics.Matrix()
 //        matrix.preScale(1f, -1f)
 //        val outputBitmap = Bitmap.createBitmap(tempBitmap, 0, 0, width, height, matrix, true)
 //        tempBitmap.recycle()
 
-            // 解绑帧缓冲
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        // 解绑帧缓冲
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
 
-            return tempBitmap
-        } finally {
-            com.hinnka.mycamera.utils.DirectBufferAllocator.freeNative(pixelBuffer)
-        }
+        return tempBitmap
     }
 
     private fun setupFramebuffer(width: Int, height: Int) {
-        // 删除旧的帧缓冲
-        if (framebufferId != 0) {
-            GLES30.glDeleteFramebuffers(1, intArrayOf(framebufferId), 0)
-            GLES30.glDeleteTextures(1, intArrayOf(outputTextureId), 0)
+        if (framebufferId != 0 &&
+            outputTextureId != 0 &&
+            outputFramebufferWidth == width &&
+            outputFramebufferHeight == height
+        ) {
+            return
         }
+
+        releaseOutputFramebuffer()
 
         // 创建输出纹理
         val textures = IntArray(1)
@@ -875,6 +872,43 @@ class LutImageProcessor {
         }
 
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        outputFramebufferWidth = width
+        outputFramebufferHeight = height
+    }
+
+    private fun releaseOutputFramebuffer() {
+        if (framebufferId != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(framebufferId), 0)
+            framebufferId = 0
+        }
+        if (outputTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(outputTextureId), 0)
+            outputTextureId = 0
+        }
+        outputFramebufferWidth = 0
+        outputFramebufferHeight = 0
+    }
+
+    private fun obtainReadbackBuffer(pixelSize: Int): ByteBuffer {
+        val current = readbackBuffer
+        if (current != null && readbackBufferSize >= pixelSize) {
+            current.clear()
+            current.limit(pixelSize)
+            return current
+        }
+        releaseReadbackBuffer()
+        return (com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())
+            ?.order(ByteOrder.nativeOrder())
+            ?: throw OutOfMemoryError("Failed to allocate native direct buffer")).also {
+            readbackBuffer = it
+            readbackBufferSize = pixelSize
+        }
+    }
+
+    private fun releaseReadbackBuffer() {
+        readbackBuffer?.let { com.hinnka.mycamera.utils.DirectBufferAllocator.freeNative(it) }
+        readbackBuffer = null
+        readbackBufferSize = 0
     }
 
     private fun uploadImageTexture(bitmap: Bitmap) {
@@ -1821,16 +1855,12 @@ class LutImageProcessor {
         if (lutTextureId != 0) {
             GLES30.glDeleteTextures(1, intArrayOf(lutTextureId), 0)
         }
-        if (framebufferId != 0) {
-            GLES30.glDeleteFramebuffers(1, intArrayOf(framebufferId), 0)
-        }
-        if (outputTextureId != 0) {
-            GLES30.glDeleteTextures(1, intArrayOf(outputTextureId), 0)
-        }
+        releaseOutputFramebuffer()
         if (pboId != 0) {
             GLES30.glDeleteBuffers(1, intArrayOf(pboId), 0)
             pboId = 0
         }
+        releaseReadbackBuffer()
 
         if (bitmapDenoisePreconditionProgram != 0) GLES31.glDeleteProgram(bitmapDenoisePreconditionProgram)
         if (bitmapDenoiseDecomposeProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseDecomposeProgram)

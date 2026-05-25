@@ -221,6 +221,9 @@ class RawDemosaicProcessor {
     private var sharpenHeight = 0
     private var outputFramebufferId = 0
     private var outputTextureId = 0
+    private var readbackPboSize = 0
+    private var readbackBuffer: ByteBuffer? = null
+    private var readbackBufferSize = 0
 
     private var curveTextureId = 0
     private var dcpToneCurveTextureId = 0
@@ -3208,9 +3211,11 @@ class RawDemosaicProcessor {
             pboId = ids[0]
         }
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, pboId)
-        // glBufferData(null) 重新分配 GPU 缓冲区（旧数据自动孤立释放）
-        GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, pixelSize, null, GLES30.GL_STREAM_READ)
-        val pboReady = GLES30.glGetError() == GLES30.GL_NO_ERROR
+        if (readbackPboSize != pixelSize) {
+            GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, pixelSize, null, GLES30.GL_STREAM_READ)
+            readbackPboSize = if (GLES30.glGetError() == GLES30.GL_NO_ERROR) pixelSize else 0
+        }
+        val pboReady = readbackPboSize == pixelSize
         if (pboReady) {
             // offset=0：读取写入已绑定的 PBO（GPU→GPU DMA，不阻塞 Java 堆）
             GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, 0)
@@ -3238,32 +3243,48 @@ class RawDemosaicProcessor {
         }
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
 
-        // --- 降级路径：直接分配 ByteBuffer（Java 堆）---
+        // --- 降级路径：直接读到复用的 native ByteBuffer ---
         val pixelBuffer = try {
-            com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())
-                ?.order(ByteOrder.nativeOrder())
-                ?: throw OutOfMemoryError("Failed to allocate native direct buffer")
+            obtainReadbackBuffer(pixelSize)
         } catch (e: OutOfMemoryError) {
             PLog.e(TAG, "OOM allocating pixel buffer ($width x $height, ${pixelSize}B)", e)
             return null
         }
 
-        try {
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
-            GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, pixelBuffer)
-            pixelBuffer.position(0)
-            checkGlError("readPixels direct")
-            return try {
-                createBitmap(width, height, Bitmap.Config.RGBA_F16, colorSpace = colorSpace).also { bitmap ->
-                    bitmap.copyPixelsFromBuffer(pixelBuffer)
-                }
-            } catch (e: OutOfMemoryError) {
-                PLog.e(TAG, "OOM creating output bitmap ($width x $height)", e)
-                null
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        GLES30.glReadPixels(0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, pixelBuffer)
+        pixelBuffer.position(0)
+        checkGlError("readPixels direct")
+        return try {
+            createBitmap(width, height, Bitmap.Config.RGBA_F16, colorSpace = colorSpace).also { bitmap ->
+                bitmap.copyPixelsFromBuffer(pixelBuffer)
             }
-        } finally {
-            com.hinnka.mycamera.utils.DirectBufferAllocator.freeNative(pixelBuffer)
+        } catch (e: OutOfMemoryError) {
+            PLog.e(TAG, "OOM creating output bitmap ($width x $height)", e)
+            null
         }
+    }
+
+    private fun obtainReadbackBuffer(pixelSize: Int): ByteBuffer {
+        val current = readbackBuffer
+        if (current != null && readbackBufferSize >= pixelSize) {
+            current.clear()
+            current.limit(pixelSize)
+            return current
+        }
+        releaseReadbackBuffer()
+        return (com.hinnka.mycamera.utils.DirectBufferAllocator.allocateNative(pixelSize.toLong())
+            ?.order(ByteOrder.nativeOrder())
+            ?: throw OutOfMemoryError("Failed to allocate native direct buffer")).also {
+            readbackBuffer = it
+            readbackBufferSize = pixelSize
+        }
+    }
+
+    private fun releaseReadbackBuffer() {
+        readbackBuffer?.let { com.hinnka.mycamera.utils.DirectBufferAllocator.freeNative(it) }
+        readbackBuffer = null
+        readbackBufferSize = 0
     }
 
     /**
@@ -3387,7 +3408,12 @@ class RawDemosaicProcessor {
             intArrayOf(outputFramebufferId),
             0
         )
-        if (pboId != 0) GLES30.glDeleteBuffers(1, intArrayOf(pboId), 0)
+        if (pboId != 0) {
+            GLES30.glDeleteBuffers(1, intArrayOf(pboId), 0)
+            pboId = 0
+            readbackPboSize = 0
+        }
+        releaseReadbackBuffer()
 
         if (lensShadingTextureId != 0) GLES30.glDeleteTextures(
             1,
