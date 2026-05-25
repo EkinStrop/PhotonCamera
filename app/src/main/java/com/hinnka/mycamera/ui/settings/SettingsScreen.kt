@@ -3004,6 +3004,7 @@ fun DefaultFocalLengthSetting(
     var inputValue by remember { mutableStateOf("") }
     val customFocalLengths by viewModel.customFocalLengths.collectAsState(initial = emptyList())
     val hiddenFocalLengths by viewModel.hiddenFocalLengths.collectAsState(initial = emptyList())
+    val cameraState by viewModel.state.collectAsState()
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
@@ -3021,7 +3022,9 @@ fun DefaultFocalLengthSetting(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        val availableFLs = remember { viewModel.getAvailableFocalLengths() }
+        val availableFLs = remember(cameraState.availableCameras) {
+            viewModel.getAvailableFocalLengths()
+        }
 
         FlowRow(
             modifier = Modifier.fillMaxWidth(),

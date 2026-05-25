@@ -2560,7 +2560,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         stops: MutableList<Float>,
         lensZoomStops: List<Float>,
         mainCamera: CameraInfo,
-        hiddenFocalLengths: List<Float>
+        hiddenFocalLengths: List<Float> = emptyList()
     ) {
         val mainZoom = mainCamera.intrinsicZoomRatio
         val hasSmallerLens = lensZoomStops.any { it < mainZoom - 0.01f }
@@ -3416,8 +3416,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (mainCamera.focalLength35mmEquivalent <= 0) return emptyList()
 
         val lensZoomStops = calculateLensZoomStops(availableCameras, mainCamera)
+        val stops = lensZoomStops.toMutableList()
+        addDefaultMinimumZoomStop(stops, lensZoomStops, mainCamera)
 
-        return lensZoomStops.map { it * mainCamera.focalLength35mmEquivalent }
+        return stops
+            .map { it * mainCamera.focalLength35mmEquivalent }
+            .distinctBy { it.roundToInt() }
+            .sorted()
     }
 
     /**
