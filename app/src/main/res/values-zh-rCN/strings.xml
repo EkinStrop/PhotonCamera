@@ -480,6 +480,7 @@
     <string name="export_mode_raw_cube">导出原版 .cube</string>
     <string name="export_mode_plut">导出无损配方 .plut</string>
     <string name="export_mode_baked_cube">导出烘焙合成 .cube</string>
+    <string name="export_mode_baked_hald_png">导出烘焙合成 HALD CLUT .png</string>
     <string name="copy">复制</string>
     <string name="copy_lut_dialog_title">复制滤镜</string>
     <string name="copy_frame_dialog_title">复制边框</string>

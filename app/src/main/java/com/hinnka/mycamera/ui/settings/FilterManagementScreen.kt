@@ -918,6 +918,33 @@ fun FilterManagementScreen(
                                 fontWeight = FontWeight.Medium
                             )
                         }
+
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val bytes = viewModel.exportBakedLutToHaldPng(lut.id)
+                                    if (bytes != null) {
+                                        pendingExportBytes = bytes
+                                        pendingExportName = "${lut.getName()}_baked_hald.png"
+                                        exportLauncher.launch(pendingExportName)
+                                    }
+                                    showExportDialog = false
+                                    exportingLut = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF6B35),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.export_mode_baked_hald_png),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 },
                 confirmButton = {},

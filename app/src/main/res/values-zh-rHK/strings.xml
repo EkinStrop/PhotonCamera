@@ -356,6 +356,7 @@
     <string name="delete_dcp_confirm_message">要刪除 DCP "%s"？</string>
     <string name="rename_dialog_title">重新命名</string>
     <string name="export_lut_cube">匯出LUT</string>
+    <string name="export_mode_baked_hald_png">匯出烘焙合成 HALD CLUT .png</string>
     <string name="copy">複製</string>
     <string name="copy_lut_dialog_title">複製濾鏡</string>
     <string name="copy_frame_dialog_title">複製邊框</string>

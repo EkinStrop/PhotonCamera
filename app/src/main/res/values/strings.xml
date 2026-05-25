@@ -485,6 +485,7 @@
     <string name="export_mode_raw_cube">Export original .cube</string>
     <string name="export_mode_plut">Export lossless .plut</string>
     <string name="export_mode_baked_cube">Export baked .cube</string>
+    <string name="export_mode_baked_hald_png">Export baked HALD CLUT .png</string>
     <string name="copy">Copy</string>
     <string name="copy_lut_dialog_title">Copy LUT</string>
     <string name="copy_frame_dialog_title">Copy Frame</string>
