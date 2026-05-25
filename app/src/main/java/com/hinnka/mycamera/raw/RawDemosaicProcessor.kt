@@ -8,6 +8,7 @@ import android.opengl.*
 import androidx.core.graphics.createBitmap
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.data.ContentRepository
+import com.hinnka.mycamera.lut.ChromaDenoiseShaders
 import com.hinnka.mycamera.ml.SharedDepthEstimator
 import com.hinnka.mycamera.raw.RawProcessingPreferences.DROMode
 import com.hinnka.mycamera.utils.BitmapUtils
@@ -138,6 +139,7 @@ class RawDemosaicProcessor {
         private const val TAG = "RawDemosaicProcessor"
         private const val RAW_HDR_HIGHLIGHT_START = 0.72f
         private const val RAW_HDR_WHITE_POINT_SCENE_LUMA = 2.4f
+        private const val DEFAULT_RAW_CHROMA_DENOISE_VALUE = 0.4f
 
         init {
             // 加载 JNI 库
@@ -170,6 +172,7 @@ class RawDemosaicProcessor {
     private var sharpenProgram = 0
     private var passthroughProgram = 0
     private var hdrReferenceProgram = 0
+    private var chromaDenoiseProgram = 0
 
     // RCD Compute Shader Programs
     private var rcdPopulateProgram = 0
@@ -401,6 +404,7 @@ class RawDemosaicProcessor {
                 rawDROMode = rawDROMode,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
+                chromaDenoiseValue = chromaDenoiseValue,
                 rawDcpId = rawDcpId,
                 dcpRenderPlan = dcpRenderPlan
             )?.sdrBitmap
@@ -484,6 +488,7 @@ class RawDemosaicProcessor {
         rawDROMode: DROMode = DROMode.fromPersistedName(null),
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
+        chromaDenoiseValue: Float? = null,
         rawDcpId: String? = null,
         dcpRenderPlan: DcpRenderPlan? = null,
         dngFile: File? = null,
@@ -769,14 +774,26 @@ class RawDemosaicProcessor {
                 rawTextureId = 0
             }
             val workingColorSpace = resolveWorkingColorSpace()
-
-            // darktable denoiseprofile 降噪
-            renderDenoiseProfilePass(
+            val linearExposureGain = computeLinearExposureGain(
+                actualMetadata,
+                effectiveExposureCompensation,
+                resolvedDcpRenderPlan
+            )
+            val denoiseSourceTextureId = renderDefaultChromaDenoiseBeforeDenoiseProfile(
                 sourceTextureId = demosaicTextureId,
                 width = actualWidth,
                 height = actualHeight,
                 metadata = actualMetadata,
-                linearExposureGain = computeLinearExposureGain(actualMetadata, effectiveExposureCompensation, resolvedDcpRenderPlan),
+                linearExposureGain = linearExposureGain,
+            )
+
+            // darktable denoiseprofile 降噪
+            renderDenoiseProfilePass(
+                sourceTextureId = denoiseSourceTextureId,
+                width = actualWidth,
+                height = actualHeight,
+                metadata = actualMetadata,
+                linearExposureGain = linearExposureGain,
                 denoiseValue = denoiseValue,
             )
             val outputTexture = gfTexId[1]
@@ -992,12 +1009,14 @@ class RawDemosaicProcessor {
             // 初始化着色器和缓冲区
             initShaderProgram()
             if (combinedProgram == 0 || highlightBaseProgram == 0 || sharpenProgram == 0 || passthroughProgram == 0 ||
+                chromaDenoiseProgram == 0 ||
                 rcdPopulateProgram == 0 || rcdStep1Program == 0 || rcdStep2Program == 0 ||
                 rcdStep3Program == 0 || rcdStep40Program == 0 || rcdStep41Program == 0 ||
                 rcdStep42Program == 0 || rcdStep43Program == 0 || rcdWriteOutputProgram == 0 ||
                 linearRcdProgram == 0) {
                 PLog.e(TAG, "Critical shader programs failed to compile or link. " +
                         "combined=$combinedProgram highlightBase=$highlightBaseProgram sharpen=$sharpenProgram pass=$passthroughProgram " +
+                        "chromaDenoise=$chromaDenoiseProgram " +
                         "populate=$rcdPopulateProgram step1=$rcdStep1Program step2=$rcdStep2Program " +
                         "step3=$rcdStep3Program step40=$rcdStep40Program step41=$rcdStep41Program " +
                         "step42=$rcdStep42Program step43=$rcdStep43Program write=$rcdWriteOutputProgram " +
@@ -1087,6 +1106,20 @@ class RawDemosaicProcessor {
 
         // 2.7 NLM Programs
         initNLMPrograms(vShader)
+
+        // 2.75 RAW 默认色度降噪 Program
+        val fShaderChromaDenoise = compileShader(GLES30.GL_FRAGMENT_SHADER, ChromaDenoiseShaders.PASS_CHROMA_DENOISE)
+        if (vShader != 0 && fShaderChromaDenoise != 0) {
+            chromaDenoiseProgram = GLES30.glCreateProgram()
+            GLES30.glAttachShader(chromaDenoiseProgram, vShader)
+            GLES30.glAttachShader(chromaDenoiseProgram, fShaderChromaDenoise)
+            GLES30.glLinkProgram(chromaDenoiseProgram)
+            if (!logProgramLinkResult(chromaDenoiseProgram, "rawChromaDenoiseProgram")) {
+                chromaDenoiseProgram = 0
+            }
+
+            GLES30.glDeleteShader(fShaderChromaDenoise)
+        }
 
         // 3. Passthrough Program
         val fShaderPass = compileShader(GLES30.GL_FRAGMENT_SHADER, RawShaders.PASSTHROUGH_FRAGMENT_SHADER)
@@ -1325,6 +1358,57 @@ class RawDemosaicProcessor {
         GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, denoiseReduceRBufferId)
         GLES31.glBufferData(GLES31.GL_SHADER_STORAGE_BUFFER, denoiseReduceSize * 4 * 4, null, GLES31.GL_DYNAMIC_READ)
         GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, 0)
+    }
+
+    private fun renderDefaultChromaDenoiseBeforeDenoiseProfile(
+        sourceTextureId: Int,
+        width: Int,
+        height: Int,
+        metadata: RawMetadata,
+        linearExposureGain: Float,
+    ): Int {
+        val strength = DEFAULT_RAW_CHROMA_DENOISE_VALUE
+        if (strength <= 0f || width * height < 2) {
+            return sourceTextureId
+        }
+
+        if (chromaDenoiseProgram == 0 || linearOutputFramebufferId == 0 || linearOutputTextureId == 0) {
+            PLog.w(TAG, "RAW chroma denoise program not initialized, falling back to denoiseprofile source")
+            return sourceTextureId
+        }
+
+        val profileGain = (metadata.iso / 100.0f * metadata.postRawSensitivityBoost).coerceAtLeast(1f)
+        val (noiseA, noiseB) = resolveDenoiseNoiseModel(metadata, linearExposureGain, profileGain)
+        val h = strength * strength * ChromaDenoiseShaders.SIGMA_STRENGTH_AT_SLIDER_ONE
+        val identityMatrix = FloatArray(16)
+        GlMatrix.setIdentityM(identityMatrix, 0)
+
+        GLES30.glUseProgram(chromaDenoiseProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, linearOutputFramebufferId)
+        GLES30.glViewport(0, 0, width, height)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(chromaDenoiseProgram, "uInputTexture"), 0)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(chromaDenoiseProgram, "uTexelSize"),
+            1.0f / width,
+            1.0f / height
+        )
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(chromaDenoiseProgram, "uTexMatrix"),
+            1,
+            false,
+            identityMatrix,
+            0
+        )
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(chromaDenoiseProgram, "uH"), h)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(chromaDenoiseProgram, "uNoiseModel"), noiseA, noiseB)
+        drawQuad(chromaDenoiseProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        checkGlError("RAW chroma denoise before denoiseprofile")
+
+        PLog.d(TAG, "RAW chroma denoise before denoiseprofile: strength=$strength h=$h a=$noiseA b=$noiseB")
+        return linearOutputTextureId
     }
 
 
@@ -3238,6 +3322,7 @@ class RawDemosaicProcessor {
         if (sharpenProgram != 0) GLES30.glDeleteProgram(sharpenProgram)
         if (passthroughProgram != 0) GLES30.glDeleteProgram(passthroughProgram)
         if (hdrReferenceProgram != 0) GLES30.glDeleteProgram(hdrReferenceProgram)
+        if (chromaDenoiseProgram != 0) GLES30.glDeleteProgram(chromaDenoiseProgram)
 
         // RCD Compute Programs
         if (rcdPopulateProgram != 0) GLES31.glDeleteProgram(rcdPopulateProgram)
