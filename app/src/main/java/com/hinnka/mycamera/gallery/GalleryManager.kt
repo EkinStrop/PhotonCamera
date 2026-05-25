@@ -2496,10 +2496,10 @@ object GalleryManager {
                     photoId = photoId,
                     input = originalBitmap,
                     metadata = resolvedMetadata,
-                    sharpening = resolvedMetadata.sharpening ?: 0f,
-                    noiseReduction = resolvedMetadata.noiseReduction ?: 0f,
-                    chromaNoiseReduction = resolvedMetadata.chromaNoiseReduction ?: 0f,
-                    useComputationalAperture = true
+                    sharpening = 0f,
+                    noiseReduction = 0f,
+                    chromaNoiseReduction = 0f,
+                    useComputationalAperture = false
                 )
 
                 val thumbnailFile = getThumbnailFile(context, photoId)
