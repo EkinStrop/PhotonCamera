@@ -51,6 +51,18 @@ object DeviceUtil {
                     || Build.BRAND.lowercase() == "samsung"
         }
 
+    val isGoogle: Boolean
+        get() {
+            return Build.MANUFACTURER.lowercase() == "google"
+                    || Build.BRAND.lowercase() == "google"
+        }
+
+    val isHuawei: Boolean
+        get() {
+            return Build.MANUFACTURER.lowercase() == "huawei"
+                    || Build.BRAND.lowercase() == "huawei"
+        }
+
     val canShowPhantom: Boolean
         get() = BuildConfig.FLAVOR != "google"
 

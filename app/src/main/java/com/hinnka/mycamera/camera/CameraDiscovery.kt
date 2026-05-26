@@ -143,7 +143,11 @@ class CameraDiscovery(private val context: Context) {
 
         // 探测隐藏的摄像头
         val lensIdBlacklist = loadLensIdBlacklist().toSet()
-        val probedIds = probeCameraIds(systemCameraIds, lensIdBlacklist)
+        val probedIds = if (DeviceUtil.isGoogle || DeviceUtil.isHuawei) {
+            emptyList()
+        } else {
+            probeCameraIds(systemCameraIds, lensIdBlacklist)
+        }
         val allIds = (systemCameraIds + probedIds).distinct()
 
         PLog.d(TAG, "After probing: $allIds (probed: $probedIds)")
@@ -409,13 +413,16 @@ class CameraDiscovery(private val context: Context) {
     private fun classifyBackCameras(cameras: List<CameraInfoWithZoom>): List<CameraInfo> {
         if (cameras.isEmpty()) return emptyList()
 
+        val adjustedCameras = adjustMacroCandidatesByFocalLength(cameras)
+
         // 分离微距镜头和普通镜头
-        val macroCameras = preferCustomCameraForSameFocalLength(cameras.filter { it.isMacro })
-        val normalCameras = preferCustomCameraForSameFocalLength(cameras.filter { !it.isMacro })
+        val macroCameras = preferCustomCameraForSameFocalLength(adjustedCameras.filter { it.isMacro })
+        val normalCameras = preferCustomCameraForSameFocalLength(adjustedCameras.filter { !it.isMacro })
 
         if (normalCameras.isEmpty()) {
             // 如果全部被识别为微距（不常见），则按 intrinsicZoomRatio 排序并返回
-            return cameras.sortedBy { it.intrinsicZoomRatio }.map { it.info.copy(lensType = LensType.BACK_MACRO) }
+            return adjustedCameras.sortedBy { it.intrinsicZoomRatio }
+                .map { it.info.copy(lensType = LensType.BACK_MACRO) }
         }
 
         val result = mutableListOf<CameraInfo>()
@@ -445,6 +452,36 @@ class CameraDiscovery(private val context: Context) {
         result.addAll(macroCameras.map { it.info.copy(lensType = LensType.BACK_MACRO) })
 
         return result
+    }
+
+    private fun adjustMacroCandidatesByFocalLength(cameras: List<CameraInfoWithZoom>): List<CameraInfoWithZoom> {
+        if (cameras.size <= 1) return cameras
+
+        val shortestFocalLength = cameras
+            .map { getComparableFocalLength(it) }
+            .filter { it > 0f }
+            .minOrNull()
+            ?: return cameras
+
+        return cameras.map { camera ->
+            if (!camera.isMacro || !isSameFocalLength(getComparableFocalLength(camera), shortestFocalLength)) {
+                camera
+            } else {
+                PLog.d(
+                    TAG,
+                    "Macro candidate ${camera.info.cameraId} treated as normal lens: shortest focal length " +
+                        "(${getComparableFocalLength(camera)}mm)"
+                )
+                camera.copy(isMacro = false)
+            }
+        }
+    }
+
+    private fun getComparableFocalLength(camera: CameraInfoWithZoom): Float {
+        return camera.info.focalLength35mmEquivalent
+            .takeIf { it > 0f }
+            ?: camera.info.focalLength.takeIf { it > 0f }
+            ?: camera.intrinsicZoomRatio
     }
 
     private fun preferCustomCameraForSameFocalLength(cameras: List<CameraInfoWithZoom>): List<CameraInfoWithZoom> {
