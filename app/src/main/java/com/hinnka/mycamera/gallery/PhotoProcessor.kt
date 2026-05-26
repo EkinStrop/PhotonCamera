@@ -199,7 +199,7 @@ class PhotoProcessor(
         if (source == null) {
             val photoFile = GalleryManager.getPhotoFile(context, photoId)
             if (photoFile.exists()) {
-                if (metadata.hasEmbeddedGainmap) {
+                if (EmbeddedGainmapReusePolicy.canReuse(metadata)) {
                     val bitmap = GalleryManager.loadBitmap(context, photoId, preserveHdr = true)
                     if (bitmap != null) {
                         source = GainmapSourceSet(
@@ -209,6 +209,8 @@ class PhotoProcessor(
                             displayHdrSdrRatio = readDisplayHdrSdrRatio()
                         )
                     }
+                } else if (metadata.hasEmbeddedGainmap) {
+                    PLog.d("PhotoProcessor", "Skip embedded gainmap reuse after edits: $photoId")
                 }
             }
         }
