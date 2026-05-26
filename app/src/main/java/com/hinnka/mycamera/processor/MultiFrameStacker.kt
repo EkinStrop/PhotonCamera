@@ -430,18 +430,15 @@ object MultiFrameStacker {
                             blackLevel = masterBlackLevel.copyOf(),
                         )
                     } else {
-                        PLog.w(TAG, "Vulkan RAW stacking failed, falling back to CPU")
+                        PLog.w(TAG, "Vulkan RAW stacking failed")
                         invalidateCachedVulkanRawStacker(vulkanStackerPtr)
+                        return null
                     }
                 } catch (e: Exception) {
-                    PLog.e(TAG, "Vulkan RAW stacking error: ${e.message}, falling back to CPU")
+                    PLog.e(TAG, "Vulkan RAW stacking error: ${e.message}", e)
                     invalidateCachedVulkanRawStacker(vulkanStackerPtr)
+                    return null
                 }
-                // fallback 到 CPU 路径前显式释放 Vulkan buffer 引用，避免与 CPU 路径的分配叠加
-                // 仅 fused Bayer 持续到 DNG 保存完成。
-                vulkanFusedBayer = null
-                @Suppress("ExplicitGarbageCollectionCall")
-                System.gc()
             } else {
                 PLog.w(TAG, "Failed to create Vulkan RAW stacker, falling back to CPU")
             }
