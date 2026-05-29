@@ -1648,19 +1648,21 @@ class Camera2Controller(private val context: Context) {
         val characteristics = cachedCharacteristics ?: return
         val availableRanges =
             characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return
-        val matchingRange = availableRanges
-            .filter { range -> range.upper >= targetFps && range.lower <= targetFps }
-            .sortedWith(
-                compareBy<android.util.Range<Int>> { kotlin.math.abs(it.upper - targetFps) }
-                    .thenBy { kotlin.math.abs(it.lower - targetFps) }
-            )
-            .firstOrNull()
-        val resolvedRange = matchingRange ?: android.util.Range(targetFps, targetFps).also {
+        
+        // 寻找完全匹配的固定帧率区间，例如 [60, 60]
+        val exactRange = availableRanges.firstOrNull { it.lower == targetFps && it.upper == targetFps }
+        
+        val resolvedRange = if (exactRange != null) {
+            exactRange
+        } else {
+            // 如果设备未宣传 [60, 60]，但为了稳定吐出 60fps，我们强行构造并锁定固定区间 [targetFps, targetFps]
+            val forced = android.util.Range(targetFps, targetFps)
             PLog.w(
                 TAG,
-                "Camera characteristics do not advertise $targetFps fps, forcing exact range $it. " +
+                "Camera characteristics do not advertise exact $targetFps fps range, forcing $forced. " +
                     "Advertised ranges=${availableRanges.joinToString()}"
             )
+            forced
         }
         builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, resolvedRange)
     }
