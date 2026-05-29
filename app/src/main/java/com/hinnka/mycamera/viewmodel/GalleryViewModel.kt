@@ -2626,7 +2626,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     /**
      * 批量导入照片
      */
-    fun importPhotos(uris: List<Uri>) {
+    fun importPhotos(uris: List<Uri>, videoUris: List<Uri?>? = null) {
         if (uris.isEmpty()) return
 
         viewModelScope.launch {
@@ -2636,8 +2636,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 var successCount = 0
 
                 withContext(Dispatchers.IO) {
-                    uris.forEach { uri ->
-                        val photoId = GalleryManager.importPhoto(context, uri, null, null)
+                    uris.forEachIndexed { index, uri ->
+                        val videoUri = videoUris?.getOrNull(index)
+                        val photoId = GalleryManager.importPhoto(context, uri, null, null, videoUri = videoUri)
                         if (photoId != null) {
                             successCount++
                         }

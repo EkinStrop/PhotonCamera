@@ -2604,6 +2604,7 @@ object GalleryManager {
         lutId: String?,
         computationalAperture: Float? = null,
         photoId: String? = null,
+        videoUri: Uri? = null,
     ): String? {
         return withContext(Dispatchers.IO) {
             try {
@@ -2719,8 +2720,28 @@ object GalleryManager {
 //                    }
                 }
 
+                // If a separate video URI is provided (e.g. Vivo Live Photo), copy it directly to videoFile
+                var hasVideo = false
+                if (videoUri != null) {
+                    val videoFile = File(photoDir, VIDEO_FILE)
+                    try {
+                        context.contentResolver.openInputStream(videoUri)?.use { input ->
+                            FileOutputStream(videoFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        PLog.d(TAG, "Successfully copied separate video from $videoUri for Vivo Live Photo: $photoId")
+                        hasVideo = true
+                        updateMetadata(context, photoId) { current ->
+                            current.copy(presentationTimestampUs = 0)
+                        }
+                    } catch (e: Exception) {
+                        PLog.e(TAG, "Failed to copy separate video from $videoUri", e)
+                    }
+                }
+
                 // Check for Motion Photo after import
-                if (photoFile.exists() && MotionPhotoWriter.isMotionPhoto(photoFile.absolutePath)) {
+                if (!hasVideo && photoFile.exists() && MotionPhotoWriter.isMotionPhoto(photoFile.absolutePath)) {
                     val videoFile = File(photoDir, VIDEO_FILE)
                     if (MotionPhotoWriter.extractVideo(photoFile.absolutePath, videoFile.absolutePath)) {
                         PLog.d(TAG, "Extracted video from imported Motion Photo: $photoId")

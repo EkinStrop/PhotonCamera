@@ -2,6 +2,11 @@ package com.hinnka.mycamera.ui.gallery
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.MediaStore
+import com.hinnka.mycamera.utils.PLog
+import org.json.JSONArray
 import android.graphics.Rect
 import android.graphics.Bitmap
 import android.widget.Toast
@@ -72,7 +77,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.recyclerview.widget.DiffUtil
 import android.os.Parcelable
+import org.json.JSONObject
 import kotlin.math.abs
+import androidx.core.net.toUri
 
 /**
  * 相册浏览界面
@@ -103,10 +110,56 @@ fun GalleryScreen(
     }
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            viewModel.importPhotos(uris)
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uris = mutableListOf<Uri>()
+            val videoUris = mutableListOf<Uri?>()
+            result.data?.let { data ->
+                /*PLog.d("GalleryScreen", "Received ACTION_PICK result. Data URI: ${data.data}, ClipData count: ${data.clipData?.itemCount ?: 0}")
+                val extras = data.extras
+                if (extras != null) {
+                    for (key in extras.keySet()) {
+                        val value = extras.get(key)
+                        PLog.d("GalleryScreen", "Intent Extra: $key = $value")
+                    }
+                } else {
+                    PLog.d("GalleryScreen", "Intent has no extras")
+                }*/
+
+                // Check for Vivo Live Photo in selected_media_infos
+                val mediaInfosStrs = data.getStringArrayListExtra("selected_media_infos")
+                val vivoLivePhotosMap = mutableMapOf<Uri, Uri>()
+                if (!mediaInfosStrs.isNullOrEmpty()) {
+                    try {
+                        for (text in mediaInfosStrs) {
+                            val jsonObject = JSONObject(text)
+                            val mainUriStr = jsonObject.optString("mainUri")
+                            val extraUriStr = jsonObject.optString("extraUri")
+                            if (!mainUriStr.isNullOrBlank() && !extraUriStr.isNullOrBlank()) {
+                                vivoLivePhotosMap[mainUriStr.toUri()] = extraUriStr.toUri()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        PLog.e("GalleryScreen", "Failed to parse selected_media_infos", e)
+                    }
+                }
+
+                data.data?.let { uri ->
+                    uris.add(uri)
+                    videoUris.add(vivoLivePhotosMap[uri])
+                }
+                data.clipData?.let { clipData ->
+                    for (i in 0 until clipData.itemCount) {
+                        val uri = clipData.getItemAt(i).uri
+                        uris.add(uri)
+                        videoUris.add(vivoLivePhotosMap[uri])
+                    }
+                }
+            }
+            if (uris.isNotEmpty()) {
+                viewModel.importPhotos(uris, videoUris)
+            }
         }
     }
 
@@ -257,7 +310,12 @@ fun GalleryScreen(
                             )
                         }
                     } else {
-                        IconButton(onClick = { launcher.launch("image/*") }) {
+                        IconButton(onClick = {
+                            val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                            launcher.launch(intent)
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.AddPhotoAlternate,
                                 contentDescription = stringResource(R.string.import_photo),
@@ -280,7 +338,9 @@ fun GalleryScreen(
             ) {
                 Surface(
                     color = Color(0xFF1A1A1A),
-                    modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
                 ) {
                     Row(
                         modifier = Modifier
@@ -397,7 +457,9 @@ fun GalleryScreen(
             if (selectedTab == GalleryTab.SYSTEM && !hasPermission) {
                 // 权限缺失提示
                 Column(
-                    modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
