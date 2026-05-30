@@ -365,6 +365,7 @@ object MultiFrameStacker {
         }
     }
 
+    @Synchronized
     fun processBurstRaw(
         images: List<SafeImage>,
         cfaPattern: Int,
