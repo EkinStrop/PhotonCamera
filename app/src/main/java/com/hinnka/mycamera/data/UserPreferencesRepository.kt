@@ -158,7 +158,8 @@ data class UserPreferences(
     val customLensIds: List<String> = emptyList(), // 自定义镜头 ID，逗号分隔存储
     val lensIdBlacklist: List<String> = emptyList(), // 主动探测黑名单镜头 ID，逗号分隔存储
     val hiddenFocalLengths: List<Float> = emptyList(), // 隐藏的焦段 (35mm等效)
-    val referencePhotoUrl: String? = null
+    val referencePhotoUrl: String? = null,
+    val deleteExported: Boolean = true
 )
 
 /**
@@ -276,6 +277,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val HIDDEN_FOCAL_LENGTHS = stringPreferencesKey("hidden_focal_lengths")
         private val USE_HDR_SCREEN_MODE = booleanPreferencesKey("use_hdr_screen_mode")
         private val REFERENCE_PHOTO_URL = stringPreferencesKey("reference_photo_url")
+        private val DELETE_EXPORTED = booleanPreferencesKey("delete_exported")
     }
 
     /**
@@ -422,7 +424,8 @@ class UserPreferencesRepository(private val context: Context) {
                     ?.mapNotNull { it.toFloatOrNull() }
                     ?: emptyList(),
                 useHdrScreenMode = preferences[USE_HDR_SCREEN_MODE] ?: true,
-                referencePhotoUrl = preferences[REFERENCE_PHOTO_URL]
+                referencePhotoUrl = preferences[REFERENCE_PHOTO_URL],
+                deleteExported = preferences[DELETE_EXPORTED] ?: true
             )
         }
 
@@ -536,6 +539,15 @@ class UserPreferencesRepository(private val context: Context) {
                 availableByName[name] ?: AspectRatio.valueOfOrNull(name)
             }
         return AspectRatio.sanitizeTopSheetRatios(ratios)
+    }
+
+    /**
+     * 保存是否同时删除系统相册中的导出图选择
+     */
+    suspend fun saveDeleteExported(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[DELETE_EXPORTED] = enabled
+        }
     }
 
     /**

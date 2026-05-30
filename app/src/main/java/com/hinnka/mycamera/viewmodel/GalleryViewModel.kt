@@ -103,6 +103,10 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     val openAIApiKey = userPreferencesRepository.userPreferences.map { it.openAIApiKey }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
+    val deleteExported: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.deleteExported }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     // 计费管理器
     private val billingManager = com.hinnka.mycamera.billing.BillingManagerImpl(application)
     val isPurchased = billingManager.isPurchased
@@ -1299,6 +1303,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             withContext(Dispatchers.Main) {
                 onComplete(success)
             }
+        }
+    }
+
+    fun setDeleteExported(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveDeleteExported(enabled)
         }
     }
 

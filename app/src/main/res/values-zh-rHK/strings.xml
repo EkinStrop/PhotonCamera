@@ -68,6 +68,7 @@
     <string name="delete_confirm">刪除這張照片嗎？</string>
     <string name="delete_multiple_confirm">刪除 %d 張照片嗎？</string>
     <string name="delete_exported_photos">同時刪除系統相冊中的導出圖</string>
+    <string name="delete_exported_photos_count">同時刪除 %d 張已導出照片</string>
     <string name="delete_system_warning">注意：此操作將同步刪除已匯出至系統相簿的照片。系統會彈出刪除確認，即使拒絕也不影響刪除 App 內的相片。</string>
 
     <string name="no_photos">暫無相片</string>

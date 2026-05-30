@@ -506,9 +506,12 @@ fun GalleryScreen(
         }
     }
 
+    val deleteExportedPref by viewModel.deleteExported.collectAsState()
+
     // 删除确认对话框
     if (showDeleteDialog) {
-//        var deleteExported by remember { mutableStateOf(true) }
+        val exportedPhotosCount = remember(selectedPhotos) { selectedPhotos.sumOf { it.metadata?.exportedUris?.size ?: 0 } }
+        var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
 
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -519,20 +522,42 @@ fun GalleryScreen(
                         text = stringResource(R.string.delete_multiple_confirm, selectedPhotos.size)
                     )
                     if (viewModel.selectedTab == GalleryTab.PHOTON) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = stringResource(R.string.delete_system_warning),
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
-                        )
+                        if (exportedPhotosCount > 0) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { deleteExportedState = !deleteExportedState }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = deleteExportedState,
+                                    onCheckedChange = { deleteExportedState = it },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = AccentOrange,
+                                        uncheckedColor = Color.White.copy(alpha = 0.6f)
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.delete_exported_photos_count, exportedPhotosCount),
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
                     }
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteSelectedPhotos(true)
+                        val finalDeleteExported = if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) deleteExportedState else true
+                        if (viewModel.selectedTab == GalleryTab.PHOTON && exportedPhotosCount > 0) {
+                            viewModel.setDeleteExported(deleteExportedState)
+                        }
+                        viewModel.deleteSelectedPhotos(finalDeleteExported)
                         showDeleteDialog = false
                     }
                 ) {
