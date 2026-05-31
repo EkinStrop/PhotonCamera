@@ -19,9 +19,11 @@ import androidx.media3.transformer.Effects
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.utils.PLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -205,10 +207,33 @@ private suspend fun runTransformer(
 ): ExportResult? = suspendCancellableCoroutine { cont ->
     var completed = false
 
+    // 启动进度轮询协程（需要在 Dispatchers.Main 上调用 getProgress）
+    val pollingJob = if (onProgress != null) {
+        CoroutineScope(Dispatchers.Main).launch {
+            val progressHolder = ProgressHolder()
+            while (!completed && isActive) {
+                try {
+                    delay(300)
+                    if (completed) break
+                    val state = transformer.getProgress(progressHolder)
+                    if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                        onProgress(progressHolder.progress)
+                    }
+                } catch (e: Exception) {
+                    PLog.e(TAG, "Error getting progress", e)
+                    break
+                }
+            }
+        }
+    } else {
+        null
+    }
+
     val listener = object : Transformer.Listener {
         override fun onCompleted(composition: Composition, exportResult: ExportResult) {
             if (!completed) {
                 completed = true
+                pollingJob?.cancel()
                 PLog.d(TAG, "Transformer.onCompleted")
                 onProgress?.invoke(100)
                 cont.resume(exportResult)
@@ -222,6 +247,7 @@ private suspend fun runTransformer(
         ) {
             if (!completed) {
                 completed = true
+                pollingJob?.cancel()
                 PLog.e(TAG, "Transformer.onError: ${exportException.errorCode}", exportException)
                 cont.resume(null)
             }
@@ -234,29 +260,9 @@ private suspend fun runTransformer(
 
     // 在取消时停止 Transformer
     cont.invokeOnCancellation {
+        pollingJob?.cancel()
         PLog.d(TAG, "Cancelling transformer")
         transformer.cancel()
-    }
-
-    // 启动进度轮询协程（在同一个 cont 作用域外需另起，这里用 Thread 简单实现）
-    if (onProgress != null) {
-        Thread {
-            val progressHolder = ProgressHolder()
-            while (!completed) {
-                try {
-                    @Suppress("BlockingMethodInNonBlockingContext")
-                    Thread.sleep(300)
-                    val state = transformer.getProgress(progressHolder)
-                    if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-                        onProgress(progressHolder.progress)
-                    }
-                } catch (_: InterruptedException) {
-                    break
-                } catch (_: Exception) {
-                    break
-                }
-            }
-        }.also { it.isDaemon = true }.start()
     }
 }
 
