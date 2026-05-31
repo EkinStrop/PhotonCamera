@@ -384,6 +384,7 @@ object GalleryMediaStore {
             multipleExposureFrameCount = multipleExposureFrameCount,
             hasAiDenoisedBase = hasAiDenoisedBase,
             aiDenoiseStrength = aiDenoiseStrength,
+            rawBlackLevelMode = rawBlackLevelMode,
             rawCustomBlackLevel = rawCustomBlackLevel,
             cameraId = cameraId,
             applyEffectsToVideo = applyEffectsToVideo
