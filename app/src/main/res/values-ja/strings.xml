@@ -53,6 +53,7 @@
     <string name="delete_confirm">この写真を削除しますか？</string>
     <string name="delete_multiple_confirm">%d枚の写真を削除しますか？</string>
     <string name="delete_exported_photos">システムギャラリーからも削除する</string>
+    <string name="delete_exported_videos_count">エクスポートされた%d個の動画も削除する</string>
     <string name="no_photos">写真がありません</string>
     <string name="photo_info">写真情報</string>
     <string name="filter">LUT</string>

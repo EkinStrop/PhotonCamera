@@ -53,6 +53,7 @@
     <string name="delete_confirm">Hapus foto ini?</string>
     <string name="delete_multiple_confirm">Hapus %d foto?</string>
     <string name="delete_exported_photos">Hapus juga dari galeri sistem</string>
+    <string name="delete_exported_videos_count">Hapus juga %d video yang diekspor</string>
     <string name="no_photos">Belum ada foto</string>
     <string name="photo_info">Info Foto</string>
     <string name="filter">LUT</string>

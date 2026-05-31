@@ -53,6 +53,7 @@
     <string name="delete_confirm">Supprimer cette photo ?</string>
     <string name="delete_multiple_confirm">Supprimer %d photos ?</string>
     <string name="delete_exported_photos">Supprimer également de la galerie système</string>
+    <string name="delete_exported_videos_count">Supprimer également %d vidéos exportées</string>
     <string name="no_photos">Aucune photo pour le moment</string>
     <string name="photo_info">Infos photo</string>
     <string name="filter">LUT</string>

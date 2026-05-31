@@ -590,7 +590,14 @@ fun GalleryDetailScreen(
 
     // 删除确认对话框
     if (showDeleteDialog) {
-        val exportedPhotosCount = remember(currentPhoto) { currentPhoto?.metadata?.exportedUris?.size ?: 0 }
+        val exportedPhotosCount = remember(currentPhoto, currentPhoto?.metadata, currentPhoto?.metadata?.exportedUris) {
+            val baseCount = currentPhoto?.metadata?.exportedUris?.size ?: 0
+            val sourceUri = currentPhoto?.metadata?.sourceUri
+            val isVideoAndCaptured = currentPhoto?.isVideo == true &&
+                    currentPhoto.metadata?.isImported != true &&
+                    !sourceUri.isNullOrBlank()
+            baseCount + (if (isVideoAndCaptured) 1 else 0)
+        }
         var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
 
         AlertDialog(
@@ -619,7 +626,11 @@ fun GalleryDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = stringResource(R.string.delete_exported_photos_count, exportedPhotosCount),
+                                    text = if (currentPhoto?.isVideo == true) {
+                                        stringResource(R.string.delete_exported_videos_count, exportedPhotosCount)
+                                    } else {
+                                        stringResource(R.string.delete_exported_photos_count, exportedPhotosCount)
+                                    },
                                     color = Color.White,
                                     fontSize = 14.sp
                                 )

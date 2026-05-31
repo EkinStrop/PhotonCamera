@@ -2246,7 +2246,7 @@ object GalleryManager {
             val exportedUris = buildList {
                 addAll(metadata?.exportedUris ?: emptyList())
                 val sourceUri = metadata?.sourceUri
-                if (metadata?.mediaType == MediaType.VIDEO && !sourceUri.isNullOrBlank()) {
+                if (metadata?.mediaType == MediaType.VIDEO && metadata.isImported != true && !sourceUri.isNullOrBlank()) {
                     add(sourceUri)
                 }
             }

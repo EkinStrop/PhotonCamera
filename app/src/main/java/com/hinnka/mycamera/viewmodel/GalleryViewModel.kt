@@ -21,6 +21,7 @@ import com.hinnka.mycamera.frame.FrameInfo
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.MediaMetadata
+import com.hinnka.mycamera.gallery.MediaType
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.hdr.UnifiedGainmapProducer
 import com.hinnka.mycamera.lut.creator.AiPhotoEvaluation
@@ -1393,6 +1394,14 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                             PLog.e(TAG, "Invalid URI: $uriString", e)
                         }
                     }
+                    val sourceUri = metadata?.sourceUri
+                    if (metadata?.mediaType == MediaType.VIDEO && metadata.isImported != true && !sourceUri.isNullOrBlank()) {
+                        try {
+                            allExportedUris.add(sourceUri.toUri())
+                        } catch (e: Exception) {
+                            PLog.e(TAG, "Invalid sourceUri: $sourceUri", e)
+                        }
+                    }
                 }
             }
 
@@ -2582,11 +2591,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     }
                 )
 
-                // 记录导出 URI 到元数据
+                // 记录导出 URI 到元数据并更新 UI 状态
                 if (resultUri != null) {
-                    GalleryManager.updateMetadata(context, photo.id) { current ->
+                    updatePhotoMetadata(photo.id) { current ->
                         current.copy(exportedUris = current.exportedUris + resultUri.toString())
                     }
+                    photoRefreshKeys[photo.id] = System.currentTimeMillis()
                 }
 
                 onComplete(resultUri != null, resultUri)

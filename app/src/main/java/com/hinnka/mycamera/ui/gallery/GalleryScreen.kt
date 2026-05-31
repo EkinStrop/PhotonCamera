@@ -90,7 +90,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel,
     onBack: () -> Unit,
     onPhotoClick: (GalleryTab, Int) -> Unit,
-    onNavigateToEdit: () -> Unit = {},
+    onNavigateToEdit: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val photos by viewModel.currentPhotos.collectAsState()
@@ -164,7 +164,7 @@ fun GalleryScreen(
                         val newPhotoId = importedIds.first()
                         viewModel.setCurrentPhotoById(newPhotoId)
                         viewModel.enterEditMode()
-                        onNavigateToEdit()
+                        onNavigateToEdit(newPhotoId)
                     }
                 }
             }
@@ -510,7 +510,19 @@ fun GalleryScreen(
 
     // 删除确认对话框
     if (showDeleteDialog) {
-        val exportedPhotosCount = remember(selectedPhotos) { selectedPhotos.sumOf { it.metadata?.exportedUris?.size ?: 0 } }
+        val exportedPhotosCount = remember(selectedPhotos) {
+            selectedPhotos.sumOf { photo ->
+                val baseCount = photo.metadata?.exportedUris?.size ?: 0
+                val sourceUri = photo.metadata?.sourceUri
+                val isVideoAndCaptured = photo.isVideo &&
+                        photo.metadata?.isImported != true &&
+                        !sourceUri.isNullOrBlank()
+                baseCount + (if (isVideoAndCaptured) 1 else 0)
+            }
+        }
+        val selectedOnlyVideos = remember(selectedPhotos) {
+            selectedPhotos.isNotEmpty() && selectedPhotos.all { it.isVideo }
+        }
         var deleteExportedState by remember(showDeleteDialog) { mutableStateOf(deleteExportedPref) }
 
         AlertDialog(
@@ -541,7 +553,11 @@ fun GalleryScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = stringResource(R.string.delete_exported_photos_count, exportedPhotosCount),
+                                    text = if (selectedOnlyVideos) {
+                                        stringResource(R.string.delete_exported_videos_count, exportedPhotosCount)
+                                    } else {
+                                        stringResource(R.string.delete_exported_photos_count, exportedPhotosCount)
+                                    },
                                     color = Color.White,
                                     fontSize = 14.sp
                                 )

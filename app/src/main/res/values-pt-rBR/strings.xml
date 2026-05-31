@@ -53,6 +53,8 @@
     <string name="delete_confirm">Excluir esta foto?</string>
     <string name="delete_multiple_confirm">Excluir %d fotos?</string>
     <string name="delete_exported_photos">Também excluir da galeria do sistema</string>
+    <string name="delete_exported_photos_count">Também excluir %d fotos exportadas</string>
+    <string name="delete_exported_videos_count">Também excluir %d vídeos exportados</string>
     <string name="no_photos">Nenhuma foto ainda</string>
     <string name="photo_info">Informações da Foto</string>
     <string name="filter">LUT</string>

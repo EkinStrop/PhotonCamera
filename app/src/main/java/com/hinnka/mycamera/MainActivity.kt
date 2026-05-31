@@ -578,7 +578,10 @@ fun NavigationHost(
                     onPhotoClick = { tab, index ->
                         navController.navigate(Routes.photoDetail(tab, index))
                     },
-                    onNavigateToEdit = {
+                    onNavigateToEdit = { photoId ->
+                        if (photoId != null) {
+                            navController.navigate(Routes.photoDetail(galleryViewModel.selectedTab, 0, photoId))
+                        }
                         navController.navigate(Routes.PHOTO_EDIT)
                     }
                 )

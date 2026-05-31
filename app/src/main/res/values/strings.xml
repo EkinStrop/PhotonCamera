@@ -134,6 +134,7 @@
     <string name="delete_multiple_confirm">Delete %d photos?</string>
     <string name="delete_exported_photos">Also delete from system gallery</string>
     <string name="delete_exported_photos_count">Also delete %d exported photos</string>
+    <string name="delete_exported_videos_count">Also delete %d exported videos</string>
     <string name="delete_system_warning">Note: Exported photos in the system gallery will also be removed. A system prompt will appear; declining it will only cancel the system deletion, while the app version will still be deleted.</string>
     <string name="no_photos">No photos yet</string>
     <string name="photo_info">Photo Info</string>

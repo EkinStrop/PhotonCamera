@@ -53,6 +53,8 @@
     <string name="delete_confirm">ลบรูปภาพนี้หรือไม่?</string>
     <string name="delete_multiple_confirm">ลบรูปภาพ %d รูปหรือไม่?</string>
     <string name="delete_exported_photos">ลบออกจากแกลเลอรีระบบด้วย</string>
+    <string name="delete_exported_photos_count">ลบ %d รูปภาพที่ส่งออกด้วย</string>
+    <string name="delete_exported_videos_count">ลบ %d วิดีโอที่ส่งออกด้วย</string>
     <string name="no_photos">ยังไม่มีรูปภาพ</string>
     <string name="photo_info">ข้อมูลรูปภาพ</string>
     <string name="filter">LUT</string>
