@@ -42,11 +42,25 @@ class VideoRecorder(
 
         private const val AUDIO_MIME = MediaFormat.MIMETYPE_AUDIO_AAC
         private const val AUDIO_SAMPLE_RATE = 48_000
-        private const val AUDIO_CHANNEL_COUNT = 1
+        private const val AUDIO_MONO_CHANNEL_COUNT = 1
+        private const val AUDIO_STEREO_CHANNEL_COUNT = 2
         private const val AUDIO_BYTES_PER_SAMPLE = 2
-        private const val AUDIO_BITRATE = 96_000
+        private const val AUDIO_MONO_BITRATE = 96_000
+        private const val AUDIO_STEREO_BITRATE = 192_000
         private const val I_FRAME_INTERVAL = 1
     }
+
+    private data class AudioCaptureConfig(
+        val channelMask: Int,
+        val channelCount: Int,
+        val bitrate: Int,
+        val label: String
+    )
+
+    private data class PreparedAudioRecord(
+        val recorder: AudioRecord,
+        val config: AudioCaptureConfig
+    )
 
     private data class EncodedSample(
         val data: ByteArray,
@@ -111,6 +125,7 @@ class VideoRecorder(
     private var errorCallback: ((String) -> Unit)? = null
     private var finishCallback: ((Uri?) -> Unit)? = null
     private var audioBytesQueued = 0L
+    private var activeAudioConfig = monoAudioConfig()
     private var lastAcceptedFrameTimestampUs = Long.MIN_VALUE
     private var frameSelectionStartTimestampUs = Long.MIN_VALUE
     private var lastAcceptedFrameSlot = Long.MIN_VALUE
@@ -381,41 +396,32 @@ class VideoRecorder(
         }
 
         return try {
-            val bufferSize = AudioRecord.getMinBufferSize(
-                AUDIO_SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            if (bufferSize <= 0) {
-                return false
-            }
-
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.CAMCORDER,
-                AUDIO_SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferSize * 2
-            ).apply {
-                if (state != AudioRecord.STATE_INITIALIZED) {
-                    release()
-                    throw IllegalStateException("AudioRecord not initialized")
-                }
-                applyPreferredAudioInput(this)
+            val preparedAudioRecord = createAudioRecordWithFallback() ?: return false
+            audioRecord = preparedAudioRecord.recorder.apply {
                 if (startLoop) {
                     startRecording()
                 }
             }
+            activeAudioConfig = preparedAudioRecord.config
 
             audioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME).apply {
-                val format = MediaFormat.createAudioFormat(AUDIO_MIME, AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_COUNT).apply {
-                    setInteger(MediaFormat.KEY_BIT_RATE, AUDIO_BITRATE)
+                val format = MediaFormat.createAudioFormat(
+                    AUDIO_MIME,
+                    AUDIO_SAMPLE_RATE,
+                    activeAudioConfig.channelCount
+                ).apply {
+                    setInteger(MediaFormat.KEY_BIT_RATE, activeAudioConfig.bitrate)
                     setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
                 }
                 configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 start()
             }
 
+            PLog.i(
+                TAG,
+                "Audio encoder initialized: ${activeAudioConfig.label}, " +
+                    "channels=${activeAudioConfig.channelCount}, bitrate=${activeAudioConfig.bitrate}"
+            )
             if (startLoop) {
                 startAudioLoop()
             }
@@ -428,6 +434,67 @@ class VideoRecorder(
             audioEncoder = null
             false
         }
+    }
+
+    private fun createAudioRecordWithFallback(): PreparedAudioRecord? {
+        val configs = listOf(stereoAudioConfig(), monoAudioConfig())
+        for (config in configs) {
+            val minBufferSize = try {
+                AudioRecord.getMinBufferSize(
+                    AUDIO_SAMPLE_RATE,
+                    config.channelMask,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+            } catch (e: Exception) {
+                PLog.w(TAG, "AudioRecord min buffer query failed for ${config.label}: ${e.message}")
+                continue
+            }
+            if (minBufferSize <= 0) {
+                PLog.w(TAG, "AudioRecord does not support ${config.label}: minBufferSize=$minBufferSize")
+                continue
+            }
+
+            val recorder = try {
+                AudioRecord(
+                    MediaRecorder.AudioSource.CAMCORDER,
+                    AUDIO_SAMPLE_RATE,
+                    config.channelMask,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    minBufferSize * 2
+                )
+            } catch (e: Exception) {
+                PLog.w(TAG, "AudioRecord creation failed for ${config.label}: ${e.message}")
+                continue
+            }
+            if (recorder.state == AudioRecord.STATE_INITIALIZED) {
+                applyPreferredAudioInput(recorder)
+                PLog.i(TAG, "AudioRecord initialized: ${config.label}, bufferSize=${minBufferSize * 2}")
+                return PreparedAudioRecord(recorder, config)
+            }
+
+            recorder.release()
+            PLog.w(TAG, "AudioRecord failed to initialize with ${config.label}")
+        }
+        PLog.w(TAG, "No supported audio capture channel configuration found")
+        return null
+    }
+
+    private fun stereoAudioConfig(): AudioCaptureConfig {
+        return AudioCaptureConfig(
+            channelMask = AudioFormat.CHANNEL_IN_STEREO,
+            channelCount = AUDIO_STEREO_CHANNEL_COUNT,
+            bitrate = AUDIO_STEREO_BITRATE,
+            label = "stereo"
+        )
+    }
+
+    private fun monoAudioConfig(): AudioCaptureConfig {
+        return AudioCaptureConfig(
+            channelMask = AudioFormat.CHANNEL_IN_MONO,
+            channelCount = AUDIO_MONO_CHANNEL_COUNT,
+            bitrate = AUDIO_MONO_BITRATE,
+            label = "mono"
+        )
     }
 
     private fun applyPreferredAudioInput(audioRecord: AudioRecord) {
@@ -479,7 +546,9 @@ class VideoRecorder(
                 }
                 val read = recorder.read(buffer, 0, buffer.size)
                 if (read <= 0) continue
-                if (!queueAudioPcm(encoder, buffer, read)) {
+                val frameAlignedRead = read - (read % audioBytesPerFrame())
+                if (frameAlignedRead <= 0) continue
+                if (!queueAudioPcm(encoder, buffer, frameAlignedRead)) {
                     break
                 }
             }
@@ -506,10 +575,12 @@ class VideoRecorder(
 
             val inputBuffer = encoder.getInputBuffer(inputIndex) ?: continue
             inputBuffer.clear()
-            val chunkSize = minOf(byteCount - offset, inputBuffer.remaining())
+            val bytesPerFrame = audioBytesPerFrame()
+            val maxChunkSize = minOf(byteCount - offset, inputBuffer.remaining())
+            val chunkSize = maxChunkSize - (maxChunkSize % bytesPerFrame)
             if (chunkSize <= 0) {
-                PLog.w(TAG, "Skip audio chunk because encoder input buffer has no capacity")
-                continue
+                PLog.w(TAG, "Skip audio chunk because encoder input buffer cannot fit a complete audio frame")
+                return true
             }
 
             inputBuffer.put(source, offset, chunkSize)
@@ -532,9 +603,12 @@ class VideoRecorder(
     }
 
     private fun audioBytesToPresentationTimeUs(byteCount: Long): Long {
-        val bytesPerFrame = AUDIO_CHANNEL_COUNT * AUDIO_BYTES_PER_SAMPLE
-        val frames = byteCount / bytesPerFrame
+        val frames = byteCount / audioBytesPerFrame()
         return frames * 1_000_000L / AUDIO_SAMPLE_RATE
+    }
+
+    private fun audioBytesPerFrame(): Int {
+        return activeAudioConfig.channelCount * AUDIO_BYTES_PER_SAMPLE
     }
 
     private fun presentationTimeForSlot(slot: Long): Long {
@@ -1023,6 +1097,7 @@ class VideoRecorder(
             videoFormat = null
             audioFormat = null
             audioBytesQueued = 0L
+            activeAudioConfig = monoAudioConfig()
             lastAcceptedFrameTimestampUs = Long.MIN_VALUE
             lastEncodedFrameSlot = Long.MIN_VALUE
             lastMuxedVideoPresentationTimeUs = Long.MIN_VALUE
