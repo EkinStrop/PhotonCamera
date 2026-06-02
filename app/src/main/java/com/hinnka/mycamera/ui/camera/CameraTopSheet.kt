@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.ui.camera
 
 import android.media.AudioDeviceInfo
+import android.graphics.Bitmap
 import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -27,6 +28,10 @@ import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
+import com.hinnka.mycamera.lut.LutInfo
+import com.hinnka.mycamera.raw.DcpInfo
+import com.hinnka.mycamera.ui.components.RawEditPanel
+import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
@@ -39,7 +44,7 @@ private enum class VideoSettingPanel {
     MICROPHONE
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CameraTopSheet(
     visible: Boolean,
@@ -61,6 +66,29 @@ fun CameraTopSheet(
     useRaw: Boolean,
     onRawToggle: (Boolean) -> Unit,
     isRawSupported: Boolean,
+    rawDcpId: String?,
+    availableDcps: List<DcpInfo>,
+    rawBaselineLutId: String?,
+    availableLuts: List<LutInfo>,
+    previewThumbnail: Bitmap?,
+    rawNlmNoiseFactor: Float,
+    rawExposureCompensation: Float,
+    rawAutoExposure: Boolean,
+    rawDROMode: String,
+    rawBlackPointCorrection: Float,
+    rawWhitePointCorrection: Float,
+    rawSpectralFilmEnabled: Boolean,
+    rawSpectralFilmStock: String?,
+    rawSpectralFilmPrint: String?,
+    onRawDcpChange: (String?) -> Unit,
+    onImportRawDcp: () -> Unit,
+    onDeleteRawDcp: (DcpInfo) -> Unit,
+    onRawBaselineLutChange: (String?) -> Unit,
+    onEditRawBaselineRecipe: (String) -> Unit,
+    onRawDROModeChange: (String) -> Unit,
+    onRawSpectralFilmEnabledChange: (Boolean) -> Unit,
+    onRawSpectralFilmStockChange: (String?) -> Unit,
+    onRawSpectralFilmPrintChange: (String?) -> Unit,
     meteringMode: MeteringMode,
     onMeteringModeChange: (MeteringMode) -> Unit,
     onFilterManageClick: () -> Unit,
@@ -78,6 +106,7 @@ fun CameraTopSheet(
     modifier: Modifier = Modifier
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
+    var showRawSheet by rememberSaveable { mutableStateOf(false) }
     AnimatedVisibility(
         visible = visible,
         enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -148,9 +177,9 @@ fun CameraTopSheet(
 
                     if (isRawSupported) {
                         QuickSettingToggle(
-                            title = "RAW",
+                            title = stringResource(R.string.baseline_target_raw),
                             checked = useRaw,
-                            onCheckedChange = onRawToggle,
+                            onCheckedChange = { showRawSheet = true },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -441,6 +470,107 @@ fun CameraTopSheet(
 
             Spacer(Modifier.weight(1f))
         }
+    }
+
+    if (showRawSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showRawSheet = false },
+            containerColor = Color(0xFF1E1E1E),
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_use_raw),
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                RawCaptureSwitch(
+                    checked = useRaw,
+                    onCheckedChange = onRawToggle
+                )
+                RawEditPanel(
+                    selectedDcpId = rawDcpId,
+                    availableDcps = availableDcps,
+                    selectedBaselineLutId = rawBaselineLutId,
+                    onSelectBaselineLut = onRawBaselineLutChange,
+                    onEditBaselineRecipe = onEditRawBaselineRecipe,
+                    availableLuts = availableLuts,
+                    thumbnail = previewThumbnail,
+                    rawNlmNoiseFactor = rawNlmNoiseFactor,
+                    rawExposureCompensation = rawExposureCompensation,
+                    rawAutoExposure = rawAutoExposure,
+                    rawDROMode = rawDROMode,
+                    rawBlackPointCorrection = rawBlackPointCorrection,
+                    rawWhitePointCorrection = rawWhitePointCorrection,
+                    spectralFilmEnabled = rawSpectralFilmEnabled,
+                    spectralFilmStock = rawSpectralFilmStock,
+                    spectralFilmPrint = rawSpectralFilmPrint,
+                    onSelectDcp = onRawDcpChange,
+                    onImportDcp = onImportRawDcp,
+                    onDeleteDcp = onDeleteRawDcp,
+                    onRawNlmNoiseFactorChange = {},
+                    onRawExposureCompensationChange = {},
+                    onRawAutoExposureChange = {},
+                    onRawDROModeChange = onRawDROModeChange,
+                    onRawBlackPointCorrectionChange = {},
+                    onRawWhitePointCorrectionChange = {},
+                    onSpectralFilmEnabledChange = onRawSpectralFilmEnabledChange,
+                    onSpectralFilmStockChange = onRawSpectralFilmStockChange,
+                    onSpectralFilmPrintChange = onRawSpectralFilmPrintChange,
+                    onAdjustmentStart = {},
+                    onAdjustmentEnd = {},
+                    contentMode = RawEditPanelContentMode.QUICK
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RawCaptureSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_use_raw),
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Normal
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.settings_use_raw_description),
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                lineHeight = 18.sp
+            )
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFFFF6B35),
+                uncheckedThumbColor = Color.Gray,
+                uncheckedTrackColor = Color.White.copy(alpha = 0.2f),
+                uncheckedBorderColor = Color.Transparent
+            )
+        )
     }
 }
 

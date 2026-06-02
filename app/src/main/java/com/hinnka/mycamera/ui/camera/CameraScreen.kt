@@ -159,6 +159,9 @@ fun CameraScreen(
     val rawBlackPointCorrection by viewModel.rawBlackPointCorrection.collectAsState()
     val rawWhitePointCorrection by viewModel.rawWhitePointCorrection.collectAsState()
     val droMode by viewModel.droMode.collectAsState()
+    val rawSpectralFilmEnabled by viewModel.rawSpectralFilmEnabled.collectAsState()
+    val rawSpectralFilmStock by viewModel.rawSpectralFilmStock.collectAsState()
+    val rawSpectralFilmPrint by viewModel.rawSpectralFilmPrint.collectAsState()
     val multipleExposureState = viewModel.multipleExposureState
     val canStartShutterAnimation by viewModel.canStartShutterAnimation.collectAsState()
     var previewRecipeParamsOverride by remember(currentLutId) { mutableStateOf<ColorRecipeParams?>(null) }
@@ -1200,8 +1203,50 @@ fun CameraScreen(
             videoAudioInputOptions = videoAudioInputOptions,
             onVideoAudioInputChange = { viewModel.setVideoAudioInputId(it) },
             useRaw = useRaw && state.isRawSupported,
-            onRawToggle = { viewModel.toggleRaw() },
+            onRawToggle = { viewModel.setUseRaw(it) },
             isRawSupported = state.isRawSupported,
+            rawDcpId = rawDcpId,
+            availableDcps = viewModel.availableDcps,
+            rawBaselineLutId = rawBaselineLutId,
+            availableLuts = viewModel.availableLutList,
+            previewThumbnail = viewModel.previewThumbnail,
+            rawNlmNoiseFactor = rawNlmNoiseFactor,
+            rawExposureCompensation = rawExposureCompensation,
+            rawAutoExposure = rawAutoExposure,
+            rawDROMode = droMode,
+            rawBlackPointCorrection = rawBlackPointCorrection,
+            rawWhitePointCorrection = rawWhitePointCorrection,
+            rawSpectralFilmEnabled = rawSpectralFilmEnabled,
+            rawSpectralFilmStock = rawSpectralFilmStock ?: "kodak_portra_400",
+            rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
+            onRawDcpChange = { viewModel.setRawDcpId(it) },
+            onImportRawDcp = { dcpImportLauncher.launch(arrayOf("*/*")) },
+            onDeleteRawDcp = { dcp ->
+                viewModel.deleteRawDcp(dcp.id) { success ->
+                    android.widget.Toast.makeText(
+                        context,
+                        if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            onRawBaselineLutChange = {
+                viewModel.setBaselineLut(BaselineColorCorrectionTarget.RAW, it)
+            },
+            onEditRawBaselineRecipe = { lutId ->
+                baselineEditLutId = lutId
+                baselineEditTarget = BaselineColorCorrectionTarget.RAW
+            },
+            onRawDROModeChange = { viewModel.setDroMode(it) },
+            onRawSpectralFilmEnabledChange = { enabled ->
+                if (enabled) {
+                    if (rawSpectralFilmStock == null) viewModel.setRawSpectralFilmStock("kodak_portra_400")
+                    if (rawSpectralFilmPrint == null) viewModel.setRawSpectralFilmPrint("kodak_portra_endura")
+                }
+                viewModel.setRawSpectralFilmEnabled(enabled)
+            },
+            onRawSpectralFilmStockChange = { viewModel.setRawSpectralFilmStock(it) },
+            onRawSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
             meteringMode = state.meteringMode,
             onMeteringModeChange = { viewModel.setMeteringMode(it) },
             onFilterManageClick = {

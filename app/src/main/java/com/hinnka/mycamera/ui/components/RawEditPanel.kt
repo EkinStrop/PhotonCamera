@@ -31,6 +31,11 @@ import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.RawProcessingPreferences.DROMode
 import com.hinnka.mycamera.raw.SpectralFilmUiInfo
 
+enum class RawEditPanelContentMode {
+    FULL,
+    QUICK,
+}
+
 @Composable
 fun RawEditPanel(
     selectedDcpId: String?,
@@ -64,6 +69,7 @@ fun RawEditPanel(
     onAdjustmentStart: () -> Unit,
     onAdjustmentEnd: () -> Unit,
     onOpenBaselineLutSheet: (() -> Unit)? = null,
+    contentMode: RawEditPanelContentMode = RawEditPanelContentMode.FULL,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -72,6 +78,25 @@ fun RawEditPanel(
             .padding(vertical = 16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
+        RawDcpSelector(
+            selectedDcpId = selectedDcpId,
+            availableDcps = availableDcps,
+            onSelectDcp = onSelectDcp,
+            onImportDcp = onImportDcp,
+            onDeleteDcp = onDeleteDcp
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        RawBaselineColorCorrectionSelector(
+            selectedLutId = selectedBaselineLutId,
+            availableLuts = availableLuts,
+            thumbnail = thumbnail,
+            onSelectLut = onSelectBaselineLut,
+            onEditRecipe = onEditBaselineRecipe,
+            onOpenSheet = onOpenBaselineLutSheet
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
         RawSwitchSettingItem(
             title = stringResource(R.string.settings_spectral_film),
             description = stringResource(R.string.settings_spectral_film_description),
@@ -91,81 +116,67 @@ fun RawEditPanel(
                 onSelectPrint = onSpectralFilmPrintChange
             )
             Spacer(modifier = Modifier.height(16.dp))
-        } else {
-            RawDcpSelector(
-                selectedDcpId = selectedDcpId,
-                availableDcps = availableDcps,
-                onSelectDcp = onSelectDcp,
-                onImportDcp = onImportDcp,
-                onDeleteDcp = onDeleteDcp
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            RawBaselineColorCorrectionSelector(
-                selectedLutId = selectedBaselineLutId,
-                availableLuts = availableLuts,
-                thumbnail = thumbnail,
-                onSelectLut = onSelectBaselineLut,
-                onEditRecipe = onEditBaselineRecipe,
-                onOpenSheet = onOpenBaselineLutSheet
-            )
-            Spacer(modifier = Modifier.height(16.dp))
         }
-        RawSwitchSettingItem(
-            title = stringResource(R.string.settings_raw_auto_exposure),
-            description = stringResource(R.string.settings_raw_auto_exposure_description),
-            checked = rawAutoExposure,
-            onCheckedChange = onRawAutoExposureChange
-        )
+
         RawDROModeSettingItem(
             title = stringResource(R.string.settings_raw_dro),
             description = stringResource(R.string.settings_raw_dro_description),
             currentMode = DROMode.fromPersistedName(rawDROMode),
             onModeSelected = { onRawDROModeChange(it.name) }
         )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_exposure_compensation),
-            value = rawExposureCompensation,
-            valueRange = -2f..2f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawExposureCompensationChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_nlm_noise_factor),
-            value = rawNlmNoiseFactor,
-            valueRange = 0f..1f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawNlmNoiseFactorChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_black_point_correction),
-            value = rawBlackPointCorrection,
-            valueRange = -0.25f..0.25f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawBlackPointCorrectionChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
-        SliderSettingItem(
-            title = stringResource(R.string.settings_raw_white_point_correction),
-            value = rawWhitePointCorrection,
-            valueRange = -0.5f..0.5f,
-            resetValue = 0f,
-            onValueChange = {
-                onAdjustmentStart()
-                onRawWhitePointCorrectionChange(it)
-            },
-            onValueChangeFinished = onAdjustmentEnd
-        )
+
+        if (contentMode != RawEditPanelContentMode.QUICK) {
+            RawSwitchSettingItem(
+                title = stringResource(R.string.settings_raw_auto_exposure),
+                description = stringResource(R.string.settings_raw_auto_exposure_description),
+                checked = rawAutoExposure,
+                onCheckedChange = onRawAutoExposureChange
+            )
+            SliderSettingItem(
+                title = stringResource(R.string.settings_raw_exposure_compensation),
+                value = rawExposureCompensation,
+                valueRange = -2f..2f,
+                resetValue = 0f,
+                onValueChange = {
+                    onAdjustmentStart()
+                    onRawExposureCompensationChange(it)
+                },
+                onValueChangeFinished = onAdjustmentEnd
+            )
+            SliderSettingItem(
+                title = stringResource(R.string.settings_raw_nlm_noise_factor),
+                value = rawNlmNoiseFactor,
+                valueRange = 0f..1f,
+                resetValue = 0f,
+                onValueChange = {
+                    onAdjustmentStart()
+                    onRawNlmNoiseFactorChange(it)
+                },
+                onValueChangeFinished = onAdjustmentEnd
+            )
+            SliderSettingItem(
+                title = stringResource(R.string.settings_raw_black_point_correction),
+                value = rawBlackPointCorrection,
+                valueRange = -0.25f..0.25f,
+                resetValue = 0f,
+                onValueChange = {
+                    onAdjustmentStart()
+                    onRawBlackPointCorrectionChange(it)
+                },
+                onValueChangeFinished = onAdjustmentEnd
+            )
+            SliderSettingItem(
+                title = stringResource(R.string.settings_raw_white_point_correction),
+                value = rawWhitePointCorrection,
+                valueRange = -0.5f..0.5f,
+                resetValue = 0f,
+                onValueChange = {
+                    onAdjustmentStart()
+                    onRawWhitePointCorrectionChange(it)
+                },
+                onValueChangeFinished = onAdjustmentEnd
+            )
+        }
     }
 }
 

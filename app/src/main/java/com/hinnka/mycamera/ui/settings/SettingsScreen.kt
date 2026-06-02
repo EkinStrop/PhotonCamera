@@ -114,6 +114,7 @@ import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.SliderSettingItem
 import com.hinnka.mycamera.ui.components.LutSelector
 import com.hinnka.mycamera.ui.components.RawEditPanel
+import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
 import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.DeviceUtil
@@ -1283,7 +1284,8 @@ fun SettingsScreen(
                         onSpectralFilmStockChange = { viewModel.setRawSpectralFilmStock(it) },
                         onSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
                         onAdjustmentStart = { isRawSliderAdjusting = true },
-                        onAdjustmentEnd = { commitRawSliderValues() }
+                        onAdjustmentEnd = { commitRawSliderValues() },
+                        contentMode = RawEditPanelContentMode.FULL
                     )
 
                     HorizontalDivider(

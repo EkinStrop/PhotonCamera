@@ -88,6 +88,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import com.hinnka.mycamera.lut.VideoLutEffect
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.ui.camera.autoRotate
+import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
 
 private data class PreviewRenderSignature(
     val photoId: String,
@@ -1196,6 +1197,7 @@ fun GalleryEditScreen(
                                         onOpenBaselineLutSheet = {
                                             showRawBaselineLutSelectorSheet = true
                                         },
+                                        contentMode = RawEditPanelContentMode.FULL,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
