@@ -164,6 +164,7 @@ class Camera2Controller(private val context: Context) {
     private var videoCaptureStatsWindowStartMs: Long = 0L
     private var videoCaptureStatsFrames: Int = 0
     private var videoCaptureStatsLastTimestampNs: Long = 0L
+    private var mirrorFrontCameraEnabled: Boolean = true
     @Volatile
     private var cameraOpenGeneration: Long = 0L
 
@@ -3310,6 +3311,10 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun setMirrorFrontCameraEnabled(enabled: Boolean) {
+        mirrorFrontCameraEnabled = enabled
+    }
+
     fun startVideoRecording() {
         if (_state.value.captureMode != CaptureMode.VIDEO || _state.value.videoRecordingState.isRecording) {
             return
@@ -3321,6 +3326,8 @@ class Camera2Controller(private val context: Context) {
         val outputSize = _state.value.videoConfig.resolveOutputSize(
             _state.value.videoCapabilities.openGatePortraitAspectRatio
         )
+        val isFrontCamera = isCurrentCameraFrontFacing()
+        val shouldFlipEncodedFrame = isFrontCamera && !mirrorFrontCameraEnabled
         val started = videoRecorder.startRecording(
             size = outputSize,
             fps = _state.value.videoConfig.fps.fps,
@@ -3331,6 +3338,7 @@ class Camera2Controller(private val context: Context) {
                 hasActiveLut = _state.value.lutEnabled && _state.value.currentLutName != null
             ),
             orientationHintDegrees = resolveVideoOrientationHintDegrees(),
+            flipEncodedFrame = shouldFlipEncodedFrame,
             onError = { message ->
                 PLog.e(TAG, "Video recording error: $message")
                 onCameraError?.invoke(-1, message, false)
@@ -3349,6 +3357,11 @@ class Camera2Controller(private val context: Context) {
         )
         videoRecordingPausedMs = 0L
         startVideoRecordingTicker()
+    }
+
+    private fun isCurrentCameraFrontFacing(): Boolean {
+        return cachedLensFacing == CameraCharacteristics.LENS_FACING_FRONT ||
+            _state.value.getCurrentCameraInfo()?.lensType == LensType.FRONT
     }
 
     fun pauseVideoRecording() {

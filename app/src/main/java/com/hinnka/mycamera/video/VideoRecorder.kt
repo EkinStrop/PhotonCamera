@@ -90,6 +90,7 @@ class VideoRecorder(
     private var requestedBitrateMbps: Int = 30
     private var requestedCodecMime: String = MediaFormat.MIMETYPE_VIDEO_AVC
     private var requestedOrientationHintDegrees: Int = 0
+    private var requestedFlipEncodedFrame: Boolean = false
     private var preferredAudioInputId: String = VIDEO_AUDIO_INPUT_AUTO
     private var requestedColorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest()
     private var preparedEncoderColorConfig: VideoEncoderColorConfig? = null
@@ -142,6 +143,7 @@ class VideoRecorder(
         codecMime: String,
         colorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest(),
         orientationHintDegrees: Int = 0,
+        flipEncodedFrame: Boolean = false,
         onError: ((String) -> Unit)? = null,
         onFinished: ((Uri?) -> Unit)? = null
     ): Boolean {
@@ -153,6 +155,7 @@ class VideoRecorder(
         requestedCodecMime = codecMime
         requestedColorConfig = colorConfig
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
+        requestedFlipEncodedFrame = flipEncodedFrame
         outputDateTakenMs = System.currentTimeMillis()
         this.errorCallback = onError
         this.finishCallback = onFinished
@@ -602,7 +605,13 @@ class VideoRecorder(
                 }
                 val presentationTimeUs = presentationTimeForSlot(frameSlot)
                 val renderStartMs = android.os.SystemClock.elapsedRealtime()
-                videoRenderer.renderFrame(frame.textureId, frame.transformMatrix, presentationTimeUs)
+                videoRenderer.renderFrame(
+                    textureId = frame.textureId,
+                    stMatrix = frame.transformMatrix,
+                    timestampUs = presentationTimeUs,
+                    mirrorHorizontally = requestedFlipEncodedFrame && requestedOrientationHintDegrees % 180 == 0,
+                    mirrorVertically = requestedFlipEncodedFrame && requestedOrientationHintDegrees % 180 != 0
+                )
                 val renderCostMs = (android.os.SystemClock.elapsedRealtime() - renderStartMs).coerceAtLeast(0L)
                 statsRenderedFrames += 1
                 statsRenderTimeTotalMs += renderCostMs

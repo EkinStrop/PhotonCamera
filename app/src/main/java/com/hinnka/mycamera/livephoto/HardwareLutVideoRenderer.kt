@@ -47,6 +47,8 @@ class HardwareLutVideoRenderer(
     private var shaderProgram: Int = 0
     private var vertexBuffer: FloatBuffer? = null
     private var texCoordBuffer: FloatBuffer? = null
+    private var horizontalMirrorTexCoordBuffer: FloatBuffer? = null
+    private var verticalMirrorTexCoordBuffer: FloatBuffer? = null
     private var indexBuffer: ShortBuffer? = null
 
     // Cached locations
@@ -218,6 +220,12 @@ class HardwareLutVideoRenderer(
         texCoordBuffer = ByteBuffer.allocateDirect(Shaders.TEXTURE_COORDS.size * 4).run {
             order(ByteOrder.nativeOrder()).asFloatBuffer().put(Shaders.TEXTURE_COORDS).apply { position(0) }
         }
+        horizontalMirrorTexCoordBuffer = ByteBuffer.allocateDirect(HORIZONTAL_MIRROR_TEXTURE_COORDS.size * 4).run {
+            order(ByteOrder.nativeOrder()).asFloatBuffer().put(HORIZONTAL_MIRROR_TEXTURE_COORDS).apply { position(0) }
+        }
+        verticalMirrorTexCoordBuffer = ByteBuffer.allocateDirect(VERTICAL_MIRROR_TEXTURE_COORDS.size * 4).run {
+            order(ByteOrder.nativeOrder()).asFloatBuffer().put(VERTICAL_MIRROR_TEXTURE_COORDS).apply { position(0) }
+        }
         indexBuffer = ByteBuffer.allocateDirect(Shaders.DRAW_ORDER.size * 2).run {
             order(ByteOrder.nativeOrder()).asShortBuffer().put(Shaders.DRAW_ORDER).apply { position(0) }
         }
@@ -227,7 +235,13 @@ class HardwareLutVideoRenderer(
      * 渲染一帧
      * @param textureId 2D 纹理 ID (GL_TEXTURE_2D)
      */
-    fun renderFrame(textureId: Int, stMatrix: FloatArray, timestampUs: Long) {
+    fun renderFrame(
+        textureId: Int,
+        stMatrix: FloatArray,
+        timestampUs: Long,
+        mirrorHorizontally: Boolean = false,
+        mirrorVertically: Boolean = false
+    ) {
         if (!isInitialized || textureId == 0 || shaderProgram == 0) return
 
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
@@ -271,8 +285,13 @@ class HardwareLutVideoRenderer(
             GLES30.glVertexAttribPointer(aPositionLoc, 2, GLES30.GL_FLOAT, false, 0, vertexBuffer)
         }
         if (aTexCoordLoc != -1) {
+            val textureCoordinates = when {
+                mirrorHorizontally -> horizontalMirrorTexCoordBuffer
+                mirrorVertically -> verticalMirrorTexCoordBuffer
+                else -> texCoordBuffer
+            }
             GLES30.glEnableVertexAttribArray(aTexCoordLoc)
-            GLES30.glVertexAttribPointer(aTexCoordLoc, 2, GLES30.GL_FLOAT, false, 0, texCoordBuffer)
+            GLES30.glVertexAttribPointer(aTexCoordLoc, 2, GLES30.GL_FLOAT, false, 0, textureCoordinates)
         }
 
         indexBuffer?.let {
@@ -306,3 +325,17 @@ class HardwareLutVideoRenderer(
     }
 
 }
+
+private val HORIZONTAL_MIRROR_TEXTURE_COORDS = floatArrayOf(
+    1.0f, 0.0f,
+    0.0f, 0.0f,
+    1.0f, 1.0f,
+    0.0f, 1.0f
+)
+
+private val VERTICAL_MIRROR_TEXTURE_COORDS = floatArrayOf(
+    0.0f, 1.0f,
+    1.0f, 1.0f,
+    0.0f, 0.0f,
+    1.0f, 0.0f
+)

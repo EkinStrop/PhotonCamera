@@ -583,6 +583,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoStabilizationMode(it.videoStabilizationMode)
                 cameraController.setVideoTorchEnabled(it.videoTorchEnabled)
                 cameraController.setVideoCodec(it.videoCodec)
+                cameraController.setMirrorFrontCameraEnabled(it.mirrorFrontCamera)
                 multipleExposureState = multipleExposureState.copy(
                     enabled = it.useMultipleExposure,
                     targetCount = it.multipleExposureCount
