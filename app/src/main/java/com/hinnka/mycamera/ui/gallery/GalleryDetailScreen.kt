@@ -55,6 +55,7 @@ import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import kotlinx.coroutines.delay
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -1632,8 +1633,17 @@ fun MotionPhotoPlayer(
     viewModel: GalleryViewModel,
     modifier: Modifier = Modifier
 ) {
-    if (!photo.isMotionPhoto) return
     val context = LocalContext.current
+    val videoFile = remember(photo.id) {
+        viewModel.getMotionPhotoVideo(photo)
+    }
+
+    if (!photo.isMotionPhoto || videoFile == null || !videoFile.exists()) {
+        if (photo.isMotionPhoto) {
+            PLog.w("MotionPhotoPlayer", "Motion Photo video file missing: ${photo.id}")
+        }
+        return
+    }
 
     val contentRepository = remember {
         com.hinnka.mycamera.data.ContentRepository.getInstance(context)
@@ -1641,15 +1651,17 @@ fun MotionPhotoPlayer(
 
     var lutConfig by remember { mutableStateOf<com.hinnka.mycamera.lut.LutConfig?>(null) }
     var recipeParams by remember { mutableStateOf<com.hinnka.mycamera.model.ColorRecipeParams?>(null) }
+    var effectMetadataLoaded by remember(photo.id) { mutableStateOf(false) }
     val refreshKey = viewModel.photoRefreshKeys[photo.id] ?: 0L
 
     LaunchedEffect(photo.id, refreshKey) {
+        effectMetadataLoaded = false
         withContext(Dispatchers.IO) {
             PLog.d("MotionPhotoPlayer", "Loading video metadata from DB.")
             val metadata = com.hinnka.mycamera.gallery.GalleryManager.loadMetadata(context, photo.id) ?: photo.metadata
             val applyEffects = metadata?.applyEffectsToVideo == true
-            val lutId = if (applyEffects) metadata?.lutId else null
-            val params = if (applyEffects) metadata?.colorRecipeParams else null
+            val lutId = if (applyEffects) metadata.lutId else null
+            val params = if (applyEffects) metadata.colorRecipeParams else null
             PLog.d("MotionPhotoPlayer", "Metadata loaded. applyEffects: $applyEffects, lutId: $lutId, recipeEnabled: ${params != null}")
 
             val config = if (lutId != null) {
@@ -1661,6 +1673,7 @@ fun MotionPhotoPlayer(
             withContext(Dispatchers.Main) {
                 lutConfig = config
                 recipeParams = params
+                effectMetadataLoaded = true
             }
         }
     }
@@ -1677,34 +1690,65 @@ fun MotionPhotoPlayer(
         videoLutEffect.update(lutConfig, recipeParams)
     }
 
-    var isReadyToShow by remember(photo.id, isPlaying) { mutableStateOf(false) }
+    if (!effectMetadataLoaded) return
 
-    val exoPlayer = remember(photo.id, isPlaying) {
-        val videoFile = viewModel.getMotionPhotoVideo(photo)
-        if (videoFile == null || !videoFile.exists()) {
-            return@remember null
-        }
+    val hasVideoEffects = lutConfig != null || recipeParams != null
+    val shouldApplyVideoEffects = hasVideoEffects
+
+    var isReadyToShow by remember(photo.id) { mutableStateOf(false) }
+
+    val exoPlayer = remember(photo.id, videoFile.absolutePath, shouldApplyVideoEffects) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.fromFile(videoFile)))
+            PLog.d(
+                "MotionPhotoPlayer",
+                "Creating ExoPlayer for ${photo.id}, video=${videoFile.absolutePath}, size=${videoFile.length()}, effects=$shouldApplyVideoEffects"
+            )
             repeatMode = Player.REPEAT_MODE_ONE
-            setVideoEffects(listOf(videoLutEffect))
+            if (shouldApplyVideoEffects) {
+                setVideoEffects(listOf(videoLutEffect))
+            }
             addListener(object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     isReadyToShow = true
                 }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                }
             })
             prepare()
-            playWhenReady = isPlaying
+        }
+    }
+
+    LaunchedEffect(exoPlayer, isPlaying, shouldApplyVideoEffects) {
+        if (isPlaying) {
+            isReadyToShow = false
+            delay(150)
+            if (exoPlayer.mediaItemCount == 0) {
+                PLog.d("MotionPhotoPlayer", "Preparing Motion Photo player after PlayerView attach: ${photo.id}")
+                exoPlayer.setMediaItem(MediaItem.fromUri(Uri.fromFile(videoFile)))
+                exoPlayer.prepare()
+            }
+            exoPlayer.seekTo(0)
+            exoPlayer.playWhenReady = true
+            exoPlayer.play()
+        } else {
+            isReadyToShow = false
+            exoPlayer.playWhenReady = false
+            exoPlayer.pause()
         }
     }
 
     DisposableEffect(exoPlayer) {
         onDispose {
-            exoPlayer?.release()
+            exoPlayer.release()
         }
     }
-
-    if (exoPlayer == null) return
 
     AndroidView(
         factory = {
@@ -1713,8 +1757,9 @@ fun MotionPhotoPlayer(
         update = {
             it.player = exoPlayer
             it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-            it.isVisible = isPlaying
-            it.alpha = if (isReadyToShow) 1f else 0f
+            it.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+            it.isVisible = true
+            it.alpha = if (isPlaying && isReadyToShow) 1f else 0f
         },
         modifier = modifier.autoRotate(matchParentSize = true)
     )

@@ -3,6 +3,8 @@ package com.hinnka.mycamera.ui.gallery
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.MediaStore
 import com.hinnka.mycamera.utils.PLog
@@ -81,6 +83,51 @@ import org.json.JSONObject
 import kotlin.math.abs
 import androidx.core.net.toUri
 
+private const val GALLERY_SCREEN_TAG = "GalleryScreen"
+
+private fun buildSystemGalleryMediaPickIntent(context: Context): Intent {
+    val intent = Intent(Intent.ACTION_PICK).apply {
+        setDataAndType(MediaStore.Files.getContentUri("external"), "*/*")
+        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+    }
+
+    val packageName = resolveSystemGalleryPackage(context)
+    if (packageName != null) {
+        intent.setPackage(packageName)
+        PLog.d(GALLERY_SCREEN_TAG, "Using system gallery package for ACTION_PICK: $packageName")
+    } else {
+        PLog.w(GALLERY_SCREEN_TAG, "No system gallery package found for ACTION_PICK; falling back to unscoped picker")
+    }
+    return intent
+}
+
+private fun resolveSystemGalleryPackage(context: Context): String? {
+    val packageManager = context.packageManager
+    val imagePickIntent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
+        type = "image/*"
+    }
+    val candidates = queryIntentActivitiesCompat(packageManager, imagePickIntent)
+    return candidates.firstOrNull { resolveInfo ->
+        val appInfo = resolveInfo.activityInfo?.applicationInfo ?: return@firstOrNull false
+        val flags = appInfo.flags
+        flags and ApplicationInfo.FLAG_SYSTEM != 0 || flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
+    }?.activityInfo?.packageName
+}
+
+private fun queryIntentActivitiesCompat(
+    packageManager: PackageManager,
+    intent: Intent
+) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    packageManager.queryIntentActivities(
+        intent,
+        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+    )
+} else {
+    @Suppress("DEPRECATION")
+    packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+}
+
 /**
  * 相册浏览界面
  */
@@ -110,25 +157,36 @@ fun GalleryScreen(
         viewModel.exitSelectionMode()
     }
 
+    fun importSelectedMedia(uris: List<Uri>, videoUris: List<Uri?>? = null) {
+        if (uris.isEmpty()) return
+        val uniqueUris = uris.distinct().also { distinct ->
+            if (distinct.size != uris.size) {
+                PLog.d("GalleryScreen", "Ignoring ${uris.size - distinct.size} duplicate selected media URI(s)")
+            }
+        }
+        val alignedVideoUris = videoUris?.let { uriVideoMap ->
+            uniqueUris.map { uri ->
+                val originalIndex = uris.indexOf(uri)
+                uriVideoMap.getOrNull(originalIndex)
+            }
+        }
+        viewModel.importPhotos(uniqueUris, alignedVideoUris) { importedIds ->
+            if (importedIds.size == 1) {
+                val newPhotoId = importedIds.first()
+                viewModel.setCurrentPhotoById(newPhotoId)
+                viewModel.enterEditMode()
+                onNavigateToEdit(newPhotoId)
+            }
+        }
+    }
+
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val uris = mutableListOf<Uri>()
-            val videoUris = mutableListOf<Uri?>()
             result.data?.let { data ->
-                /*PLog.d("GalleryScreen", "Received ACTION_PICK result. Data URI: ${data.data}, ClipData count: ${data.clipData?.itemCount ?: 0}")
-                val extras = data.extras
-                if (extras != null) {
-                    for (key in extras.keySet()) {
-                        val value = extras.get(key)
-                        PLog.d("GalleryScreen", "Intent Extra: $key = $value")
-                    }
-                } else {
-                    PLog.d("GalleryScreen", "Intent has no extras")
-                }*/
+                PLog.d("GalleryScreen", "Received ACTION_PICK result. Data URI: ${data.data}, ClipData count: ${data.clipData?.itemCount ?: 0}")
 
-                // Check for Vivo Live Photo in selected_media_infos
                 val mediaInfosStrs = data.getStringArrayListExtra("selected_media_infos")
                 val vivoLivePhotosMap = mutableMapOf<Uri, Uri>()
                 if (!mediaInfosStrs.isNullOrEmpty()) {
@@ -146,27 +204,21 @@ fun GalleryScreen(
                     }
                 }
 
-                data.data?.let { uri ->
+                val uris = mutableListOf<Uri>()
+                val videoUris = mutableListOf<Uri?>()
+                fun addSelectedUri(uri: Uri) {
                     uris.add(uri)
                     videoUris.add(vivoLivePhotosMap[uri])
                 }
+
+                data.data?.let(::addSelectedUri)
                 data.clipData?.let { clipData ->
                     for (i in 0 until clipData.itemCount) {
-                        val uri = clipData.getItemAt(i).uri
-                        uris.add(uri)
-                        videoUris.add(vivoLivePhotosMap[uri])
+                        clipData.getItemAt(i).uri?.let(::addSelectedUri)
                     }
                 }
-            }
-            if (uris.isNotEmpty()) {
-                viewModel.importPhotos(uris, videoUris) { importedIds ->
-                    if (importedIds.size == 1) {
-                        val newPhotoId = importedIds.first()
-                        viewModel.setCurrentPhotoById(newPhotoId)
-                        viewModel.enterEditMode()
-                        onNavigateToEdit(newPhotoId)
-                    }
-                }
+
+                importSelectedMedia(uris, videoUris)
             }
         }
     }
@@ -283,10 +335,7 @@ fun GalleryScreen(
                         }
                     } else {
                         IconButton(onClick = {
-                            val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                            }
-                            launcher.launch(intent)
+                            launcher.launch(buildSystemGalleryMediaPickIntent(context))
                         }) {
                             Icon(
                                 imageVector = Icons.Default.AddPhotoAlternate,
