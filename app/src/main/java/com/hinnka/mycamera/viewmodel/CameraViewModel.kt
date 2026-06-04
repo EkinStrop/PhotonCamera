@@ -361,6 +361,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             isApplyingPreset = true
             try {
+                PLog.d(
+                    TAG,
+                    "Applying preset id=${preset?.id}, aspectRatio=${preset?.aspectRatio}, frameId=${preset?.frameId}"
+                )
                 applyCameraFeatureUpdate(
                     preset.toCameraFeatureUpdate().copy(activePresetId = SettingValue(preset?.id)),
                     clearActivePresetOnMismatch = false
@@ -429,11 +433,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        val currentState = state.value
+        val targetAspectRatio = update.aspectRatio?.value
         val needsCameraReopen =
-            update.aspectRatio != null ||
-                update.useRaw != null ||
-                update.useMFNR != null ||
-                update.useMFSR != null
+            targetAspectRatio != null && targetAspectRatio != currentState.aspectRatio ||
+                desiredUseRaw != prefs.useRaw ||
+                desiredUseMFNR != prefs.useMFNR ||
+                desiredUseMFSR != prefs.useMFSR
 
         update.colorRecipe?.let {
             val recipeLutId = if (update.lutId != null) {

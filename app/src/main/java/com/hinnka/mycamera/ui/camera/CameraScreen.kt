@@ -71,6 +71,7 @@ import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.data.AiFocusTargetMode
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
+import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.*
@@ -380,6 +381,36 @@ fun CameraScreen(
             }
             viewModel.setCaptureMode(mode)
         }
+    }
+
+    fun presetTargetAspectRatio(preset: CameraPreset?): AspectRatio {
+        return try {
+            AspectRatio.valueOf(preset?.aspectRatio ?: AspectRatio.RATIO_4_3.name)
+        } catch (_: Exception) {
+            AspectRatio.RATIO_4_3
+        }
+    }
+
+    fun presetRequiresPreviewTransition(preset: CameraPreset?): Boolean {
+        val targetAspectRatio = presetTargetAspectRatio(preset)
+        var targetUseRaw = preset?.useRaw ?: false
+        var targetUseMFNR = preset?.useMFNR ?: false
+        var targetUseMFSR = preset?.useMFSR ?: false
+
+        if (targetUseRaw) {
+            targetUseMFSR = false
+        }
+        if (targetUseMFNR) {
+            targetUseMFSR = false
+        }
+        if (targetUseMFSR && targetUseRaw) {
+            targetUseMFSR = false
+        }
+
+        return targetAspectRatio != state.aspectRatio ||
+            targetUseRaw != useRaw ||
+            targetUseMFNR != useMFNR ||
+            targetUseMFSR != useMFSR
     }
 
     LaunchedEffect(previewTransitionToken, state.isPreviewActive, previewTransitionAwaitingResume) {
@@ -1401,7 +1432,13 @@ fun CameraScreen(
                         activePresetId = activePresetId,
                         selectedMode = lutSelectorMode,
                         onModeSelected = { viewModel.setLutSelectorMode(it) },
-                        onPresetSelected = { viewModel.applyPreset(it) },
+                        onPresetSelected = { preset ->
+                            if (presetRequiresPreviewTransition(preset)) {
+                                runPreviewTransition { viewModel.applyPreset(preset) }
+                            } else {
+                                viewModel.applyPreset(preset)
+                            }
+                        },
                         onCreatePresetClick = {
                             viewModel.prepareCurrentSettingsPresetDraft(defaultPresetName)
                             onPresetEditClick(null)
