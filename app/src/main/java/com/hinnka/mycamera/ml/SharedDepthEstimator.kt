@@ -2,13 +2,20 @@ package com.hinnka.mycamera.ml
 
 import android.content.Context
 import android.graphics.Bitmap
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 
 object SharedDepthEstimator {
     private val mutex = Mutex()
+    private val estimatorDispatcher = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "SharedDepthEstimator").apply {
+            isDaemon = true
+        }
+    }.asCoroutineDispatcher()
+
     @Volatile
     private var estimator: DepthEstimator? = null
 
@@ -30,7 +37,7 @@ object SharedDepthEstimator {
         context: Context,
         modelAssetName: String,
         block: (DepthEstimator) -> T
-    ): T = withContext(Dispatchers.Default) {
+    ): T = withContext(estimatorDispatcher) {
         mutex.withLock {
             val current = estimator
             val resolved = if (current?.modelAssetName == modelAssetName) {
@@ -46,7 +53,7 @@ object SharedDepthEstimator {
     }
 
     suspend fun close() {
-        withContext(Dispatchers.Default) {
+        withContext(estimatorDispatcher) {
             mutex.withLock {
                 estimator?.close()
                 estimator = null

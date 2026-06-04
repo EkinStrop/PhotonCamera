@@ -106,6 +106,22 @@ private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
 
+private fun Bitmap.copyForCaptureAnimation(): Bitmap? {
+    if (isRecycled) return null
+    val copyConfig = if (config == Bitmap.Config.HARDWARE) {
+        Bitmap.Config.ARGB_8888
+    } else {
+        config ?: Bitmap.Config.ARGB_8888
+    }
+    return copy(copyConfig, false) ?: copy(Bitmap.Config.ARGB_8888, false)
+}
+
+private fun Bitmap.recycleIfAlive() {
+    if (!isRecycled) {
+        recycle()
+    }
+}
+
 private fun CameraParameter.defaultResetValue(): Float {
     return when (this) {
         CameraParameter.EXPOSURE_COMPENSATION -> 0f
@@ -296,15 +312,22 @@ fun CameraScreen(
 
             fun startCaptureAnimation(bitmap: Bitmap) {
                 if (sourceBounds == null || targetBounds == null) {
+                    bitmap.recycleIfAlive()
                     return
                 }
                 scope.launch {
-                    val bitmap = viewModel.applyLut(bitmap)
-                    captureAnimationSnapshot = CaptureAnimationSnapshot(
-                        bitmap = bitmap.asImageBitmap(),
-                        sourceBounds = sourceBounds,
-                        targetBounds = targetBounds
-                    )
+                    val processedBitmap = viewModel.applyLut(bitmap)
+                    val animationBitmap = processedBitmap.copyForCaptureAnimation()
+                    if (processedBitmap !== animationBitmap) {
+                        processedBitmap.recycleIfAlive()
+                    }
+                    animationBitmap?.let {
+                        captureAnimationSnapshot = CaptureAnimationSnapshot(
+                            bitmap = it.asImageBitmap(),
+                            sourceBounds = sourceBounds,
+                            targetBounds = targetBounds
+                        )
+                    }
                 }
             }
 
@@ -1100,6 +1123,7 @@ fun CameraScreen(
 
                     if (enableDevelopAnimation && state.captureMode == CaptureMode.PHOTO) {
                         viewModel.glSurfaceView?.capturePreviewFrame { bitmap ->
+                            pendingCaptureAnimationBitmap?.recycleIfAlive()
                             pendingCaptureAnimationBitmap = bitmap
                         }
                     }

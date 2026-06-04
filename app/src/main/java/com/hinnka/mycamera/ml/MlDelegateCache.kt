@@ -19,7 +19,7 @@ internal object MlDelegateCacheFactory {
         modelSizeBytes: Int
     ): MlDelegateCache? {
         return try {
-            val directory = File(context.codeCacheDir, "${cacheName}_delegate_cache").apply {
+            val directory = File(context.noBackupFilesDir, "${cacheName}_delegate_cache").apply {
                 mkdirs()
             }
             if (!directory.isDirectory) {
