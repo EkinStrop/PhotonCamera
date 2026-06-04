@@ -107,6 +107,16 @@ private data class RawSpectralFilmSettings(
     val tuning: SpectralFilmTuning
 )
 
+private fun resolveEffectiveRawAutoExposure(
+    userPrefs: UserPreferences?,
+    isRawCapture: Boolean,
+    exposureBias: Float
+): Boolean {
+    val rawAutoExposure = userPrefs?.rawAutoExposure ?: true
+    if (!isRawCapture || abs(exposureBias) <= 0.0001f) return rawAutoExposure
+    return false
+}
+
 private data class PresetMatchSnapshot(
     val lutId: String?,
     val colorRecipe: ColorRecipeParams,
@@ -1608,6 +1618,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             target = baselineTarget,
             userPrefs = userPrefs,
         )
+        val effectiveRawAutoExposure = resolveEffectiveRawAutoExposure(
+            userPrefs = userPrefs,
+            isRawCapture = baselineTarget == BaselineColorCorrectionTarget.RAW,
+            exposureBias = state.value.exposureBias,
+        )
 
         val spectralFilmSettings = resolveRawSpectralFilmSettings(userPrefs)
 
@@ -1624,7 +1639,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             rawDcpId = userPrefs?.rawDcpId,
             rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
             rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
-            rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+            rawAutoExposure = effectiveRawAutoExposure,
             rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
             rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,
@@ -3567,6 +3582,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 BaselineColorCorrectionTarget.JPG
             }
             val baselineMetadata = resolveBaselineMetadata(baselineTarget, userPrefs)
+            val effectiveRawAutoExposure = resolveEffectiveRawAutoExposure(
+                userPrefs = userPrefs,
+                isRawCapture = baselineTarget == BaselineColorCorrectionTarget.RAW,
+                exposureBias = state.value.exposureBias,
+            )
             val spectralFilmSettings = resolveRawSpectralFilmSettings(userPrefs)
 
             // 创建统一的 PhotoMetadata，包含编辑配置和拍摄信息
@@ -3583,7 +3603,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawDcpId = userPrefs?.rawDcpId,
                 rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
-                rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+                rawAutoExposure = effectiveRawAutoExposure,
                 rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,
@@ -3697,6 +3717,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     (userPrefs?.mirrorFrontCamera ?: true)
             val baselineMetadata = resolveBaselineMetadata(BaselineColorCorrectionTarget.JPG, userPrefs)
             val currentCameraId = cameraController.getCurrentCameraId()
+            val effectiveRawAutoExposure = resolveEffectiveRawAutoExposure(
+                userPrefs = userPrefs,
+                isRawCapture = false,
+                exposureBias = currentState.exposureBias,
+            )
             val spectralFilmSettings = resolveRawSpectralFilmSettings(userPrefs)
 
             val metadata = MediaMetadata(
@@ -3712,7 +3737,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawDcpId = userPrefs?.rawDcpId,
                 rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
-                rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+                rawAutoExposure = effectiveRawAutoExposure,
                 rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,
@@ -3840,6 +3865,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 BaselineColorCorrectionTarget.JPG
             }
             val baselineMetadata = resolveBaselineMetadata(baselineTarget, userPrefs)
+            val effectiveRawAutoExposure = resolveEffectiveRawAutoExposure(
+                userPrefs = userPrefs,
+                isRawCapture = baselineTarget == BaselineColorCorrectionTarget.RAW,
+                exposureBias = state.value.exposureBias,
+            )
             val spectralFilmSettings = resolveRawSpectralFilmSettings(userPrefs)
 
             // 创建统一的 PhotoMetadata，包含编辑配置和拍摄信息
@@ -3856,7 +3886,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawDcpId = userPrefs?.rawDcpId,
                 rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
-                rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+                rawAutoExposure = effectiveRawAutoExposure,
                 rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
                 rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
                 rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,
@@ -3996,6 +4026,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             BaselineColorCorrectionTarget.JPG
         }
         val baselineMetadata = resolveBaselineMetadata(baselineTarget, userPrefs)
+        val effectiveRawAutoExposure = resolveEffectiveRawAutoExposure(
+            userPrefs = userPrefs,
+            isRawCapture = baselineTarget == BaselineColorCorrectionTarget.RAW,
+            exposureBias = state.value.exposureBias,
+        )
         val spectralFilmSettings = resolveRawSpectralFilmSettings(userPrefs)
 
         // 创建统一的 PhotoMetadata，包含编辑配置和拍摄信息
@@ -4012,7 +4047,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             rawDcpId = userPrefs?.rawDcpId,
             rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
             rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
-            rawAutoExposure = userPrefs?.rawAutoExposure ?: true,
+            rawAutoExposure = effectiveRawAutoExposure,
             rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
             rawWhitePointCorrection = userPrefs?.rawWhitePointCorrection ?: 0f,
             rawAutoWhiteBalanceEstimate = userPrefs?.rawAutoWhiteBalanceEstimate ?: false,
