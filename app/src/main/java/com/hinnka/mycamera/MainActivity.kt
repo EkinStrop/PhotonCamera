@@ -574,11 +574,12 @@ fun NavigationHost(
                         viewModel = cameraViewModel,
                         galleryViewModel = galleryViewModel,
                         onGalleryClick = {
-                            navController.navigate(Routes.GALLERY)
                             val latestPhoto = galleryViewModel.latestPhoto.value
                             if (latestPhoto != null && System.currentTimeMillis() - latestPhoto.dateAdded < 3 * 60 * 1000) {
                                 galleryViewModel.setCurrentPhotoById(latestPhoto.id)
                                 navController.navigate(Routes.photoDetail(photoId = latestPhoto.id))
+                            } else {
+                                navController.navigate(Routes.GALLERY)
                             }
                         },
                         onSettingsClick = {
@@ -643,6 +644,11 @@ fun NavigationHost(
                     photoId = photoId,
                     onBack = {
                         navController.popBackStack()
+                    },
+                    onGoToGallery = {
+                        navController.navigate(Routes.GALLERY) {
+                            popUpTo(Routes.CAMERA)
+                        }
                     },
                     onEdit = {
                         navController.navigate(Routes.PHOTO_EDIT)

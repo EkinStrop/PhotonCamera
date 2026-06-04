@@ -95,6 +95,7 @@ fun GalleryDetailScreen(
     photoId: String? = null,
     isExpanded: Boolean = false,
     onBack: () -> Unit = {},
+    onGoToGallery: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onViewBurst: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -267,11 +268,38 @@ fun GalleryDetailScreen(
             TopAppBar(
                 modifier = Modifier,
                 title = {
-                    Text(
-                        text = "${pagerState.currentPage + 1} / ${photos.size}",
-                        maxLines = 1,
-                        color = Color.White
-                    )
+                    if (onGoToGallery != null) {
+                        Surface(
+                            onClick = onGoToGallery,
+                            shape = CircleShape,
+                            color = Color.White.copy(alpha = 0.15f),
+                            contentColor = Color.White
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.GridView,
+                                    contentDescription = "Gallery",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "${pagerState.currentPage + 1} / ${photos.size}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "${pagerState.currentPage + 1} / ${photos.size}",
+                            maxLines = 1,
+                            color = Color.White,
+                            fontSize = 18.sp
+                        )
+                    }
                 },
                 navigationIcon = {
                     if (!isExpanded) {
