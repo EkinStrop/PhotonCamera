@@ -260,7 +260,7 @@
     <string name="settings_section_software_processing">细节微调</string>
     <string name="settings_baseline_jpg_title">JPG 基准色彩校正</string>
     <string name="settings_baseline_jpg_description">选择普通 JPG 创意 LUT 之前先应用的基准 LUT 与基准配方。</string>
-    <string name="settings_baseline_raw_title">基准色彩校正</string>
+    <string name="settings_baseline_raw_title">RAW 基准色彩校正</string>
     <string name="settings_baseline_raw_description">选择用于 RAW 渲染、导出和重处理链路的基准 LUT 与基准配方。</string>
     <string name="raw_dcp_title">DCP</string>
     <string name="raw_dcp_import">导入 DCP</string>

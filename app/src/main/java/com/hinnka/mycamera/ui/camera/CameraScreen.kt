@@ -1266,17 +1266,13 @@ fun CameraScreen(
                 activePanel = ActivePanel.NONE
                 onFrameManagementClick()
             },
+            onPresetManageClick = {
+                activePanel = ActivePanel.NONE
+                onPresetManagementClick()
+            },
             onToolboxClick = {
                 activePanel = ActivePanel.NONE
                 onToolboxClick()
-            },
-            phantomMode = phantomMode,
-            onPhantomModeToggle = {
-                if (it && (!Settings.canDrawOverlays(context) || !Environment.isExternalStorageManager())) {
-                    showGhostPermissionDialog = true
-                } else {
-                    viewModel.togglePhantomMode()
-                }
             },
             onMoreSettingsClick = {
                 activePanel = ActivePanel.NONE
@@ -1420,6 +1416,7 @@ fun CameraScreen(
                 onParamsPreviewChange = { previewRecipeParamsOverride = it },
                 onDismiss = {
                     previewRecipeParamsOverride = null
+                    viewModel.refreshActivePresetMatch()
                     activePanel = ActivePanel.FILTERS
                 }
             )

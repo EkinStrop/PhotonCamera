@@ -32,7 +32,6 @@ import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.ui.components.RawEditPanel
 import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
-import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 
@@ -93,9 +92,8 @@ fun CameraTopSheet(
     onMeteringModeChange: (MeteringMode) -> Unit,
     onFilterManageClick: () -> Unit,
     onFrameManageClick: () -> Unit,
+    onPresetManageClick: () -> Unit,
     onToolboxClick: () -> Unit,
-    phantomMode: Boolean,
-    onPhantomModeToggle: (Boolean) -> Unit,
     onMoreSettingsClick: () -> Unit,
     useMFNR: Boolean,
     onMFNRToggle: (Boolean) -> Unit,
@@ -191,15 +189,6 @@ fun CameraTopSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (DeviceUtil.canShowPhantom) {
-                        QuickSettingToggle(
-                            title = stringResource(R.string.ghost_mode),
-                            checked = phantomMode,
-                            onCheckedChange = onPhantomModeToggle,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
                     QuickSettingToggle(
                         title = stringResource(R.string.settings_use_multiple_exposure),
                         checked = useMultipleExposure,
@@ -225,6 +214,12 @@ fun CameraTopSheet(
                             }
                             onMeteringModeChange(next)
                         },
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickSettingButton(
+                        title = stringResource(R.string.toolbox_title),
+                        icon = Icons.Default.Palette,
+                        onClick = onToolboxClick,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -401,13 +396,6 @@ fun CameraTopSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 QuickSettingButton(
-                    title = stringResource(R.string.toolbox_title),
-                    icon = Icons.Default.Palette,
-                    onClick = onToolboxClick,
-                    modifier = Modifier.weight(1f)
-                )
-
-                QuickSettingButton(
                     title = stringResource(R.string.settings_filter_management),
                     icon = Icons.Default.AutoAwesome,
                     onClick = onFilterManageClick,
@@ -418,6 +406,13 @@ fun CameraTopSheet(
                     title = stringResource(R.string.settings_frame_management),
                     icon = Icons.Default.BorderBottom,
                     onClick = onFrameManageClick,
+                    modifier = Modifier.weight(1f)
+                )
+
+                QuickSettingButton(
+                    title = stringResource(R.string.settings_preset_management),
+                    icon = Icons.Default.Tune,
+                    onClick = onPresetManageClick,
                     modifier = Modifier.weight(1f)
                 )
             }

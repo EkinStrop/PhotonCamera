@@ -44,6 +44,8 @@ import com.hinnka.mycamera.raw.DcpProfileParser
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.RawDemosaicProcessor
 import com.hinnka.mycamera.color.TransferCurve
+import com.hinnka.mycamera.model.EffectParams
+import com.hinnka.mycamera.raw.RawProcessingPreferences
 import com.hinnka.mycamera.raw.RawProfile
 import com.hinnka.mycamera.raw.SpectralFilmProfile
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
@@ -100,10 +102,79 @@ private data class RawSpectralFilmSettings(
     val print: String?
 )
 
+private data class PresetMatchSnapshot(
+    val lutId: String?,
+    val colorRecipe: ColorRecipeParams,
+    val effects: com.hinnka.mycamera.model.EffectParams,
+    val aspectRatio: String,
+    val useRaw: Boolean,
+    val useMFNR: Boolean,
+    val useMFSR: Boolean,
+    val frameId: String?,
+    val rawDcpId: String?,
+    val rawSpectralFilmEnabled: Boolean,
+    val rawSpectralFilmStock: String?,
+    val rawSpectralFilmPrint: String?,
+    val rawDROMode: String,
+    val jpgBaselineLutId: String?,
+    val rawBaselineLutId: String?,
+    val phantomBaselineLutId: String?
+) {
+    fun matches(preset: com.hinnka.mycamera.model.CameraPreset): Boolean {
+        return lutId == preset.lutId &&
+            colorRecipe == preset.colorRecipe &&
+            effects == preset.effects &&
+            aspectRatio == preset.aspectRatio &&
+            useRaw == preset.useRaw &&
+            useMFNR == preset.useMFNR &&
+            useMFSR == preset.useMFSR &&
+            frameId == preset.frameId &&
+            rawDcpId == preset.rawDcpId &&
+            rawSpectralFilmEnabled == preset.rawSpectralFilmEnabled &&
+            rawSpectralFilmStock == preset.rawSpectralFilmStock &&
+            rawSpectralFilmPrint == preset.rawSpectralFilmPrint &&
+            rawDROMode == preset.rawDROMode &&
+            jpgBaselineLutId == preset.jpgBaselineLutId &&
+            rawBaselineLutId == preset.rawBaselineLutId &&
+            phantomBaselineLutId == preset.phantomBaselineLutId
+    }
+}
+
+private data class ActivePresetMatchState(
+    val prefs: UserPreferences,
+    val presets: List<com.hinnka.mycamera.model.CameraPreset>,
+    val aspectRatio: String,
+    val lutId: String,
+    val recipe: ColorRecipeParams,
+    val effects: com.hinnka.mycamera.model.EffectParams
+)
+
+private data class SettingValue<T>(val value: T)
+
+private data class CameraFeatureUpdate(
+    val lutId: SettingValue<String?>? = null,
+    val colorRecipe: SettingValue<ColorRecipeParams>? = null,
+    val effects: SettingValue<com.hinnka.mycamera.model.EffectParams>? = null,
+    val aspectRatio: SettingValue<AspectRatio>? = null,
+    val useRaw: SettingValue<Boolean>? = null,
+    val useMFNR: SettingValue<Boolean>? = null,
+    val useMFSR: SettingValue<Boolean>? = null,
+    val frameId: SettingValue<String?>? = null,
+    val rawDcpId: SettingValue<String?>? = null,
+    val rawSpectralFilmEnabled: SettingValue<Boolean>? = null,
+    val rawSpectralFilmStock: SettingValue<String?>? = null,
+    val rawSpectralFilmPrint: SettingValue<String?>? = null,
+    val droMode: SettingValue<String>? = null,
+    val jpgBaselineLutId: SettingValue<String?>? = null,
+    val rawBaselineLutId: SettingValue<String?>? = null,
+    val phantomBaselineLutId: SettingValue<String?>? = null
+)
+
 /**
  * 相机 ViewModel
  * 使用 Camera2Controller 支持隐藏摄像头
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
@@ -239,6 +310,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     var draftPreset: com.hinnka.mycamera.model.CameraPreset? = null
 
+    @Volatile
+    private var isApplyingPreset = false
+
     fun prepareCurrentSettingsPresetDraft(name: String): com.hinnka.mycamera.model.CameraPreset {
         return com.hinnka.mycamera.model.CameraPreset(
             id = UUID.randomUUID().toString(),
@@ -271,110 +345,173 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setEffectParams(effects: com.hinnka.mycamera.model.EffectParams) {
         viewModelScope.launch {
-            userPreferencesRepository.saveActiveEffectParams(effects)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(effects = SettingValue(effects))
+            )
         }
     }
 
     fun applyPreset(preset: com.hinnka.mycamera.model.CameraPreset?) {
         viewModelScope.launch {
-            userPreferencesRepository.saveActivePresetId(preset?.id)
-            if (preset == null) {
-                // 恢复默认状态
-                setLut(null)
-                userPreferencesRepository.saveRawDcpId(null)
-                userPreferencesRepository.saveRawSpectralFilmEnabled(false)
-                userPreferencesRepository.saveDroMode("OFF")
-                userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.JPG, null)
-                userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.RAW, null)
-                userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.PHANTOM, null)
-                return@launch
-            }
-
-            // 1. 保存色彩配方
-            val recipeLutId = preset.lutId ?: "none"
-            contentRepository.lutManager.saveColorRecipeParams(recipeLutId, preset.colorRecipe)
-            // 2. 应用 Lut
-            setLut(preset.lutId)
-
-            // 3. 应用独立物理效果
-            userPreferencesRepository.saveActiveEffectParams(preset.effects)
-
-            // 4. 应用拍摄参数 (全量覆盖以消除上一个预设残留)
-            val ratioStr = preset.aspectRatio
+            isApplyingPreset = true
             try {
-                val ratio = AspectRatio.valueOf(ratioStr)
-                cameraController.setAspectRatio(ratio)
-                reopenCamera()
-                userPreferencesRepository.saveAspectRatio(ratio.name)
-            } catch (e: Exception) {
-                PLog.e(TAG, "Failed to apply preset aspectRatio: $ratioStr", e)
+                applyCameraFeatureUpdate(
+                    preset.toCameraFeatureUpdate(),
+                    clearActivePresetOnMismatch = false
+                )
+                userPreferencesRepository.saveActivePresetId(preset?.id)
+            } finally {
+                isApplyingPreset = false
             }
-
-            userPreferencesRepository.saveUseRaw(preset.useRaw)
-            userPreferencesRepository.setUseMFNR(preset.useMFNR)
-            userPreferencesRepository.saveUseMFSR(preset.useMFSR)
-            currentFrameId = preset.frameId
-            userPreferencesRepository.saveFrameConfig(preset.frameId)
-
-            // 5. 应用 Quick RAW 状态
-            userPreferencesRepository.saveRawDcpId(preset.rawDcpId)
-            userPreferencesRepository.saveRawSpectralFilmEnabled(preset.rawSpectralFilmEnabled)
-            userPreferencesRepository.saveRawSpectralFilmStock(preset.rawSpectralFilmStock)
-            userPreferencesRepository.saveRawSpectralFilmPrint(preset.rawSpectralFilmPrint)
-            userPreferencesRepository.saveDroMode(preset.rawDROMode)
-
-            // 6. 应用基准色彩校正
-            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.JPG, preset.jpgBaselineLutId)
-            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.RAW, preset.rawBaselineLutId)
-            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.PHANTOM, preset.phantomBaselineLutId)
         }
     }
 
-    fun createOrUpdatePreset(
-        name: String,
-        lutId: String?,
-        recipe: ColorRecipeParams,
-        effects: com.hinnka.mycamera.model.EffectParams,
-        aspectRatio: String = AspectRatio.RATIO_4_3.name,
-        useRaw: Boolean = false,
-        useMFNR: Boolean = false,
-        useMFSR: Boolean = false,
-        frameId: String? = currentFrameId,
-        existingId: String? = null
-    ) {
-        viewModelScope.launch {
-            val currentList = customPresets.value.toMutableList()
-            val presetId = existingId ?: UUID.randomUUID().toString()
-            val newPreset = com.hinnka.mycamera.model.CameraPreset(
-                id = presetId,
-                name = name,
-                lutId = lutId,
-                colorRecipe = recipe,
-                effects = effects,
-                aspectRatio = aspectRatio,
-                useRaw = useRaw,
-                useMFNR = useMFNR,
-                useMFSR = useMFSR,
-                frameId = frameId,
-                rawDcpId = rawDcpId.value,
-                rawSpectralFilmEnabled = rawSpectralFilmEnabled.value,
-                rawSpectralFilmStock = rawSpectralFilmStock.value,
-                rawSpectralFilmPrint = rawSpectralFilmPrint.value,
-                rawDROMode = droMode.value,
-                jpgBaselineLutId = jpgBaselineLutId.value,
-                rawBaselineLutId = rawBaselineLutId.value,
-                phantomBaselineLutId = phantomBaselineLutId.value,
-                isBuiltIn = false
-            )
+    private fun com.hinnka.mycamera.model.CameraPreset?.toCameraFeatureUpdate(): CameraFeatureUpdate {
+        val ratio = try {
+            AspectRatio.valueOf(this?.aspectRatio ?: AspectRatio.RATIO_4_3.name)
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to apply preset aspectRatio: ${this?.aspectRatio}", e)
+            AspectRatio.RATIO_4_3
+        }
+        return CameraFeatureUpdate(
+            lutId = SettingValue(this?.lutId),
+            colorRecipe = SettingValue(this?.colorRecipe ?: ColorRecipeParams.DEFAULT),
+            effects = SettingValue(this?.effects ?: EffectParams.DEFAULT),
+            aspectRatio = SettingValue(ratio),
+            useRaw = SettingValue(this?.useRaw ?: false),
+            useMFNR = SettingValue(this?.useMFNR ?: false),
+            useMFSR = SettingValue(this?.useMFSR ?: false),
+            frameId = SettingValue(this?.frameId),
+            rawDcpId = SettingValue(this?.rawDcpId),
+            rawSpectralFilmEnabled = SettingValue(this?.rawSpectralFilmEnabled ?: false),
+            rawSpectralFilmStock = SettingValue(this?.rawSpectralFilmStock),
+            rawSpectralFilmPrint = SettingValue(this?.rawSpectralFilmPrint),
+            droMode = SettingValue(this?.rawDROMode ?: RawProcessingPreferences.DROMode.OFF.name),
+            jpgBaselineLutId = SettingValue(this?.jpgBaselineLutId),
+            rawBaselineLutId = SettingValue(this?.rawBaselineLutId),
+            phantomBaselineLutId = SettingValue(this?.phantomBaselineLutId)
+        )
+    }
 
-            val index = currentList.indexOfFirst { it.id == presetId }
-            if (index >= 0) {
-                currentList[index] = newPreset
+    private suspend fun applyCameraFeatureUpdate(
+        update: CameraFeatureUpdate,
+        clearActivePresetOnMismatch: Boolean = true
+    ) {
+        val prefs = userPreferencesRepository.userPreferences.first()
+        var desiredUseRaw = prefs.useRaw
+        var desiredUseMFNR = prefs.useMFNR
+        var desiredUseMFSR = prefs.useMFSR
+        var desiredUseMultipleExposure = prefs.useMultipleExposure
+
+        update.useRaw?.let { desiredUseRaw = it.value }
+        update.useMFNR?.let { desiredUseMFNR = it.value }
+        update.useMFSR?.let { desiredUseMFSR = it.value }
+
+        if (update.useRaw?.value == true) {
+            desiredUseMultipleExposure = false
+            desiredUseMFSR = false
+        }
+        if (update.useMFNR?.value == true) {
+            desiredUseMultipleExposure = false
+            desiredUseMFSR = false
+        }
+        if (update.useMFSR?.value == true) {
+            if (desiredUseRaw) {
+                desiredUseMFSR = false
             } else {
-                currentList.add(newPreset)
+                desiredUseMultipleExposure = false
+                desiredUseMFNR = false
             }
-            userPreferencesRepository.saveCustomPresets(currentList)
-            userPreferencesRepository.saveActivePresetId(presetId)
+        }
+
+        val needsCameraReopen =
+            update.aspectRatio != null ||
+                update.useRaw != null ||
+                update.useMFNR != null ||
+                update.useMFSR != null
+
+        update.colorRecipe?.let {
+            val recipeLutId = if (update.lutId != null) {
+                update.lutId.value ?: "none"
+            } else {
+                currentLutId.value
+            }
+            contentRepository.lutManager.saveColorRecipeParams(recipeLutId, it.value)
+        }
+
+        update.lutId?.let {
+            setLut(it.value, persist = false)
+            userPreferencesRepository.saveLutConfig(it.value)
+        }
+
+        update.effects?.let {
+            userPreferencesRepository.saveActiveEffectParams(it.value)
+        }
+
+        update.aspectRatio?.let {
+            cameraController.setAspectRatio(it.value)
+            userPreferencesRepository.saveAspectRatio(it.value.name)
+        }
+
+        if (desiredUseMultipleExposure != prefs.useMultipleExposure) {
+            if (!desiredUseMultipleExposure) {
+                cancelMultipleExposureSession()
+            }
+            userPreferencesRepository.saveUseMultipleExposure(desiredUseMultipleExposure)
+        }
+
+        if (update.useRaw != null) {
+            cameraController.setUseRaw(desiredUseRaw)
+            userPreferencesRepository.saveUseRaw(desiredUseRaw)
+        }
+        if (update.useMFNR != null || desiredUseMFNR != prefs.useMFNR) {
+            cameraController.setUseMFNR(desiredUseMFNR)
+            userPreferencesRepository.setUseMFNR(desiredUseMFNR)
+        }
+        if (update.useMFSR != null || desiredUseMFSR != prefs.useMFSR) {
+            cameraController.setUseMFSR(desiredUseMFSR)
+            userPreferencesRepository.saveUseMFSR(desiredUseMFSR)
+        }
+
+        update.frameId?.let {
+            currentFrameId = it.value
+            userPreferencesRepository.saveFrameConfig(it.value)
+        }
+
+        update.rawDcpId?.let {
+            userPreferencesRepository.saveRawDcpId(it.value)
+            prewarmRawDcp(it.value)
+        }
+        update.rawSpectralFilmEnabled?.let {
+            userPreferencesRepository.saveRawSpectralFilmEnabled(it.value)
+        }
+        update.rawSpectralFilmStock?.let {
+            userPreferencesRepository.saveRawSpectralFilmStock(it.value)
+        }
+        update.rawSpectralFilmPrint?.let {
+            userPreferencesRepository.saveRawSpectralFilmPrint(it.value)
+        }
+        update.droMode?.let {
+            val resolvedMode = RawProcessingPreferences.DROMode.fromPersistedName(it.value)
+            userPreferencesRepository.saveDroMode(resolvedMode.name)
+            userPreferencesRepository.updateRawDROEnabled(resolvedMode.isEnabled)
+        }
+
+        update.jpgBaselineLutId?.let {
+            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.JPG, it.value)
+        }
+        update.rawBaselineLutId?.let {
+            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.RAW, it.value)
+        }
+        update.phantomBaselineLutId?.let {
+            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.PHANTOM, it.value)
+        }
+
+        if (needsCameraReopen) {
+            reopenCamera()
+        }
+        if (clearActivePresetOnMismatch) {
+            clearActivePresetIfCurrentSettingsMismatch()
         }
     }
 
@@ -388,7 +525,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 currentList.add(preset)
             }
             userPreferencesRepository.saveCustomPresets(currentList)
-            userPreferencesRepository.saveActivePresetId(preset.id)
+            applyPreset(preset)
         }
     }
 
@@ -415,23 +552,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun renamePreset(presetId: String, newName: String) {
-        viewModelScope.launch {
-            val currentList = customPresets.value.toMutableList()
-            val index = currentList.indexOfFirst { it.id == presetId }
-            if (index >= 0) {
-                currentList[index] = currentList[index].copy(name = newName)
-            } else {
-                // 它是内置预设，克隆并保存到 customPresets 中
-                val builtin = com.hinnka.mycamera.model.CameraPreset.BUILT_IN_PRESETS.find { it.id == presetId }
-                if (builtin != null) {
-                    currentList.add(builtin.copy(name = newName))
-                }
-            }
-            userPreferencesRepository.saveCustomPresets(currentList)
-        }
-    }
-
     fun resetToDefaultPresets() {
         viewModelScope.launch {
             userPreferencesRepository.saveDeletedBuiltInIds("")
@@ -445,6 +565,84 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userPreferencesRepository.saveCustomPresets(presets)
         }
+    }
+
+    fun refreshActivePresetMatch() {
+        viewModelScope.launch {
+            clearActivePresetIfCurrentSettingsMismatch()
+        }
+    }
+
+    private suspend fun clearActivePresetIfCurrentSettingsMismatch() {
+        if (isApplyingPreset) return
+        val presetId = activePresetId.value ?: return
+        val preset = allPresets.value.firstOrNull { it.id == presetId }
+        if (preset == null) {
+            userPreferencesRepository.saveActivePresetId(null)
+            return
+        }
+        val snapshot = currentPresetMatchSnapshot()
+        if (!snapshot.matches(preset)) {
+            PLog.d(TAG, "Active preset [$presetId] no longer matches current settings; showing default preset")
+            userPreferencesRepository.saveActivePresetId(null)
+        }
+    }
+
+    private suspend fun clearActivePresetIfCurrentSettingsMismatch(matchState: ActivePresetMatchState) {
+        if (isApplyingPreset) return
+        val presetId = matchState.prefs.activePresetId ?: return
+        val preset = matchState.presets.firstOrNull { it.id == presetId }
+        if (preset == null) {
+            userPreferencesRepository.saveActivePresetId(null)
+            return
+        }
+        val snapshot = matchState.toPresetMatchSnapshot()
+        if (!snapshot.matches(preset)) {
+            PLog.d(TAG, "Active preset [$presetId] no longer matches current settings; showing default preset")
+            userPreferencesRepository.saveActivePresetId(null)
+        }
+    }
+
+    private fun currentPresetMatchSnapshot(): PresetMatchSnapshot {
+        return PresetMatchSnapshot(
+            lutId = currentLutId.value.takeIf { it != "none" },
+            colorRecipe = currentRecipeParams.value,
+            effects = currentEffectParams.value,
+            aspectRatio = state.value.aspectRatio.name,
+            useRaw = useRaw.value,
+            useMFNR = useMFNR.value,
+            useMFSR = useMFSR.value,
+            frameId = currentFrameId,
+            rawDcpId = rawDcpId.value,
+            rawSpectralFilmEnabled = rawSpectralFilmEnabled.value,
+            rawSpectralFilmStock = rawSpectralFilmStock.value,
+            rawSpectralFilmPrint = rawSpectralFilmPrint.value,
+            rawDROMode = droMode.value,
+            jpgBaselineLutId = jpgBaselineLutId.value,
+            rawBaselineLutId = rawBaselineLutId.value,
+            phantomBaselineLutId = phantomBaselineLutId.value
+        )
+    }
+
+    private fun ActivePresetMatchState.toPresetMatchSnapshot(): PresetMatchSnapshot {
+        return PresetMatchSnapshot(
+            lutId = lutId.takeIf { it != "none" },
+            colorRecipe = recipe,
+            effects = effects,
+            aspectRatio = aspectRatio,
+            useRaw = prefs.useRaw,
+            useMFNR = prefs.useMFNR,
+            useMFSR = prefs.useMFSR,
+            frameId = prefs.frameId,
+            rawDcpId = prefs.rawDcpId,
+            rawSpectralFilmEnabled = prefs.rawSpectralFilmEnabled,
+            rawSpectralFilmStock = prefs.rawSpectralFilmStock,
+            rawSpectralFilmPrint = prefs.rawSpectralFilmPrint,
+            rawDROMode = prefs.droMode,
+            jpgBaselineLutId = prefs.jpgBaselineLutId,
+            rawBaselineLutId = prefs.rawBaselineLutId,
+            phantomBaselineLutId = prefs.phantomBaselineLutId
+        )
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -945,6 +1143,38 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        viewModelScope.launch {
+            val presetInputs = combine(
+                userPreferencesRepository.userPreferences,
+                allPresets,
+                isInitialized
+            ) { prefs, presets, initialized ->
+                if (initialized) prefs to presets else null
+            }
+
+            combine(
+                presetInputs,
+                state.map { it.aspectRatio.name }.distinctUntilChanged(),
+                currentLutId.flatMapLatest { lutId -> contentRepository.lutManager.getColorRecipeParams(lutId) },
+                currentEffectParams
+            ) { inputs, aspectRatio, recipe, effects ->
+                inputs?.let { (prefs, presets) ->
+                    ActivePresetMatchState(
+                        prefs = prefs,
+                        presets = presets,
+                        aspectRatio = aspectRatio,
+                        lutId = currentLutId.value,
+                        recipe = recipe,
+                        effects = effects
+                    )
+                }
+            }.collect { matchState ->
+                if (matchState != null) {
+                    clearActivePresetIfCurrentSettingsMismatch(matchState)
+                }
+            }
+        }
+
         // 加载用户偏好设置
         viewModelScope.launch {
             val prefs = userPreferencesRepository.userPreferences.firstOrNull()
@@ -1076,28 +1306,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setRawDcpId(dcpId: String?) {
         viewModelScope.launch {
-            userPreferencesRepository.saveRawDcpId(dcpId)
-            prewarmRawDcp(dcpId)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(rawDcpId = SettingValue(dcpId))
+            )
         }
     }
     fun setRawBaselineLutId(lutId: String?) {
         viewModelScope.launch {
-            userPreferencesRepository.saveBaselineLutConfig(BaselineColorCorrectionTarget.RAW, lutId)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(rawBaselineLutId = SettingValue(lutId))
+            )
         }
     }
     fun setRawSpectralFilmEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            userPreferencesRepository.saveRawSpectralFilmEnabled(enabled)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(rawSpectralFilmEnabled = SettingValue(enabled))
+            )
         }
     }
     fun setRawSpectralFilmStock(stock: String?) {
         viewModelScope.launch {
-            userPreferencesRepository.saveRawSpectralFilmStock(stock)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(rawSpectralFilmStock = SettingValue(stock))
+            )
         }
     }
     fun setRawSpectralFilmPrint(print: String?) {
         viewModelScope.launch {
-            userPreferencesRepository.saveRawSpectralFilmPrint(print)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(rawSpectralFilmPrint = SettingValue(print))
+            )
         }
     }
     fun setRawNlmNoiseFactor(value: Float) {
@@ -1815,11 +2054,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置画面比例
      */
     fun setAspectRatio(ratio: AspectRatio) {
-        cameraController.setAspectRatio(ratio)
-        reopenCamera()
-        // 保存到用户偏好设置
         viewModelScope.launch {
-            userPreferencesRepository.saveAspectRatio(ratio.name)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(aspectRatio = SettingValue(ratio))
+            )
         }
     }
 
@@ -2188,6 +2426,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (persist) {
             viewModelScope.launch {
                 userPreferencesRepository.saveLutConfig(lutId)
+                clearActivePresetIfCurrentSettingsMismatch()
             }
         }
     }
@@ -2480,10 +2719,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置当前边框
      */
     fun setFrame(frameId: String?) {
-        currentFrameId = frameId
-        // 保存到用户偏好设置
         viewModelScope.launch {
-            userPreferencesRepository.saveFrameConfig(frameId)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(frameId = SettingValue(frameId))
+            )
         }
     }
 
@@ -2542,15 +2781,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置是否使用多帧降噪
      */
     fun setUseMFNR(enabled: Boolean) {
-        if (enabled) {
-            setUseMultipleExposure(false)
-            setUseMFSR(false)
-        }
-        cameraController.setUseMFNR(enabled)
         viewModelScope.launch {
-            userPreferencesRepository.setUseMFNR(enabled)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(useMFNR = SettingValue(enabled))
+            )
         }
-        reopenCamera()
     }
 
     /**
@@ -2580,22 +2815,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置是否使用超分辨率
      */
     fun setUseMFSR(enabled: Boolean) {
-        if (enabled && useRaw.value) {
-            cameraController.setUseMFSR(false)
-            viewModelScope.launch {
-                userPreferencesRepository.saveUseMFSR(false)
-            }
-            return
-        }
-        if (enabled) {
-            setUseMultipleExposure(false)
-            setUseMFNR(false)
-        }
-        cameraController.setUseMFSR(enabled)
         viewModelScope.launch {
-            userPreferencesRepository.saveUseMFSR(enabled)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(useMFSR = SettingValue(enabled))
+            )
         }
-        reopenCamera()
     }
 
     fun setSuperResolutionScale(scale: Float) {
@@ -2664,18 +2888,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setUseRaw(useRaw: Boolean) {
-        if (useRaw) {
-            setUseMultipleExposure(false)
-            cameraController.setUseMFSR(false)
-        }
-        cameraController.setUseRaw(useRaw)
         viewModelScope.launch {
-            userPreferencesRepository.saveUseRaw(useRaw)
-            if (useRaw) {
-                userPreferencesRepository.saveUseMFSR(false)
-            }
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(useRaw = SettingValue(useRaw))
+            )
         }
-        reopenCamera()
     }
 
     fun setExportDngWithRawExport(enabled: Boolean) {
@@ -3078,7 +3295,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setBaselineLut(target: BaselineColorCorrectionTarget, lutId: String?) {
         viewModelScope.launch {
-            userPreferencesRepository.saveBaselineLutConfig(target, lutId)
+            val update = when (target) {
+                BaselineColorCorrectionTarget.JPG -> CameraFeatureUpdate(jpgBaselineLutId = SettingValue(lutId))
+                BaselineColorCorrectionTarget.RAW -> CameraFeatureUpdate(rawBaselineLutId = SettingValue(lutId))
+                BaselineColorCorrectionTarget.PHANTOM -> CameraFeatureUpdate(phantomBaselineLutId = SettingValue(lutId))
+            }
+            applyCameraFeatureUpdate(update)
         }
     }
 
@@ -3918,9 +4140,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setDroMode(mode: String) {
         viewModelScope.launch {
-            val resolvedMode = com.hinnka.mycamera.raw.RawProcessingPreferences.DROMode.fromPersistedName(mode)
-            userPreferencesRepository.saveDroMode(resolvedMode.name)
-            userPreferencesRepository.updateRawDROEnabled(resolvedMode.isEnabled)
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(droMode = SettingValue(mode))
+            )
         }
     }
 

@@ -3,9 +3,11 @@ package com.hinnka.mycamera.ui.settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -161,6 +163,13 @@ fun PresetManagementScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            item(key = "preset_default") {
+                DefaultPresetManagementItem(
+                    isActive = activePresetId == null,
+                    onSelect = { viewModel.applyPreset(null) }
+                )
+            }
+
             itemsIndexed(localPresets, key = { _, preset -> preset.id }) { _, preset ->
                 ReorderableItem(reorderableLazyListState, key = preset.id) { isDragging ->
                     PresetManagementItem(
@@ -168,6 +177,7 @@ fun PresetManagementScreen(
                         isActive = activePresetId == preset.id,
                         isDragging = isDragging,
                         dragModifier = Modifier.draggableHandle(),
+                        onSelect = { viewModel.applyPreset(preset) },
                         onEdit = { onPresetEditClick(preset.id) },
                         onDelete = { deletingPreset = preset }
                     )
@@ -225,11 +235,55 @@ fun PresetManagementScreen(
 }
 
 @Composable
+private fun DefaultPresetManagementItem(
+    isActive: Boolean,
+    onSelect: () -> Unit
+) {
+    val cardColor = if (isActive) Color(0xFFFFD700).copy(alpha = 0.10f) else Color.White.copy(alpha = 0.055f)
+    val borderColor = if (isActive) Color(0xFFFFD700).copy(alpha = 0.7f) else Color.White.copy(alpha = 0.10f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp)),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Spacer(modifier = Modifier.size(28.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.preset_none_default),
+                    color = if (isActive) Color(0xFFFFD700) else Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                PresetBadge(
+                    text = stringResource(R.string.current_default),
+                    highlighted = isActive
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PresetManagementItem(
     preset: CameraPreset,
     isActive: Boolean,
     isDragging: Boolean,
     dragModifier: Modifier,
+    onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -244,6 +298,7 @@ private fun PresetManagementItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onSelect)
             .border(1.dp, borderColor, RoundedCornerShape(10.dp)),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
@@ -284,7 +339,7 @@ private fun PresetManagementItem(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     PresetFeatureText(preset.aspectRatio.removePrefix("RATIO_").replace("_", ":"))
                     if (preset.useRaw) PresetFeatureText("RAW")
                     if (preset.useMFNR) PresetFeatureText("MFNR")
@@ -292,7 +347,6 @@ private fun PresetManagementItem(
                     if (preset.rawSpectralFilmEnabled) PresetFeatureText("FILM")
                     if (preset.lutId != null) PresetFeatureText("LUT")
                     if (preset.rawDcpId != null) PresetFeatureText("DCP")
-                    if (preset.frameId != null) PresetFeatureText("FRAME")
                 }
             }
 

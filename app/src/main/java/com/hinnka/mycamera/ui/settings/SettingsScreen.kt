@@ -1370,6 +1370,24 @@ fun SettingsScreen(
                         // 幻影模式设置
                         SettingsSection(title = stringResource(R.string.ghost_mode)) {
                             SwitchSettingItem(
+                                title = stringResource(R.string.ghost_mode),
+                                description = stringResource(R.string.ghost_mode_dialog_description),
+                                checked = phantomMode,
+                                onCheckedChange = { enabled ->
+                                    if (enabled && (!Settings.canDrawOverlays(context) || !Environment.isExternalStorageManager())) {
+                                        showGhostPermissionDialog = true
+                                    } else if (enabled != phantomMode) {
+                                        viewModel.togglePhantomMode()
+                                    }
+                                }
+                            )
+
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.1f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            SwitchSettingItem(
                                 title = stringResource(R.string.settings_phantom_button_hidden),
                                 description = stringResource(R.string.settings_phantom_button_hidden_description),
                                 checked = phantomButtonHidden,

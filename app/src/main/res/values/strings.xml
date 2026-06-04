@@ -262,7 +262,7 @@
     <string name="settings_section_software_processing">Fine Tuning</string>
     <string name="settings_baseline_jpg_title">JPG Baseline Color Correction</string>
     <string name="settings_baseline_jpg_description">Choose the baseline LUT and recipe applied before the regular JPG creative LUT.</string>
-    <string name="settings_baseline_raw_title">Baseline Color Correction</string>
+    <string name="settings_baseline_raw_title">RAW Baseline Color Correction</string>
     <string name="settings_baseline_raw_description">Choose the baseline LUT and recipe used for RAW rendering, export, and reprocessing.</string>
     <string name="raw_dcp_title">DCP</string>
     <string name="raw_dcp_import">Import DCP</string>
