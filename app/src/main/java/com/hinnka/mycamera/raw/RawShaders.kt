@@ -91,7 +91,6 @@ object RawShaders {
         uniform sampler2D uInputTexture;
         uniform sampler2D uCurveTexture;
         uniform sampler2D uHighlightBaseTexture;
-        uniform sampler2D uLensShadingMap;
         uniform sampler3D uDcpHueSatTexture;
         uniform sampler3D uDcpLookTableTexture;
         uniform sampler3D uSpectralFilmTexture;
@@ -101,8 +100,6 @@ object RawShaders {
         uniform float uHighlightWhitePoint;
         uniform float uHighlightExposureGain;
         uniform bool uHighlightBaseEnabled;
-        uniform bool uLensShadingEnabled;
-        uniform float uLensShadingPower;
         uniform bool uDcpHueSatEnabled;
         uniform bool uDcpLookTableEnabled;
         uniform bool uSpectralFilmEnabled;
@@ -114,19 +111,6 @@ object RawShaders {
         
         float luminance(vec3 color) {
             return max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-        }
-
-        vec3 applyLensShading(vec3 color) {
-            if (!uLensShadingEnabled) {
-                return color;
-            }
-            vec4 gain = texture(uLensShadingMap, vTexCoord);
-            vec4 centerGain = texture(uLensShadingMap, vec2(0.5));
-            float lumaGain = dot(vec3(gain.r, 0.5 * (gain.g + gain.b), gain.a), vec3(0.2126, 0.7152, 0.0722));
-            float centerLumaGain = dot(vec3(centerGain.r, 0.5 * (centerGain.g + centerGain.b), centerGain.a), vec3(0.2126, 0.7152, 0.0722));
-            lumaGain /= max(centerLumaGain, 1e-4);
-            lumaGain = pow(max(lumaGain, 1e-4), clamp(uLensShadingPower, 0.0, 1.0));
-            return color * max(lumaGain, 0.0);
         }
 
         float sampleCurve(float value) {
@@ -447,7 +431,6 @@ object RawShaders {
 
         void main() {
             vec3 color = texture(uInputTexture, vTexCoord).rgb;
-            color = applyLensShading(color);
 
             if (uDcpHueSatEnabled) {
                 color = applyDcpHsvMap(color, uDcpHueSatTexture, uDcpHueSatDivisions, uDcpHueSatEncoding);
@@ -486,32 +469,16 @@ object RawShaders {
         out vec4 fragColor;
 
         uniform sampler2D uInputTexture;
-        uniform sampler2D uLensShadingMap;
         uniform vec2 uSourceTexelSize;
         uniform float uBlurRadius;
-        uniform bool uLensShadingEnabled;
-        uniform float uLensShadingPower;
 
         float luminance(vec3 color) {
             return max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
         }
 
-        vec3 applyLensShadingAt(vec3 color, vec2 uv) {
-            if (!uLensShadingEnabled) {
-                return color;
-            }
-            vec4 gain = texture(uLensShadingMap, uv);
-            vec4 centerGain = texture(uLensShadingMap, vec2(0.5));
-            float lumaGain = dot(vec3(gain.r, 0.5 * (gain.g + gain.b), gain.a), vec3(0.2126, 0.7152, 0.0722));
-            float centerLumaGain = dot(vec3(centerGain.r, 0.5 * (centerGain.g + centerGain.b), centerGain.a), vec3(0.2126, 0.7152, 0.0722));
-            lumaGain /= max(centerLumaGain, 1e-4);
-            lumaGain = pow(max(lumaGain, 1e-4), clamp(uLensShadingPower, 0.0, 1.0));
-            return color * max(lumaGain, 0.0);
-        }
-
         float sampleLuma(vec2 uv) {
             uv = clamp(uv, vec2(0.0), vec2(1.0));
-            return luminance(applyLensShadingAt(texture(uInputTexture, uv).rgb, uv));
+            return luminance(texture(uInputTexture, uv).rgb);
         }
 
         void main() {

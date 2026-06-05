@@ -106,6 +106,7 @@ class RawDemosaicProcessor {
             lensShadingMap = dngRawData.lensShadingMap,
             lensShadingMapWidth = dngRawData.lensShadingMapWidth,
             lensShadingMapHeight = dngRawData.lensShadingMapHeight,
+            lensShadingMapGrid = dngRawData.lensShadingMapGrid,
             baselineExposure = if (dngRawData.baselineExposure == 0f) (baseMetadata?.baselineExposure
                 ?: 0f) else dngRawData.baselineExposure,
             exposureBias = if (dngRawData.exposureBias == 0f) {
@@ -662,15 +663,22 @@ class RawDemosaicProcessor {
                 GLES31.glActiveTexture(GLES31.GL_TEXTURE10)
                 GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, rawTextureId)
                 GLES31.glUniform1i(GLES31.glGetUniformLocation(rcdPopulateProgram, "uRawTexture"), 10) // 对应 RcdShaders.POPULATE 中的 binding = 10
+                bindLensShadingForRcdPopulate(actualMetadata)
                 GLES31.glUniform2i(GLES31.glGetUniformLocation(rcdPopulateProgram, "uImageSize"), actualWidth, actualHeight)
                 GLES31.glUniform1i(GLES31.glGetUniformLocation(rcdPopulateProgram, "uCfaPattern"), actualMetadata.cfaPattern)
                 GLES31.glUniform4fv(GLES31.glGetUniformLocation(rcdPopulateProgram, "uBlackLevel"), 1, blackLevel4, 0)
                 GLES31.glUniform1f(GLES31.glGetUniformLocation(rcdPopulateProgram, "uWhiteLevel"), actualMetadata.whiteLevel)
                 val wbGains = actualMetadata.whiteBalanceGains
+                val lscSize = if (hasValidLensShadingMap(actualMetadata)) {
+                    "${actualMetadata.lensShadingMapWidth}x${actualMetadata.lensShadingMapHeight}"
+                } else {
+                    "none"
+                }
                 PLog.d(
                     TAG,
                     "RCD populate: cfa=${actualMetadata.cfaPattern} black=${blackLevel4.contentToString()} " +
                         "white=${actualMetadata.whiteLevel} wb=${wbGains.contentToString()} " +
+                        "lsc=$lscSize " +
                         "linearBlackPoint=${rawBlackPointCorrection.coerceIn(0f, 0.99f)} " +
                         "linearWhitePoint=${(1f + rawWhitePointCorrection).coerceAtLeast(rawBlackPointCorrection.coerceIn(0f, 0.99f) + 0.01f)}"
                 )
@@ -2059,6 +2067,47 @@ class RawDemosaicProcessor {
         )
     }
 
+    private fun hasValidLensShadingMap(metadata: RawMetadata): Boolean {
+        val map = metadata.lensShadingMap ?: return false
+        val width = metadata.lensShadingMapWidth
+        val height = metadata.lensShadingMapHeight
+        return width > 0 && height > 0 && map.size >= width * height * 4
+    }
+
+    private fun bindLensShadingForRcdPopulate(metadata: RawMetadata) {
+        val enabled = hasValidLensShadingMap(metadata)
+        GLES31.glActiveTexture(GLES31.GL_TEXTURE11)
+        if (enabled) {
+            uploadLensShadingTexture(metadata)
+            GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, lensShadingTextureId)
+        } else {
+            GLES31.glBindTexture(GLES31.GL_TEXTURE_2D, 0)
+        }
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(rcdPopulateProgram, "uLensShadingMap"), 11)
+        GLES31.glUniform1i(
+            GLES31.glGetUniformLocation(rcdPopulateProgram, "uLensShadingEnabled"),
+            if (enabled) 1 else 0
+        )
+        GLES31.glUniform2f(
+            GLES31.glGetUniformLocation(rcdPopulateProgram, "uLensShadingMapSize"),
+            metadata.lensShadingMapWidth.toFloat(),
+            metadata.lensShadingMapHeight.toFloat()
+        )
+        val grid = metadata.lensShadingMapGrid
+        val usesDngGrid = enabled && grid != null && grid.size >= 4
+        GLES31.glUniform1i(
+            GLES31.glGetUniformLocation(rcdPopulateProgram, "uLensShadingUsesDngGrid"),
+            if (usesDngGrid) 1 else 0
+        )
+        GLES31.glUniform4f(
+            GLES31.glGetUniformLocation(rcdPopulateProgram, "uLensShadingGrid"),
+            grid?.getOrElse(0) { 0f } ?: 0f,
+            grid?.getOrElse(1) { 0f } ?: 0f,
+            grid?.getOrElse(2) { 1f } ?: 1f,
+            grid?.getOrElse(3) { 1f } ?: 1f
+        )
+    }
+
     private fun createDummyShadingTexture(): Int {
         val textures = IntArray(1)
         GLES30.glGenTextures(1, textures, 0)
@@ -2753,26 +2802,6 @@ class RawDemosaicProcessor {
         )
         checkGlError("renderCombinedPass base uniforms")
 
-        val hasLensShading = metadata.lensShadingMap != null &&
-            metadata.lensShadingMapWidth > 0 &&
-            metadata.lensShadingMapHeight > 0
-        GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
-        if (hasLensShading) {
-            uploadLensShadingTexture(metadata)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, lensShadingTextureId)
-        } else {
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, createDummyShadingTexture())
-        }
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uLensShadingMap"), 4)
-        GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uLensShadingEnabled"),
-            if (hasLensShading) 1 else 0
-        )
-        GLES30.glUniform1f(
-            GLES30.glGetUniformLocation(combinedProgram, "uLensShadingPower"),
-            computeLensShadingPower(metadata)
-        )
-
         bindDcpCombinedResources(dcpRenderPlan)
         bindSpectralFilmCombinedResource(spectralFilmLut)
 
@@ -2807,25 +2836,6 @@ class RawDemosaicProcessor {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTextureId)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(highlightBaseProgram, "uInputTexture"), 0)
 
-        val hasLensShading = metadata.lensShadingMap != null &&
-            metadata.lensShadingMapWidth > 0 &&
-            metadata.lensShadingMapHeight > 0
-        GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
-        if (hasLensShading) {
-            uploadLensShadingTexture(metadata)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, lensShadingTextureId)
-        } else {
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, createDummyShadingTexture())
-        }
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(highlightBaseProgram, "uLensShadingMap"), 4)
-        GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(highlightBaseProgram, "uLensShadingEnabled"),
-            if (hasLensShading) 1 else 0
-        )
-        GLES30.glUniform1f(
-            GLES30.glGetUniformLocation(highlightBaseProgram, "uLensShadingPower"),
-            computeLensShadingPower(metadata)
-        )
         GLES30.glUniform2f(
             GLES30.glGetUniformLocation(highlightBaseProgram, "uSourceTexelSize"),
             1.0f / metadata.width,
@@ -2845,44 +2855,6 @@ class RawDemosaicProcessor {
 
         drawQuad(highlightBaseProgram)
         checkGlError("renderHighlightBasePass")
-    }
-
-    private fun smoothstep(edge0: Float, edge1: Float, x: Float): Float {
-        val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
-        return t * t * (3f - 2f * t)
-    }
-
-    private fun computeLensShadingPower(metadata: RawMetadata): Float {
-        val map = metadata.lensShadingMap ?: return 1f
-        val width = metadata.lensShadingMapWidth
-        val height = metadata.lensShadingMapHeight
-        if (width <= 0 || height <= 0 || map.size < width * height * 4) return 1f
-
-        fun lumaGainAt(index: Int): Float {
-            val base = index * 4
-            val r = map.getOrElse(base) { 1f }
-            val gr = map.getOrElse(base + 1) { 1f }
-            val gb = map.getOrElse(base + 2) { gr }
-            val b = map.getOrElse(base + 3) { 1f }
-            return (0.2126f * r + 0.7152f * ((gr + gb) * 0.5f) + 0.0722f * b)
-                .coerceAtLeast(1e-4f)
-        }
-
-        val centerIndex = (height / 2) * width + (width / 2)
-        val centerGain = lumaGainAt(centerIndex)
-        var maxRelativeGain = 1f
-        for (i in 0 until width * height) {
-            maxRelativeGain = max(maxRelativeGain, lumaGainAt(i) / centerGain)
-        }
-
-        // Limit the strongest post-denoise LSC lift to one stop:
-        // applied = relativeGain^power, so power = log(2) / log(maxRelativeGain).
-        val maxAllowedLift = 2f
-        return if (maxRelativeGain <= maxAllowedLift) {
-            1f
-        } else {
-            (ln(maxAllowedLift) / ln(maxRelativeGain)).coerceIn(0f, 1f)
-        }
     }
 
     private fun logProgramLinkResult(program: Int, name: String): Boolean {

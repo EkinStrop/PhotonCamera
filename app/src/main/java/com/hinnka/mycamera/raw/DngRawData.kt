@@ -21,6 +21,7 @@ import java.nio.ByteBuffer
  * @param lensShadingMap Lens Shading Map (LSC) 增益表，null表示无LSC数据
  * @param lensShadingMapWidth LSC 表宽度
  * @param lensShadingMapHeight LSC 表高度
+ * @param lensShadingMapGrid DNG GainMap grid 参数 [originH, originV, spacingH, spacingV]，null 表示按 Camera2 UV 采样
  */
 @Keep
 data class DngRawData @Keep constructor(
@@ -39,6 +40,7 @@ data class DngRawData @Keep constructor(
     val lensShadingMap: FloatArray?,
     val lensShadingMapWidth: Int,
     val lensShadingMapHeight: Int,
+    val lensShadingMapGrid: FloatArray?,
     val exposureBias: Float,
     val iso: Int,
     val shutterSpeed: Long,
@@ -97,6 +99,10 @@ data class DngRawData @Keep constructor(
         } else if (other.lensShadingMap != null) return false
         if (lensShadingMapWidth != other.lensShadingMapWidth) return false
         if (lensShadingMapHeight != other.lensShadingMapHeight) return false
+        if (lensShadingMapGrid != null) {
+            if (other.lensShadingMapGrid == null) return false
+            if (!lensShadingMapGrid.contentEquals(other.lensShadingMapGrid)) return false
+        } else if (other.lensShadingMapGrid != null) return false
         if (embeddedPreview != null) {
             if (other.embeddedPreview == null) return false
             if (!embeddedPreview.sameAs(other.embeddedPreview)) return false
@@ -121,6 +127,7 @@ data class DngRawData @Keep constructor(
         result = 31 * result + (lensShadingMap?.contentHashCode() ?: 0)
         result = 31 * result + lensShadingMapWidth
         result = 31 * result + lensShadingMapHeight
+        result = 31 * result + (lensShadingMapGrid?.contentHashCode() ?: 0)
         result = 31 * result + (embeddedPreview?.hashCode() ?: 0)
         return result
     }

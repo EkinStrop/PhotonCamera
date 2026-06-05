@@ -559,9 +559,14 @@ static bool applySupportedDngGainMaps(LibRaw &rawProcessor, const float blackLev
 }
 
 static jfloatArray buildDngLensShadingArray(JNIEnv *env, LibRaw &rawProcessor,
-                                            int &outWidth, int &outHeight) {
+                                            int &outWidth, int &outHeight,
+                                            float outGrid[4]) {
   outWidth = 0;
   outHeight = 0;
+  outGrid[0] = 0.0f;
+  outGrid[1] = 0.0f;
+  outGrid[2] = 1.0f;
+  outGrid[3] = 1.0f;
 
   std::vector<DngGainMap> gainMaps;
   if (!parseDngGainMaps(rawProcessor.imgdata.color.dng_levels.rawopcodes[1], gainMaps) ||
@@ -575,12 +580,33 @@ static jfloatArray buildDngLensShadingArray(JNIEnv *env, LibRaw &rawProcessor,
     return nullptr;
   }
 
+  unsigned check = 0;
   for (const auto &gainMap : gainMaps) {
     if (gainMap.mapPointsH != mapWidth || gainMap.mapPointsV != mapHeight ||
-        gainMap.mapPlanes != 1 || gainMap.mapGain.empty()) {
+        gainMap.rowPitch != 2 || gainMap.colPitch != 2 ||
+        gainMap.mapPlanes != 1 || gainMap.mapGain.empty() ||
+        gainMap.mapGain.size() != static_cast<size_t>(gainMap.mapPointsV) *
+                                     static_cast<size_t>(gainMap.mapPointsH) *
+                                     static_cast<size_t>(gainMap.mapPlanes)) {
       LOGI("dng gain map export: incompatible map layout");
       return nullptr;
     }
+    if (std::abs(gainMap.mapOriginH - gainMaps[0].mapOriginH) > 1e-9 ||
+        std::abs(gainMap.mapOriginV - gainMaps[0].mapOriginV) > 1e-9 ||
+        std::abs(gainMap.mapSpacingH - gainMaps[0].mapSpacingH) > 1e-9 ||
+        std::abs(gainMap.mapSpacingV - gainMaps[0].mapSpacingV) > 1e-9) {
+      LOGI("dng gain map export: per-channel grid differs");
+      return nullptr;
+    }
+    if ((gainMap.top & 1u) == 0u) {
+      check += ((gainMap.left & 1u) == 0u) ? 1u : 2u;
+    } else {
+      check += ((gainMap.left & 1u) == 0u) ? 4u : 8u;
+    }
+  }
+  if (check != 15u) {
+    LOGI("dng gain map export: unsupported CFA parity combination check=%u", check);
+    return nullptr;
   }
 
   std::vector<float> packed(static_cast<size_t>(mapWidth) * mapHeight * 4, 1.0f);
@@ -608,12 +634,17 @@ static jfloatArray buildDngLensShadingArray(JNIEnv *env, LibRaw &rawProcessor,
 
   outWidth = static_cast<int>(mapWidth);
   outHeight = static_cast<int>(mapHeight);
+  outGrid[0] = static_cast<float>(gainMaps[0].mapOriginH);
+  outGrid[1] = static_cast<float>(gainMaps[0].mapOriginV);
+  outGrid[2] = static_cast<float>(gainMaps[0].mapSpacingH);
+  outGrid[3] = static_cast<float>(gainMaps[0].mapSpacingV);
   jfloatArray result = env->NewFloatArray(static_cast<jsize>(packed.size()));
   if (!result) {
     return nullptr;
   }
   env->SetFloatArrayRegion(result, 0, static_cast<jsize>(packed.size()), packed.data());
-  LOGI("dng gain map export: %dx%d", outWidth, outHeight);
+  LOGI("dng gain map export: %dx%d origin=(%f,%f) spacing=(%f,%f)",
+       outWidth, outHeight, outGrid[0], outGrid[1], outGrid[2], outGrid[3]);
   return result;
 }
 
@@ -2252,7 +2283,14 @@ Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
   LOGI("dng black levels (metadata): %f %f %f %f", dngBlackLevels[0], dngBlackLevels[1], dngBlackLevels[2], dngBlackLevels[3]);
   int exportedLscWidth = 0;
   int exportedLscHeight = 0;
-  jfloatArray exportedLscArray = buildDngLensShadingArray(env, RawProcessor, exportedLscWidth, exportedLscHeight);
+  float exportedLscGrid[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+  jfloatArray exportedLscArray = buildDngLensShadingArray(
+      env, RawProcessor, exportedLscWidth, exportedLscHeight, exportedLscGrid);
+  jfloatArray exportedLscGridArray = nullptr;
+  if (exportedLscArray) {
+    exportedLscGridArray = env->NewFloatArray(4);
+    env->SetFloatArrayRegion(exportedLscGridArray, 0, 4, exportedLscGrid);
+  }
   LOGI("dng gain map: opcode2_len=%u native_apply=0 exported=%d",
        RawProcessor.imgdata.color.dng_levels.rawopcodes[1].len,
        exportedLscArray ? 1 : 0);
@@ -2329,7 +2367,7 @@ Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
   jclass dngDataClass = env->FindClass("com/hinnka/mycamera/raw/DngRawData");
   jmethodID constructor =
       env->GetMethodID(dngDataClass, "<init>",
-                       "(Ljava/nio/ByteBuffer;IIIF[F[F[F[FIIF[FIIFIJF[I[FLandroid/graphics/Bitmap;)V");
+                       "(Ljava/nio/ByteBuffer;IIIF[F[F[F[FIIF[FII[FFIJF[I[FLandroid/graphics/Bitmap;)V");
 
   jfloatArray blackLevelArray = env->NewFloatArray(4);
   for (int i = 0; i < 4; i++) {
@@ -2666,7 +2704,8 @@ Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
   jobject dngData = env->NewObject(
       dngDataClass, constructor, rawDataBuffer, width, height, rowStride,
       whiteLevel, blackLevelArray, preMulArray, wbArray, colorMatrixArray,
-      cfaPattern, ed.rotation, baselineExposure, exportedLscArray, exportedLscWidth, exportedLscHeight, exposureBias, iso,
+      cfaPattern, ed.rotation, baselineExposure, exportedLscArray, exportedLscWidth, exportedLscHeight,
+      exportedLscGridArray, exposureBias, iso,
       shutterSpeedLong, aperture, activeArray, noiseProfileArray,
       embeddedPreviewBitmap);
 

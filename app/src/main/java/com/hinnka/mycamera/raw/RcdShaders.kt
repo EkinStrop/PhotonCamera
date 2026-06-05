@@ -19,6 +19,7 @@ object RcdShaders {
         layout (local_size_x = 16, local_size_y = 16) in;
 
         layout (binding = 10) uniform highp usampler2D uRawTexture; // 单通道 R16UI 原始图像，移至 binding = 10 避开 SSBO
+        layout (binding = 11) uniform highp sampler2D uLensShadingMap; // R, Gr, Gb, B 增益图
 
         layout(std430, binding = 0) buffer CFA_Buf    { float cfa[]; };
         layout(std430, binding = 1) buffer RGB0_Buf   { float rgb0[]; }; // R
@@ -30,6 +31,10 @@ object RcdShaders {
         uniform vec4 uBlackLevel; // R, Gr, Gb, B 或 [0,1,2,3] 四通道黑电平
         uniform float uWhiteLevel;
         uniform vec4 uWhiteBalanceGains; // R, Gr, Gb, B 或 [0,1,2,3] 四通道白平衡增益
+        uniform bool uLensShadingEnabled;
+        uniform bool uLensShadingUsesDngGrid;
+        uniform vec2 uLensShadingMapSize;
+        uniform vec4 uLensShadingGrid; // originH, originV, spacingH, spacingV
 
         #define RED 0
         #define GREEN 1
@@ -71,6 +76,22 @@ object RcdShaders {
             }
         }
 
+        float getLensShadingGain(int channelIndex, ivec2 coord) {
+            if (!uLensShadingEnabled) {
+                return 1.0;
+            }
+            vec2 norm = (vec2(coord) + vec2(0.5)) / vec2(uImageSize);
+            vec2 uv = norm;
+            if (uLensShadingUsesDngGrid) {
+                vec2 origin = uLensShadingGrid.xy;
+                vec2 spacing = max(uLensShadingGrid.zw, vec2(1e-8));
+                vec2 mapIndex = (norm - origin) / spacing;
+                uv = (mapIndex + vec2(0.5)) / max(uLensShadingMapSize, vec2(1.0));
+            }
+            vec4 gains = texture(uLensShadingMap, uv);
+            return max(gains[channelIndex], 0.0);
+        }
+
         void main() {
             ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
             if (coord.x >= uImageSize.x || coord.y >= uImageSize.y) return;
@@ -83,7 +104,8 @@ object RcdShaders {
             int blIdx = getBlackLevelIndex(uCfaPattern, coord.x, coord.y);
             float bl = uBlackLevel[blIdx];
             float wl = max(uWhiteLevel, bl + 1.0);
-            val = min(clamp((val - bl) / (wl - bl), 0.0, 1.0) * uWhiteBalanceGains[blIdx], 1.0);
+            val = max(val - bl, 0.0) * getLensShadingGain(blIdx, coord);
+            val = min(clamp(val / (wl - bl), 0.0, 1.0) * uWhiteBalanceGains[blIdx], 1.0);
 
             cfa[idx] = val;
 

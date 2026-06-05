@@ -64,6 +64,7 @@ data class RawMetadata(
     val lensShadingMap: FloatArray? = null,
     val lensShadingMapWidth: Int = 0,
     val lensShadingMapHeight: Int = 0,
+    val lensShadingMapGrid: FloatArray? = null,
 
     /**
      * 数字增益 (Post RAW Boost)
@@ -819,6 +820,7 @@ data class RawMetadata(
         result = 31 * result + (lensShadingMap?.contentHashCode() ?: 0)
         result = 31 * result + lensShadingMapWidth
         result = 31 * result + lensShadingMapHeight
+        result = 31 * result + (lensShadingMapGrid?.contentHashCode() ?: 0)
         result = 31 * result + postRawSensitivityBoost.hashCode()
         result = 31 * result + baselineExposure.hashCode()
         result = 31 * result + iso
