@@ -87,45 +87,11 @@ private const val GALLERY_SCREEN_TAG = "GalleryScreen"
 
 private fun buildSystemGalleryMediaPickIntent(context: Context): Intent {
     val intent = Intent(Intent.ACTION_PICK).apply {
-        setDataAndType(MediaStore.Files.getContentUri("external"), "*/*")
+        setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "*/*")
         putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
         putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
     }
-
-    val packageName = resolveSystemGalleryPackage(context)
-    if (packageName != null) {
-        intent.setPackage(packageName)
-        PLog.d(GALLERY_SCREEN_TAG, "Using system gallery package for ACTION_PICK: $packageName")
-    } else {
-        PLog.w(GALLERY_SCREEN_TAG, "No system gallery package found for ACTION_PICK; falling back to unscoped picker")
-    }
     return intent
-}
-
-private fun resolveSystemGalleryPackage(context: Context): String? {
-    val packageManager = context.packageManager
-    val imagePickIntent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-        type = "image/*"
-    }
-    val candidates = queryIntentActivitiesCompat(packageManager, imagePickIntent)
-    return candidates.firstOrNull { resolveInfo ->
-        val appInfo = resolveInfo.activityInfo?.applicationInfo ?: return@firstOrNull false
-        val flags = appInfo.flags
-        flags and ApplicationInfo.FLAG_SYSTEM != 0 || flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
-    }?.activityInfo?.packageName
-}
-
-private fun queryIntentActivitiesCompat(
-    packageManager: PackageManager,
-    intent: Intent
-) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-    packageManager.queryIntentActivities(
-        intent,
-        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
-    )
-} else {
-    @Suppress("DEPRECATION")
-    packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
 }
 
 /**
