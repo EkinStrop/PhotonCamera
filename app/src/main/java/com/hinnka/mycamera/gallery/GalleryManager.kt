@@ -1644,7 +1644,7 @@ object GalleryManager {
                 ColorSpace.get(metadata.colorSpace)
             )
 
-            if (result == null && currentUseSuperResolution) {
+            if (result == null && currentUseSuperResolution && !useGpuAcceleration) {
                 PLog.w(TAG, "processBurst failed with SR, retrying without SR")
                 currentUseSuperResolution = false
                 result = MultiFrameStacker.processBurst(

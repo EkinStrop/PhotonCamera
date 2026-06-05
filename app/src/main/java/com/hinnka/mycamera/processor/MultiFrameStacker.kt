@@ -113,6 +113,9 @@ object MultiFrameStacker {
 
         val scale = if (enableSuperResolution) 2 else 1
         val startTime = System.currentTimeMillis()
+        val dimensions = BitmapUtils.calculateProcessedRect(width, height, aspectRatio, null, rotation)
+        val targetW = dimensions.width() * scale
+        val targetH = dimensions.height() * scale
 
         if (useVulkan) {
             PLog.i(
@@ -134,9 +137,6 @@ object MultiFrameStacker {
                     }
                     PLog.d(TAG, "Stack frames processed")
 
-                    val dimensions = BitmapUtils.calculateProcessedRect(width, height, aspectRatio, null, rotation)
-                    val targetW = dimensions.width() * scale
-                    val targetH = dimensions.height() * scale
                     val previewBitmap = try {
                         createBitmap(targetW, targetH, colorSpace = colorSpace)
                     } catch (e: OutOfMemoryError) {
@@ -147,7 +147,9 @@ object MultiFrameStacker {
                     val processOk = processVulkanStackNative(stackerPtr, previewBitmap, rotation)
                     if (!processOk) {
                         PLog.w(TAG, "Vulkan stack processing failed, invalidating cached stacker")
+                        previewBitmap.recycle()
                         invalidateCachedVulkanStacker(stackerPtr)
+                        return null
                     } else {
                         PLog.i(TAG, "Vulkan stacking completed in ${System.currentTimeMillis() - startTime}ms")
                         return previewBitmap
@@ -155,6 +157,7 @@ object MultiFrameStacker {
                 } catch (e: Exception) {
                     PLog.e(TAG, "Error during Vulkan stacking", e)
                     invalidateCachedVulkanStacker(stackerPtr)
+                    return null
                 }
             }
         }
@@ -187,9 +190,6 @@ object MultiFrameStacker {
             }
             clearStagedFramesNative(stackerPtr)
 
-            val dimensions = BitmapUtils.calculateProcessedRect(width, height, aspectRatio, null, rotation)
-            val targetW = dimensions.width() * scale
-            val targetH = dimensions.height() * scale
             val previewBitmap = try {
                 createBitmap(targetW, targetH, colorSpace = colorSpace)
             } catch (e: OutOfMemoryError) {

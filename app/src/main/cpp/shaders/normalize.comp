@@ -17,6 +17,7 @@ layout(push_constant, scalar) uniform PushConstants {
     uint outHeight;
     uint outOriginX;
     uint outOriginY;
+    uint outBufferOriginY;
     uint sensorWidth;  // Global sensor width
     uint sensorHeight; // Global sensor height
     uint tileX;
@@ -259,7 +260,7 @@ void main() {
         uint b = uint(clamp(color.b * 255.0, 0.0, 255.0));
         uint a = 255;
 
-        uint outIndex = Y * pc.outWidth + X;
+        uint outIndex = (Y - pc.outBufferOriginY) * pc.outWidth + X;
         outputBuffer.pixels[outIndex] = (a << 24) | (b << 16) | (g << 8) | r;
     }
 }

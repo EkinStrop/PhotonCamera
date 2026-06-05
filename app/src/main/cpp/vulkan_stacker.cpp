@@ -1735,6 +1735,32 @@ bool VulkanImageStacker::processStack(uint32_t *outBitmap, uint32_t outWidth,
     return false;
   }
 
+  VkDeviceSize rowBytes = (VkDeviceSize)outWidth * 4;
+  VkDeviceSize outSize = rowBytes * (VkDeviceSize)outHeight;
+  VkPhysicalDeviceProperties deviceProperties{};
+  vkGetPhysicalDeviceProperties(vm.getPhysicalDevice(), &deviceProperties);
+  VkDeviceSize maxStorageBufferRange =
+      deviceProperties.limits.maxStorageBufferRange;
+  if (maxStorageBufferRange > 0 && rowBytes > maxStorageBufferRange) {
+    LOGE("processStack: one output row exceeds storage buffer range. row=%llu "
+         "limit=%llu output=%ux%u",
+         (unsigned long long)rowBytes,
+         (unsigned long long)maxStorageBufferRange, outWidth, outHeight);
+    return false;
+  }
+  uint32_t maxStripeRows = outHeight;
+  if (maxStorageBufferRange > 0 && outSize > maxStorageBufferRange) {
+    maxStripeRows = std::max<uint32_t>(
+        1, std::min<uint32_t>(
+               outHeight,
+               static_cast<uint32_t>(maxStorageBufferRange / rowBytes)));
+    LOGI("processStack: output storage buffer range requires striped output. "
+         "out=%llu limit=%llu output=%ux%u stripeRows=%u",
+         (unsigned long long)outSize,
+         (unsigned long long)maxStorageBufferRange, outWidth, outHeight,
+         maxStripeRows);
+  }
+
   TIME_START(allFramesProcessing);
   int frameIdx = 0;
   for (auto &frame : pendingFrames) {
@@ -1816,23 +1842,6 @@ bool VulkanImageStacker::processStack(uint32_t *outBitmap, uint32_t outWidth,
     break;
   }
 
-  VkDeviceSize outSize = outWidth * outHeight * 4;
-  VkPhysicalDeviceProperties deviceProperties{};
-  vkGetPhysicalDeviceProperties(vm.getPhysicalDevice(), &deviceProperties);
-  VkDeviceSize maxStorageBufferRange =
-      deviceProperties.limits.maxStorageBufferRange;
-  if (maxStorageBufferRange > 0 && outSize > maxStorageBufferRange) {
-    LOGE("processStack: output storage buffer range is too large. out=%llu "
-         "limit=%llu output=%ux%u",
-         (unsigned long long)outSize,
-         (unsigned long long)maxStorageBufferRange, outWidth, outHeight);
-    return false;
-  }
-
-  // 1. Dispatch Normalization for each tile
-  VkCommandBuffer cb = vm.beginSingleTimeCommands();
-  vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, normalizePipeline);
-
   uint32_t fullW = sensorW;
   uint32_t fullH = sensorH;
   uint32_t tileW = (fullW + numTilesX - 1) / numTilesX;
@@ -1840,173 +1849,189 @@ bool VulkanImageStacker::processStack(uint32_t *outBitmap, uint32_t outWidth,
 
   int numTiles = numTilesX * numTilesY;
 
-  for (int i = 0; i < numTiles; ++i) {
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &normalizeSetLayout;
-    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &normalizeSets[i]));
+  TIME_START(normalizationDispatch);
+  TIME_START(outputCopy);
+  for (uint32_t stripeY = 0; stripeY < outHeight; stripeY += maxStripeRows) {
+    const uint32_t stripeRows = std::min(maxStripeRows, outHeight - stripeY);
+    const VkDeviceSize stripeSize = rowBytes * (VkDeviceSize)stripeRows;
 
-    VkDescriptorBufferInfo outBufferInfo{stagingBuffer, 0, outSize};
-    VkDescriptorBufferInfo accumBufferInfo{accumBuffers[i], 0, VK_WHOLE_SIZE};
+    VkCommandBuffer cb = vm.beginSingleTimeCommands();
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, normalizePipeline);
 
-    VkWriteDescriptorSet writes[2] = {};
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = normalizeSets[i];
-    writes[0].dstBinding = 0;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[0].descriptorCount = 1;
-    writes[0].pBufferInfo = &outBufferInfo;
+    std::vector<VkDescriptorSet> stripeSets;
+    stripeSets.reserve(numTiles);
 
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = normalizeSets[i];
-    writes[1].dstBinding = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[1].descriptorCount = 1;
-    writes[1].pBufferInfo = &accumBufferInfo;
+    for (int i = 0; i < numTiles; ++i) {
+      struct {
+        float t0, t1, t2, t3, t4, t5;
+        uint32_t outWidth;
+        uint32_t outHeight;
+        uint32_t outOriginX;
+        uint32_t outOriginY;
+        uint32_t outBufferOriginY;
+        uint32_t sensorWidth;
+        uint32_t sensorHeight;
+        uint32_t tileX;
+        uint32_t tileY;
+        uint32_t tileW;
+        uint32_t tileH;
+        uint32_t bufferStride;
+      } npc;
+      memcpy(&npc, transform, 6 * sizeof(float));
+      npc.outWidth = outWidth;
+      npc.outHeight = outHeight;
+      npc.outBufferOriginY = stripeY;
+      int tx = i % numTilesX;
+      int ty = i / numTilesX;
+      npc.tileX = tx * tileW;
+      npc.tileY = ty * tileH;
+      npc.tileW = std::min(tileW, fullW - npc.tileX);
+      npc.tileH = std::min(tileH, fullH - npc.tileY);
+      npc.bufferStride = tileW + 16;
+      npc.sensorWidth = fullW;
+      npc.sensorHeight = fullH;
 
-    vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+      const int tileStartX = static_cast<int>(npc.tileX);
+      const int tileStartY = static_cast<int>(npc.tileY);
+      const int tileEndX = tileStartX + static_cast<int>(npc.tileW);
+      const int tileEndY = tileStartY + static_cast<int>(npc.tileH);
+      int dispatchMinX = 0;
+      int dispatchMinY = static_cast<int>(stripeY);
+      int dispatchMaxX = static_cast<int>(outWidth);
+      int dispatchMaxY = static_cast<int>(stripeY + stripeRows);
 
-    // Let's re-map manually to be safe
-    struct {
-      float t0, t1, t2, t3, t4, t5;
-      uint32_t outWidth;
-      uint32_t outHeight;
-      uint32_t outOriginX;
-      uint32_t outOriginY;
-      uint32_t sensorWidth;
-      uint32_t sensorHeight;
-      uint32_t tileX;
-      uint32_t tileY;
-      uint32_t tileW;
-      uint32_t tileH;
-      uint32_t bufferStride;
-    } npc;
-    memcpy(&npc, transform, 6 * sizeof(float));
-    npc.outWidth = outWidth;
-    npc.outHeight = outHeight;
-    int tx = i % numTilesX;
-    int ty = i / numTilesX;
-    npc.tileX = tx * tileW;
-    npc.tileY = ty * tileH;
-    npc.tileW = std::min(tileW, fullW - npc.tileX);
-    npc.tileH = std::min(tileH, fullH - npc.tileY);
-    npc.bufferStride = tileW + 16;
-    npc.sensorWidth = fullW;
-    npc.sensorHeight = fullH;
+      switch (rotation) {
+      case 0:
+        dispatchMinX =
+            std::max(0, static_cast<int>(std::floor(tileStartX - cropX)) - 1);
+        dispatchMaxX = std::min(static_cast<int>(outWidth),
+                                static_cast<int>(std::ceil(tileEndX - cropX)) + 1);
+        dispatchMinY = std::max(dispatchMinY,
+                                static_cast<int>(std::floor(tileStartY - cropY)) - 1);
+        dispatchMaxY = std::min(dispatchMaxY,
+                                static_cast<int>(std::ceil(tileEndY - cropY)) + 1);
+        break;
+      case 90:
+        dispatchMinX =
+            std::max(0, static_cast<int>(std::floor(sH - cropX - tileEndY)) - 1);
+        dispatchMaxX =
+            std::min(static_cast<int>(outWidth),
+                     static_cast<int>(std::ceil(sH - cropX - tileStartY)) + 1);
+        dispatchMinY =
+            std::max(dispatchMinY,
+                     static_cast<int>(std::floor(tileStartX - cropY)) - 1);
+        dispatchMaxY = std::min(dispatchMaxY,
+                                static_cast<int>(std::ceil(tileEndX - cropY)) + 1);
+        break;
+      case 180:
+        dispatchMinX =
+            std::max(0, static_cast<int>(std::floor(sW - cropX - tileEndX)) - 1);
+        dispatchMaxX =
+            std::min(static_cast<int>(outWidth),
+                     static_cast<int>(std::ceil(sW - cropX - tileStartX)) + 1);
+        dispatchMinY =
+            std::max(dispatchMinY,
+                     static_cast<int>(std::floor(sH - cropY - tileEndY)) - 1);
+        dispatchMaxY =
+            std::min(dispatchMaxY,
+                     static_cast<int>(std::ceil(sH - cropY - tileStartY)) + 1);
+        break;
+      case 270:
+        dispatchMinX =
+            std::max(0, static_cast<int>(std::floor(tileStartY - cropX)) - 1);
+        dispatchMaxX = std::min(static_cast<int>(outWidth),
+                                static_cast<int>(std::ceil(tileEndY - cropX)) + 1);
+        dispatchMinY =
+            std::max(dispatchMinY,
+                     static_cast<int>(std::floor(sW - cropY - tileEndX)) - 1);
+        dispatchMaxY =
+            std::min(dispatchMaxY,
+                     static_cast<int>(std::ceil(sW - cropY - tileStartX)) + 1);
+        break;
+      default:
+        break;
+      }
 
-    const int tileStartX = static_cast<int>(npc.tileX);
-    const int tileStartY = static_cast<int>(npc.tileY);
-    const int tileEndX = tileStartX + static_cast<int>(npc.tileW);
-    const int tileEndY = tileStartY + static_cast<int>(npc.tileH);
-    int dispatchMinX = 0;
-    int dispatchMinY = 0;
-    int dispatchMaxX = static_cast<int>(outWidth);
-    int dispatchMaxY = static_cast<int>(outHeight);
+      if (dispatchMinX >= dispatchMaxX || dispatchMinY >= dispatchMaxY)
+        continue;
 
-    switch (rotation) {
-    case 0:
-      dispatchMinX = std::max(0, static_cast<int>(std::floor(tileStartX - cropX)) - 1);
-      dispatchMaxX = std::min(static_cast<int>(outWidth),
-                              static_cast<int>(std::ceil(tileEndX - cropX)) + 1);
-      dispatchMinY = std::max(0, static_cast<int>(std::floor(tileStartY - cropY)) - 1);
-      dispatchMaxY = std::min(static_cast<int>(outHeight),
-                              static_cast<int>(std::ceil(tileEndY - cropY)) + 1);
-      break;
-    case 90:
-      dispatchMinX =
-          std::max(0, static_cast<int>(std::floor(sH - cropX - tileEndY)) - 1);
-      dispatchMaxX =
-          std::min(static_cast<int>(outWidth),
-                   static_cast<int>(std::ceil(sH - cropX - tileStartY)) + 1);
-      dispatchMinY = std::max(0, static_cast<int>(std::floor(tileStartX - cropY)) - 1);
-      dispatchMaxY = std::min(static_cast<int>(outHeight),
-                              static_cast<int>(std::ceil(tileEndX - cropY)) + 1);
-      break;
-    case 180:
-      dispatchMinX =
-          std::max(0, static_cast<int>(std::floor(sW - cropX - tileEndX)) - 1);
-      dispatchMaxX =
-          std::min(static_cast<int>(outWidth),
-                   static_cast<int>(std::ceil(sW - cropX - tileStartX)) + 1);
-      dispatchMinY =
-          std::max(0, static_cast<int>(std::floor(sH - cropY - tileEndY)) - 1);
-      dispatchMaxY =
-          std::min(static_cast<int>(outHeight),
-                   static_cast<int>(std::ceil(sH - cropY - tileStartY)) + 1);
-      break;
-    case 270:
-      dispatchMinX = std::max(0, static_cast<int>(std::floor(tileStartY - cropX)) - 1);
-      dispatchMaxX = std::min(static_cast<int>(outWidth),
-                              static_cast<int>(std::ceil(tileEndY - cropX)) + 1);
-      dispatchMinY =
-          std::max(0, static_cast<int>(std::floor(sW - cropY - tileEndX)) - 1);
-      dispatchMaxY =
-          std::min(static_cast<int>(outHeight),
-                   static_cast<int>(std::ceil(sW - cropY - tileStartX)) + 1);
-      break;
-    default:
-      break;
+      VkDescriptorSet normalizeSet = VK_NULL_HANDLE;
+      VkDescriptorSetAllocateInfo allocInfo{};
+      allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      allocInfo.descriptorPool = descriptorPool;
+      allocInfo.descriptorSetCount = 1;
+      allocInfo.pSetLayouts = &normalizeSetLayout;
+      VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &normalizeSet));
+      stripeSets.push_back(normalizeSet);
+
+      VkDescriptorBufferInfo outBufferInfo{stagingBuffer, 0, stripeSize};
+      VkDescriptorBufferInfo accumBufferInfo{accumBuffers[i], 0, VK_WHOLE_SIZE};
+
+      VkWriteDescriptorSet writes[2] = {};
+      writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[0].dstSet = normalizeSet;
+      writes[0].dstBinding = 0;
+      writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      writes[0].descriptorCount = 1;
+      writes[0].pBufferInfo = &outBufferInfo;
+
+      writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[1].dstSet = normalizeSet;
+      writes[1].dstBinding = 1;
+      writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      writes[1].descriptorCount = 1;
+      writes[1].pBufferInfo = &accumBufferInfo;
+
+      vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+
+      const uint32_t dispatchW =
+          static_cast<uint32_t>(dispatchMaxX - dispatchMinX);
+      const uint32_t dispatchH =
+          static_cast<uint32_t>(dispatchMaxY - dispatchMinY);
+      npc.outOriginX = static_cast<uint32_t>(dispatchMinX);
+      npc.outOriginY = static_cast<uint32_t>(dispatchMinY);
+
+      vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              normalizePipelineLayout, 0, 1, &normalizeSet, 0,
+                              nullptr);
+
+      vkCmdPushConstants(cb, normalizePipelineLayout,
+                         VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(npc), &npc);
+
+      vkCmdDispatch(cb, (dispatchW + 15) / 16, (dispatchH + 15) / 16, 1);
     }
 
-    if (dispatchMinX >= dispatchMaxX || dispatchMinY >= dispatchMaxY)
-      continue;
+    VkBufferMemoryBarrier hostBarrier{};
+    hostBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    hostBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    hostBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    hostBarrier.buffer = stagingBuffer;
+    hostBarrier.size = stripeSize;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                         &hostBarrier, 0, nullptr);
 
-    const uint32_t dispatchW =
-        static_cast<uint32_t>(dispatchMaxX - dispatchMinX);
-    const uint32_t dispatchH =
-        static_cast<uint32_t>(dispatchMaxY - dispatchMinY);
-    npc.outOriginX = static_cast<uint32_t>(dispatchMinX);
-    npc.outOriginY = static_cast<uint32_t>(dispatchMinY);
+    vm.endSingleTimeCommands(cb);
+    vkQueueWaitIdle(vm.getComputeQueue());
 
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            normalizePipelineLayout, 0, 1, &normalizeSets[i], 0,
-                            nullptr);
+    void *hostData;
+    vkMapMemory(device, stagingMemory, 0, stripeSize, 0, &hostData);
+    for (uint32_t y = 0; y < stripeRows; ++y) {
+      memcpy((uint8_t *)outBitmap + (stripeY + y) * stride,
+             (uint8_t *)hostData + y * rowBytes, (size_t)rowBytes);
+    }
+    vkUnmapMemory(device, stagingMemory);
 
-    vkCmdPushConstants(cb, normalizePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
-                       0, sizeof(npc), &npc);
-
-    vkCmdDispatch(cb, (dispatchW + 15) / 16, (dispatchH + 15) / 16, 1);
+    if (!stripeSets.empty()) {
+      vkFreeDescriptorSets(device, descriptorPool,
+                           static_cast<uint32_t>(stripeSets.size()),
+                           stripeSets.data());
+    }
   }
-
-  // Transition staging buffer
-  VkBufferMemoryBarrier hostBarrier{};
-  hostBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-  hostBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-  hostBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-  hostBarrier.buffer = stagingBuffer;
-  hostBarrier.size = outSize;
-  vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                       VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                       &hostBarrier, 0, nullptr);
-
-  TIME_START(normalizationDispatch);
-  vm.endSingleTimeCommands(cb);
-  vkQueueWaitIdle(vm.getComputeQueue());
+  TIME_END(outputCopy);
   TIME_END(normalizationDispatch);
   perf.normalizationDispatchMs = elapsed_normalizationDispatch;
-
-  // 2. Map and copy to bitmap
-  TIME_START(outputCopy);
-  void *hostData;
-  vkMapMemory(device, stagingMemory, 0, outSize, 0, &hostData);
-
-  if (stride == outWidth * 4) {
-    memcpy(outBitmap, hostData, (size_t)outSize);
-  } else {
-    for (uint32_t y = 0; y < outHeight; ++y) {
-      memcpy((uint8_t *)outBitmap + y * stride,
-             (uint8_t *)hostData + y * outWidth * 4, outWidth * 4);
-    }
-  }
-  vkUnmapMemory(device, stagingMemory);
-  TIME_END(outputCopy);
   perf.outputCopyMs = elapsed_outputCopy;
-
-  vkFreeDescriptorSets(device, descriptorPool, numTiles, normalizeSets.data());
-  std::fill(normalizeSets.begin(), normalizeSets.end(),
-            (VkDescriptorSet)VK_NULL_HANDLE);
 
   perf.totalMs = std::chrono::duration<double, std::milli>(
                      std::chrono::steady_clock::now() - startTotal)
