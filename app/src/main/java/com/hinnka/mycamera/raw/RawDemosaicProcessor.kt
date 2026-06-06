@@ -791,14 +791,13 @@ class RawDemosaicProcessor {
                     GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, i, 0)
                 }
 
+                // DR200/DR400 must compensate capture-side underexposure even when RAW auto exposure is disabled.
+                val droExposureCompensation = rawDROMode.captureExposureReductionEv
+                effectiveExposureCompensation += droExposureCompensation
+                highlightWhitePoint = resolveDroHighlightWhitePoint(droExposureCompensation)
+
                 // 处理自动曝光测光
                 if (rawAutoExposure) {
-                    val droEv = when (rawDROMode) {
-                        DROMode.DR200 -> 1f
-                        DROMode.DR400 -> 2f
-                        else -> 0f
-                    }
-                    effectiveExposureCompensation += droEv
                     val meteringResult = resolveRawAutoExposureEv(
                         context = context,
                         metadata = actualMetadata,
@@ -812,7 +811,10 @@ class RawDemosaicProcessor {
                     val autoExposureEv = meteringResult.meteredEv
                     if (rawDROMode.isEnabled && autoExposureEv > 0f) {
                         effectiveExposureCompensation += autoExposureEv
-                        highlightWhitePoint = meteringResult.p998 * 2f.pow(effectiveExposureCompensation)
+                        highlightWhitePoint = max(
+                            highlightWhitePoint,
+                            meteringResult.p998 * 2f.pow(effectiveExposureCompensation)
+                        )
                     } else {
                         effectiveExposureCompensation += autoExposureEv
                     }
@@ -2869,6 +2871,14 @@ class RawDemosaicProcessor {
         checkGlError("renderCombinedPass matrices")
         drawQuad(combinedProgram)
         checkGlError("renderCombinedPass")
+    }
+
+    private fun resolveDroHighlightWhitePoint(droExposureCompensation: Float): Float {
+        return if (droExposureCompensation > 0f) {
+            2.0f.pow(droExposureCompensation)
+        } else {
+            0f
+        }
     }
 
     private fun renderHighlightBasePass(
