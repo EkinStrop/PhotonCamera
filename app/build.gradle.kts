@@ -169,6 +169,9 @@ dependencies {
     
     // ExifInterface for writing EXIF metadata
     implementation(libs.androidx.exifinterface)
+
+    // HEIC export through the platform image encoder
+    implementation(libs.androidx.heifwriter)
     
     // DataStore for user preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")

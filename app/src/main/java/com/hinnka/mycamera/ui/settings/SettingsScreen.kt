@@ -107,6 +107,7 @@ import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.data.AiFocusTargetMode
 import com.hinnka.mycamera.data.VolumeKeyAction
 import com.hinnka.mycamera.frame.FrameInfo
+import com.hinnka.mycamera.gallery.HeicExportEncoder
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.lut.creator.OpenAIApiClient
@@ -215,6 +216,7 @@ fun SettingsScreen(
     val useLivePhoto by viewModel.useLivePhoto.collectAsState()
     val enableDevelopAnimation by viewModel.enableDevelopAnimation.collectAsState()
     val photoQuality by viewModel.photoQuality.collectAsState(initial = 95)
+    val useHeicExport by viewModel.useHeicExport.collectAsState(initial = false)
     val tonemapMode by viewModel.tonemapMode.collectAsState()
     val fixTonemapPreview by viewModel.fixTonemapPreview.collectAsState()
     val useGpuAcceleration by viewModel.useGpuAcceleration.collectAsState()
@@ -291,6 +293,7 @@ fun SettingsScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val isHdrSettingsSupported = remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !DeviceUtil.isHarmonyOS }
+    val isHeicExportSupported = remember { HeicExportEncoder.isSupported }
 
     val backupLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
@@ -918,6 +921,20 @@ fun SettingsScreen(
                             currentLevel = photoQuality,
                             onLevelSelected = { viewModel.setPhotoQuality(it) }
                         )
+
+                        if (isHeicExportSupported) {
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.1f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            SwitchSettingItem(
+                                title = stringResource(R.string.settings_use_heic_export),
+                                description = stringResource(R.string.settings_use_heic_export_description),
+                                checked = useHeicExport,
+                                onCheckedChange = { viewModel.setUseHeicExport(it) }
+                            )
+                        }
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),

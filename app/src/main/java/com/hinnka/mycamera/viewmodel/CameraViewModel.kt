@@ -781,6 +781,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val photoQuality: Flow<Int> = userPreferencesRepository.userPreferences.map { it.photoQuality }
+    val useHeicExport: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.useHeicExport }
 
     val defaultFocalLength: Flow<Float> = userPreferencesRepository.userPreferences.map { it.defaultFocalLength }
     val customFocalLengths: Flow<List<Float>> = userPreferencesRepository.userPreferences.map { it.customFocalLengths }
@@ -3412,6 +3413,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setPhotoQuality(quality: Int) {
         viewModelScope.launch {
             userPreferencesRepository.savePhotoQuality(quality)
+        }
+    }
+
+    fun setUseHeicExport(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveUseHeicExport(enabled)
         }
     }
 
