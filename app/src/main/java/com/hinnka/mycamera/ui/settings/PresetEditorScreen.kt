@@ -34,6 +34,9 @@ import com.hinnka.mycamera.ui.components.CurveChannel
 import com.hinnka.mycamera.raw.SpectralFilmUiInfo
 import com.hinnka.mycamera.ui.components.EffectsBottomSheet
 import com.hinnka.mycamera.ui.components.FrameSelector
+import com.hinnka.mycamera.ui.components.RawBaselineColorCorrectionSelector
+import com.hinnka.mycamera.ui.camera.LutEditBottomSheet
+import com.hinnka.mycamera.ui.camera.LutEditorTarget
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import java.util.UUID
 
@@ -107,6 +110,8 @@ fun PresetEditorScreen(
     var expandBaseline by remember { mutableStateOf(false) }
     var showColorRecipeSheet by remember { mutableStateOf(false) }
     var showEffectsSheet by remember { mutableStateOf(false) }
+    var baselineRecipeEditLutId by remember { mutableStateOf<String?>(null) }
+    var baselineRecipeEditorTarget by remember { mutableStateOf<LutEditorTarget?>(null) }
 
     // 保存方法
     val onSave = {
@@ -342,6 +347,22 @@ fun PresetEditorScreen(
                 )
             }
 
+            val editBaselineRecipe: (String, LutEditorTarget) -> Unit = { lutId, target ->
+                baselineRecipeEditLutId = lutId
+                baselineRecipeEditorTarget = target
+            }
+
+            if (baselineRecipeEditLutId != null && baselineRecipeEditorTarget != null) {
+                LutEditBottomSheet(
+                    lutId = baselineRecipeEditLutId!!,
+                    editorTarget = baselineRecipeEditorTarget!!,
+                    onDismiss = {
+                        baselineRecipeEditLutId = null
+                        baselineRecipeEditorTarget = null
+                    }
+                )
+            }
+
             SettingsSection(
                 title = "RAW",
                 isExpandable = true,
@@ -442,61 +463,35 @@ fun PresetEditorScreen(
                 isExpanded = expandBaseline,
                 onToggleExpand = { expandBaseline = !expandBaseline }
             ) {
-                val noneBaselineName = stringResource(R.string.none)
-
-                val currentJpgLut = availableLuts.find { it.id == jpgBaselineLutId }
-                val currentJpgLutName = currentJpgLut?.getName() ?: noneBaselineName
-                DropdownSettingItem(
+                RawBaselineColorCorrectionSelector(
                     title = stringResource(R.string.settings_baseline_jpg_title),
-                    value = currentJpgLutName,
-                    options = listOf(noneBaselineName) + availableLuts.map { it.getName() },
-                    isLoading = false,
-                    onExpanded = {},
-                    onOptionSelected = { selectedName ->
-                        jpgBaselineLutId = if (selectedName == noneBaselineName) {
-                            null
-                        } else {
-                            availableLuts.find { it.getName() == selectedName }?.id
-                        }
-                    }
+                    selectedLutId = jpgBaselineLutId,
+                    availableLuts = availableLuts,
+                    thumbnail = null,
+                    onSelectLut = { jpgBaselineLutId = it },
+                    onEditRecipe = { editBaselineRecipe(it, LutEditorTarget.BASELINE_JPG) }
                 )
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.05f), modifier = Modifier.padding(vertical = 8.dp))
 
-                val currentRawLut = availableLuts.find { it.id == rawBaselineLutId }
-                val currentRawLutName = currentRawLut?.getName() ?: noneBaselineName
-                DropdownSettingItem(
+                RawBaselineColorCorrectionSelector(
                     title = stringResource(R.string.settings_baseline_raw_title),
-                    value = currentRawLutName,
-                    options = listOf(noneBaselineName) + availableLuts.map { it.getName() },
-                    isLoading = false,
-                    onExpanded = {},
-                    onOptionSelected = { selectedName ->
-                        rawBaselineLutId = if (selectedName == noneBaselineName) {
-                            null
-                        } else {
-                            availableLuts.find { it.getName() == selectedName }?.id
-                        }
-                    }
+                    selectedLutId = rawBaselineLutId,
+                    availableLuts = availableLuts,
+                    thumbnail = null,
+                    onSelectLut = { rawBaselineLutId = it },
+                    onEditRecipe = { editBaselineRecipe(it, LutEditorTarget.BASELINE_RAW) }
                 )
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.05f), modifier = Modifier.padding(vertical = 8.dp))
 
-                val currentPhantomLut = availableLuts.find { it.id == phantomBaselineLutId }
-                val currentPhantomLutName = currentPhantomLut?.getName() ?: noneBaselineName
-                DropdownSettingItem(
+                RawBaselineColorCorrectionSelector(
                     title = stringResource(R.string.settings_baseline_phantom_title),
-                    value = currentPhantomLutName,
-                    options = listOf(noneBaselineName) + availableLuts.map { it.getName() },
-                    isLoading = false,
-                    onExpanded = {},
-                    onOptionSelected = { selectedName ->
-                        phantomBaselineLutId = if (selectedName == noneBaselineName) {
-                            null
-                        } else {
-                            availableLuts.find { it.getName() == selectedName }?.id
-                        }
-                    }
+                    selectedLutId = phantomBaselineLutId,
+                    availableLuts = availableLuts,
+                    thumbnail = null,
+                    onSelectLut = { phantomBaselineLutId = it },
+                    onEditRecipe = { editBaselineRecipe(it, LutEditorTarget.BASELINE_PHANTOM) }
                 )
             }
         }
