@@ -136,8 +136,10 @@ private data class PresetMatchSnapshot(
     val phantomBaselineLutId: String?
 ) {
     fun matches(preset: com.hinnka.mycamera.model.CameraPreset): Boolean {
+        val colorRecipeMatches = colorRecipe.isSameAs(preset.colorRecipe)
+//        PLog.d("PresetMatchSnapshot", "colorRecipe=$colorRecipe ${preset.colorRecipe} colorRecipe match: $colorRecipeMatches")
         return lutId == preset.lutId &&
-            colorRecipe == preset.colorRecipe &&
+            colorRecipeMatches &&
             effects == preset.effects &&
             aspectRatio == preset.aspectRatio &&
             useRaw == preset.useRaw &&
