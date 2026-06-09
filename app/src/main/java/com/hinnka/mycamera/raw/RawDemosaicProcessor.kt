@@ -2905,6 +2905,14 @@ class RawDemosaicProcessor {
             GLES30.glGetUniformLocation(highlightBaseProgram, "uBlurRadius"),
             32.0f
         )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(highlightBaseProgram, "uRangeSigmaLog"),
+            0.85f
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(highlightBaseProgram, "uMaskThreshold"),
+            0.72f
+        )
 
         val identityMatrix = FloatArray(16)
         GlMatrix.setIdentityM(identityMatrix, 0)
