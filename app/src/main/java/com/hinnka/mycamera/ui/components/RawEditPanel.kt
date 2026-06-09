@@ -590,7 +590,8 @@ fun RawBaselineColorCorrectionSelector(
     availableLuts: List<LutInfo>,
     thumbnail: Bitmap?,
     onSelectLut: (String?) -> Unit,
-    onEditRecipe: (String) -> Unit,
+    title: String = stringResource(R.string.settings_baseline_raw_title),
+    onEditRecipe: ((String) -> Unit)? = null,
     onOpenSheet: (() -> Unit)? = null
 ) {
     var showSheet by remember { mutableStateOf(false) }
@@ -618,7 +619,7 @@ fun RawBaselineColorCorrectionSelector(
                 .clickable { openSheet() }
         ) {
             Text(
-                text = stringResource(R.string.settings_baseline_raw_title),
+                text = title,
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal
@@ -651,6 +652,7 @@ fun RawBaselineColorCorrectionSelector(
             selectedLutId = selectedLutId,
             availableLuts = availableLuts,
             thumbnail = thumbnail,
+            title = title,
             onSelectLut = onSelectLut,
             onEditRecipe = onEditRecipe,
             onDismiss = { showSheet = false }
@@ -664,9 +666,10 @@ fun RawBaselineColorCorrectionBottomSheet(
     selectedLutId: String?,
     availableLuts: List<LutInfo>,
     thumbnail: Bitmap?,
+    title: String = stringResource(R.string.settings_baseline_raw_title),
     containerColor: Color = Color(0xFF1E1E1E),
     onSelectLut: (String?) -> Unit,
-    onEditRecipe: (String) -> Unit,
+    onEditRecipe: ((String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -687,7 +690,7 @@ fun RawBaselineColorCorrectionBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = stringResource(R.string.settings_baseline_raw_title),
+                    text = title,
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
@@ -728,15 +731,18 @@ fun RawBaselineColorCorrectionBottomSheet(
                 ) {
                     Text(stringResource(R.string.settings_baseline_clear))
                 }
-                TextButton(
-                    onClick = {
-                        if (selectedLutId != null) {
-                            onEditRecipe(selectedLutId)
-                        }
-                    },
-                    enabled = selectedLutId != null
-                ) {
-                    Text(stringResource(R.string.settings_baseline_edit_recipe))
+                if (onEditRecipe != null) {
+                    TextButton(
+                        onClick = {
+                            if (selectedLutId != null) {
+                                onDismiss()
+                                onEditRecipe(selectedLutId)
+                            }
+                        },
+                        enabled = selectedLutId != null
+                    ) {
+                        Text(stringResource(R.string.settings_baseline_edit_recipe))
+                    }
                 }
             }
         }

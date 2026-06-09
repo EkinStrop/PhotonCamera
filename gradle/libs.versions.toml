@@ -13,6 +13,7 @@ materialIconsExtended = "1.7.8"
 coil = "2.7.0"
 navigationCompose = "2.9.6"
 exifinterface = "1.4.2"
+heifwriter = "1.1.0"
 billing = "8.3.0"
 fragment = "1.8.9"
 media3 = "1.10.0"
@@ -54,6 +55,7 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
+androidx-heifwriter = { group = "androidx.heifwriter", name = "heifwriter", version.ref = "heifwriter" }
 androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragment" }
 androidx-animation-core = { group = "androidx.compose.animation", name = "animation-core", version.ref = "animationCore" }
 androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycleProcess" }

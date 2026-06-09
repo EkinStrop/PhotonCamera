@@ -394,36 +394,22 @@ object RawShaders {
 
         vec3 combinedLocalToneMapping(vec3 sceneLinear, float originalLuma) {
             float toneInputLuma = luminance(sceneLinear);
-            float baseLuma = uHighlightBaseEnabled
-                ? max(texture(uHighlightBaseTexture, vTexCoord).r, 1e-4)
-                : max(toneInputLuma, 1e-4);
-
-            float localContrast = originalLuma / baseLuma;
             float highlightAnchor = max(originalLuma, toneInputLuma);
+            float guidedHighlightMask = uHighlightBaseEnabled
+                ? clamp(texture(uHighlightBaseTexture, vTexCoord).r, 0.0, 1.0)
+                : smoothstep(0.4, 0.75, highlightAnchor);
+            float tonalHighlightMask = smoothstep(0.4, 0.75, highlightAnchor);
             float gainMask = smoothstep(1.05, 1.35, uHighlightExposureGain);
-            float highlightMask = smoothstep(0.4, 0.75, highlightAnchor) * gainMask;
+            float highlightMask = max(guidedHighlightMask, tonalHighlightMask * 0.35) * gainMask;
 
-            // Broad-base compression only belongs to the highlight range; otherwise window base bleeds into interiors.
-            float compressionFloor = mix(
-                toneInputLuma,
-                toneInputLuma / (1.0 + baseLuma),
-                highlightMask
-            );
-
-            // 单调高光曲线：从 pivot 往上按曝光增益回退，避免 mask 混合造成亮度排序反转。
             float exposureGain = max(uHighlightExposureGain, 1.0);
             float exposureCancel = 1.0 / exposureGain;
             float pivot = 0.35;
-            float monotonicRecoveredLuma = highlightAnchor <= pivot
+            float compressedLuma = highlightAnchor <= pivot
                 ? toneInputLuma
                 : pivot + (toneInputLuma - pivot) * exposureCancel;
 
-            float detailContrast = max(localContrast, 1e-4);
-            float recoveredLuma = monotonicRecoveredLuma * mix(1.0, detailContrast, highlightMask);
-            float mappedLuma = mix(compressionFloor, recoveredLuma, highlightMask);
-
-            // 保留一点 Reinhard 底线，避免高光边缘被压成脏灰；最终仍限制在 SDR 白内。
-            mappedLuma = max(mappedLuma, compressionFloor * mix(1.0, 0.82, highlightMask));
+            float mappedLuma = mix(toneInputLuma, compressedLuma, highlightMask);
             mappedLuma = min(mappedLuma, 1.0);
 
             return clamp(sceneLinear * (mappedLuma / max(toneInputLuma, 1e-5)), 0.0, 1.0);
@@ -457,9 +443,11 @@ object RawShaders {
     """.trimIndent()
 
     /**
-     * Low-resolution highlight base shader.
+     * Edge-aware highlight mask shader.
      *
-     * R stores a broad luma base used to restore local contrast after SDR tone mapping.
+     * R stores a smoothed tonal highlight mask. This follows RawTherapee's
+     * Shadows/Highlights structure: build a tonal mask, then edge-aware smooth
+     * that mask instead of dividing by a blurred luma base.
      */
     val HIGHLIGHT_BASE_FRAGMENT_SHADER = """
         #version 300 es
@@ -471,9 +459,24 @@ object RawShaders {
         uniform sampler2D uInputTexture;
         uniform vec2 uSourceTexelSize;
         uniform float uBlurRadius;
+        uniform float uRangeSigmaLog;
+        uniform float uMaskThreshold;
 
         float luminance(vec3 color) {
             return max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+        }
+
+        float pow4(float value) {
+            float v = clamp(value, 0.0, 1.0);
+            float v2 = v * v;
+            return v2 * v2;
+        }
+
+        float highlightMaskFromLuma(float luma) {
+            float threshold = clamp(uMaskThreshold, 0.05, 0.98);
+            float normalizedLuma = clamp(luma, 0.0, 1.0);
+            float softMask = pow4(normalizedLuma * 0.9 / threshold);
+            return normalizedLuma > threshold ? 1.0 : softMask;
         }
 
         float sampleLuma(vec2 uv) {
@@ -482,15 +485,22 @@ object RawShaders {
         }
 
         void main() {
-            vec2 stepSize = uSourceTexelSize * uBlurRadius;
+            vec2 stepSize = uSourceTexelSize * (uBlurRadius * 0.5);
+            float centerLuma = sampleLuma(vTexCoord);
+            float centerLog = log2(centerLuma);
+            float twoRangeSigma2 = 2.0 * uRangeSigmaLog * uRangeSigmaLog;
             float sum = 0.0;
             float weightSum = 0.0;
 
             for (int y = -2; y <= 2; y++) {
                 for (int x = -2; x <= 2; x++) {
                     vec2 offset = vec2(float(x), float(y));
-                    float weight = exp(-dot(offset, offset) * 0.5);
-                    sum += sampleLuma(vTexCoord + offset * stepSize) * weight;
+                    float sampleLumaValue = sampleLuma(vTexCoord + offset * stepSize);
+                    float logDelta = log2(sampleLumaValue) - centerLog;
+                    float spatialWeight = exp(-dot(offset, offset) * 0.5);
+                    float rangeWeight = exp(-(logDelta * logDelta) / max(twoRangeSigma2, 1e-5));
+                    float weight = spatialWeight * rangeWeight;
+                    sum += highlightMaskFromLuma(sampleLumaValue) * weight;
                     weightSum += weight;
                 }
             }

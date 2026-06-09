@@ -26,8 +26,8 @@ android {
         applicationId = "com.hinnka.mycamera"
         minSdk = 30
         targetSdk = 36
-        versionCode = 96
-        versionName = "1.21.1.1"
+        versionCode = 99
+        versionName = "1.21.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
@@ -169,6 +169,9 @@ dependencies {
     
     // ExifInterface for writing EXIF metadata
     implementation(libs.androidx.exifinterface)
+
+    // HEIC export through the platform image encoder
+    implementation(libs.androidx.heifwriter)
     
     // DataStore for user preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")

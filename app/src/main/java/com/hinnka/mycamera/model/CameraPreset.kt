@@ -33,7 +33,14 @@ data class CameraPreset(
     // 是否为内置预设
     val isBuiltIn: Boolean = false
 ) {
-    fun toJson(): String = gson.toJson(this)
+    fun toJson(): String = gson.toJson(withoutLegacyHdf())
+
+    fun withoutLegacyHdf(): CameraPreset {
+        return copy(
+            colorRecipe = colorRecipe.copy(halation = 0f),
+            effects = effects.copy(hdf = 0f)
+        )
+    }
 
     companion object {
         private val gson = Gson()
@@ -60,8 +67,6 @@ data class CameraPreset(
                 lutId = "standard",
                 colorRecipe = ColorRecipeParams.DEFAULT.copy(
                     exposure = 0.2f,
-                    contrast = 0.95f,
-                    fade = 0.05f
                 ),
                 effects = EffectParams.DEFAULT,
                 frameId = "polaroid",
@@ -78,19 +83,13 @@ data class CameraPreset(
                 lutId = "leica_m9",
                 colorRecipe = ColorRecipeParams.DEFAULT.copy(
                     exposure = -0.3f,
-                    contrast = 1.05f,
-                    saturation = 0.88f,
+                    saturation = 0.9f,
                     color = 0.12f,
-                    redChroma = 0.08f,
-                    redLightness = -0.03f,
-                    orangeChroma = 0.06f,
-                    yellowHue = -0.03f,
-                    yellowChroma = 0.05f,
-                    greenChroma = -0.04f,
-                    cyanHue = -0.04f,
-                    blueChroma = 0.06f,
                     primaryRedSaturation = 0.06f,
                     primaryBlueSaturation = 0.04f,
+                    masterCurvePoints = floatArrayOf(
+                        0.0f, 0.0f, 0.25f, 0.24f, 0.66f, 0.74f, 1.0f, 1.0f
+                    )
                 ),
                 effects = EffectParams.DEFAULT.copy(
                     vignette = -0.2f,
@@ -106,7 +105,7 @@ data class CameraPreset(
             CameraPreset(
                 id = "builtin_cinematic",
                 name = "builtin_cinematic",
-                lutId = null,
+                lutId = "ricoh_yellow",
                 colorRecipe = ColorRecipeParams.DEFAULT.copy(
                     shadows = -0.08f,
                     highlights = 0.05f
@@ -116,10 +115,8 @@ data class CameraPreset(
                 aspectRatio = AspectRatio.XPAN.name,
                 useRaw = true,
                 rawDcpId = null,
-                rawSpectralFilmEnabled = true,
-                rawSpectralFilmStock = "kodak_vision3_250d",
-                rawSpectralFilmPrint = "kodak_2383",
-                rawDROMode = "OFF",
+                rawSpectralFilmEnabled = false,
+                rawDROMode = "DR100",
                 isBuiltIn = true
             ),
             CameraPreset(
@@ -133,7 +130,6 @@ data class CameraPreset(
                 effects = EffectParams.DEFAULT.copy(
                     vignette = -0.25f,
                     filmGrain = 0.25f,
-                    hdf = 0.25f,
                     halation = 0.25f,
                 ),
                 frameId = "time",
@@ -164,7 +160,7 @@ data class CameraPreset(
 
         fun fromJson(json: String): CameraPreset? {
             return try {
-                gson.fromJson(json, CameraPreset::class.java)
+                gson.fromJson(json, CameraPreset::class.java)?.withoutLegacyHdf()
             } catch (e: Exception) {
                 null
             }
@@ -174,12 +170,12 @@ data class CameraPreset(
             if (json.isEmpty()) return emptyList()
             return try {
                 val type = object : TypeToken<List<CameraPreset>>() {}.type
-                gson.fromJson(json, type) ?: emptyList()
+                (gson.fromJson(json, type) ?: emptyList<CameraPreset>()).map { it.withoutLegacyHdf() }
             } catch (e: Exception) {
                 emptyList()
             }
         }
 
-        fun listToJson(list: List<CameraPreset>): String = gson.toJson(list)
+        fun listToJson(list: List<CameraPreset>): String = gson.toJson(list.map { it.withoutLegacyHdf() })
     }
 }

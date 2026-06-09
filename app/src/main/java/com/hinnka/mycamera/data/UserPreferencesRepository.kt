@@ -129,6 +129,7 @@ data class UserPreferences(
     val useMFSR: Boolean = false, // 是否启用 RAW 多帧超分
     val superResolutionScale: Float = 1.5f, // RAW 多帧超分倍率
     val photoQuality: Int = 95, // 照片质量: 90, 95, 100
+    val useHeicExport: Boolean = false, // 是否优先使用 HEIC 导出
     val useLivePhoto: Boolean = false, // 是否启用 Live Photo (Motion Photo)
     val enableDevelopAnimation: Boolean = false, // 是否启用拍摄后的显影动画
     val backgroundImage: String = "camera_bg", // 背景图资源名或文件路径
@@ -285,6 +286,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val USE_SUPER_RESOLUTION = booleanPreferencesKey("use_super_resolution")
         private val RAW_SUPER_RESOLUTION_SCALE = floatPreferencesKey("raw_super_resolution_scale")
         private val PHOTO_QUALITY = intPreferencesKey("photo_quality")
+        private val USE_HEIC_EXPORT = booleanPreferencesKey("use_heic_export")
         private val USE_LIVE_PHOTO = booleanPreferencesKey("use_live_photo")
         private val ENABLE_DEVELOP_ANIMATION = booleanPreferencesKey("enable_develop_animation")
         private val BACKGROUND_IMAGE = stringPreferencesKey("background_image")
@@ -422,6 +424,7 @@ class UserPreferencesRepository(private val context: Context) {
                 useMFSR = preferences[USE_SUPER_RESOLUTION] ?: false,
                 superResolutionScale = preferences[RAW_SUPER_RESOLUTION_SCALE] ?: 1.5f,
                 photoQuality = preferences[PHOTO_QUALITY] ?: 95,
+                useHeicExport = preferences[USE_HEIC_EXPORT] ?: false,
                 useLivePhoto = preferences[USE_LIVE_PHOTO] ?: false,
                 enableDevelopAnimation = preferences[ENABLE_DEVELOP_ANIMATION] ?: false,
                 backgroundImage = preferences[BACKGROUND_IMAGE] ?: "camera_bg",
@@ -1158,6 +1161,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun savePhotoQuality(quality: Int) {
         context.dataStore.edit { preferences ->
             preferences[PHOTO_QUALITY] = quality
+        }
+    }
+
+    suspend fun saveUseHeicExport(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[USE_HEIC_EXPORT] = enabled
         }
     }
 

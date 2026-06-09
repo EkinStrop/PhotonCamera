@@ -536,11 +536,16 @@ object GalleryManager {
         suffix: String? = null,
         preparedUltraHdrSource: GainmapSourceSet? = null,
         preparedGainmapResult: GainmapResult? = null,
+        preferHeicExport: Boolean? = null,
     ): Boolean {
         return withContext(Dispatchers.IO) {
             val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.jpg")
             try {
-                if (bitmap == null && canReuseEmbeddedGainmap(metadata)) {
+                val shouldPreferHeic = preferHeicExport
+                    ?: (ContentRepository.getInstance(context).userPreferencesRepository.userPreferences.firstOrNull()
+                        ?.useHeicExport ?: false)
+
+                if (!shouldPreferHeic && bitmap == null && canReuseEmbeddedGainmap(metadata)) {
                     val embeddedBitmap = loadOriginalBitmap(context, id)
                     if (embeddedBitmap != null && hasBitmapGainmap(embeddedBitmap)) {
                         PLog.d(TAG, "Reusing embedded gainmap for export: $id")
@@ -608,6 +613,9 @@ object GalleryManager {
                     "processedBitmap = ${processedBitmap.colorSpace?.name}, ultraHdrSource=${ultraHdrSource?.sourceKind}, gainmap=${gainmapResult != null}"
                 )
 
+                val videoFile = File(getPhotoDir(context, id), VIDEO_FILE)
+                val isLivePhoto = videoFile.exists()
+
                 // 保存到指定目录
                 val date = metadata.dateTaken ?: System.currentTimeMillis()
 
@@ -618,8 +626,29 @@ object GalleryManager {
                     withSuffix += ".$lutName"
                 }
 
-                val filename =
-                    "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix.jpg"
+                val baseFilename =
+                    "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix"
+
+                if (shouldPreferHeic && !isLivePhoto) {
+                    val heicExported = exportEncodedPhotoToMediaStore(
+                        context = context,
+                        id = id,
+                        bitmap = processedBitmap,
+                        metadata = metadata,
+                        photoQuality = photoQuality,
+                        baseFilename = baseFilename,
+                        extension = HeicExportEncoder.EXTENSION,
+                        mimeType = HeicExportEncoder.MIME_TYPE,
+                        gainmapResult = gainmapResult
+                    )
+                    if (heicExported) {
+                        processedBitmap.recycle()
+                        return@withContext true
+                    }
+                    PLog.w(TAG, "HEIC export unavailable or failed, falling back to JPEG for photo $id")
+                }
+
+                val filename = "$baseFilename.jpg"
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
@@ -632,9 +661,6 @@ object GalleryManager {
                 )
 
                 uri?.let {
-                    val videoFile = File(getPhotoDir(context, id), VIDEO_FILE)
-                    val isLivePhoto = videoFile.exists()
-
                     val exportWriteElapsed = measureTimeMillis {
                         FileOutputStream(tempExportFile).use { outputStream ->
                             writeFinalJpeg(
@@ -830,6 +856,70 @@ object GalleryManager {
             }
             PLog.d(TAG, "Exported embedded-gainmap URI saved: $uri for photo $id")
             return true
+        } finally {
+            tempExportFile.delete()
+        }
+    }
+
+    private suspend fun exportEncodedPhotoToMediaStore(
+        context: Context,
+        id: String,
+        bitmap: Bitmap,
+        metadata: MediaMetadata,
+        photoQuality: Int,
+        baseFilename: String,
+        extension: String,
+        mimeType: String,
+        gainmapResult: GainmapResult? = null,
+    ): Boolean {
+        val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.$extension")
+        try {
+            val captureInfo = metadata.toCaptureInfo().copy(
+                imageWidth = bitmap.width,
+                imageHeight = bitmap.height
+            )
+            val exifData = if (mimeType == HeicExportEncoder.MIME_TYPE) {
+                ExifWriter.buildExifBlock(context.cacheDir, captureInfo) ?: return false
+            } else {
+                null
+            }
+            val encoded = when (mimeType) {
+                HeicExportEncoder.MIME_TYPE -> HeicExportEncoder.write(
+                    bitmap = bitmap,
+                    outputFile = tempExportFile,
+                    quality = photoQuality,
+                    gainmapResult = gainmapResult,
+                    exifData = exifData
+                )
+                else -> false
+            }
+            if (!encoded) return false
+
+            val filename = "$baseFilename.$extension"
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/PhotonCamera")
+            }
+            val uri = context.contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+            ) ?: return false
+
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                tempExportFile.inputStream().use { input -> input.copyTo(output) }
+            } ?: return false
+
+            updateMetadata(context, id) { current ->
+                current.copy(
+                    exportedUris = current.exportedUris + uri.toString()
+                )
+            }
+            PLog.d(TAG, "Exported $mimeType URI saved: $uri for photo $id")
+            return true
+        } catch (e: Exception) {
+            PLog.w(TAG, "Failed to export encoded photo as $mimeType", e)
+            return false
         } finally {
             tempExportFile.delete()
         }
