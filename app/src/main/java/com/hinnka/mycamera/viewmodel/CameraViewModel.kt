@@ -985,6 +985,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     // 保存当前的 SurfaceTexture 以便切换摄像头时重用
     private var currentSurfaceTexture: SurfaceTexture? = null
+    private var cameraOpenInFlight = false
 
     // 用于处理音量键连续按下的时间戳，防止抖动和过快响应
     private var lastVolumeKeyEventTime = 0L
@@ -1007,6 +1008,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         cameraController.initialize()
+        viewModelScope.launch {
+            cameraController.state.collect { cameraState ->
+                if (cameraState.isPreviewActive) {
+                    cameraOpenInFlight = false
+                }
+            }
+        }
         cameraController.onImageCaptured = { image, captureInfo, characteristics, captureResult ->
             if (state.value.burstCapturing) {
                 if (burstCaptureInfo == null) {
@@ -1054,6 +1062,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 相机恢复应该由 CameraScreen 的 ON_RESUME 生命周期事件处理
             // 这样可以避免在相机被其他应用占用时的无限重试循环
             PLog.d(TAG, "onCameraError: code=$code, message=$message, canRetry=$canRetry")
+            cameraOpenInFlight = false
+            resetExposureCompensationForCameraRestart()
             stackingImages.forEach {
                 it.close()
             }
@@ -1510,7 +1520,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
+        if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
+            PLog.d(
+                TAG,
+                "openCamera skipped: same SurfaceTexture active=${state.value.isPreviewActive}, inFlight=$cameraOpenInFlight"
+            )
+            return
+        }
         currentSurfaceTexture = surfaceTexture
+        cameraOpenInFlight = true
         cameraController.openCamera(surfaceTexture)
     }
 
@@ -1518,6 +1536,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 关闭相机
      */
     fun closeCamera() {
+        cameraOpenInFlight = false
         currentSurfaceTexture = null
         cameraController.closeCamera()
     }
@@ -1541,13 +1560,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 检查相机状态并在必要时恢复
      */
     fun checkAndRecoverCamera() {
+        if (!state.value.isPreviewActive) {
+            resetExposureCompensationForCameraRestart()
+        }
+
         // 如果有保存的 SurfaceTexture，重新打开相机
         currentSurfaceTexture?.let { texture ->
-            if (!state.value.isPreviewActive) {
+            if (!state.value.isPreviewActive && !cameraOpenInFlight) {
+                cameraOpenInFlight = true
                 cameraController.openCamera(texture)
+            } else {
+                PLog.d(
+                    TAG,
+                    "checkAndRecoverCamera skipped: active=${state.value.isPreviewActive}, inFlight=$cameraOpenInFlight"
+                )
             }
         }
         restorePreviewLutAfterResume()
+    }
+
+    private fun resetExposureCompensationForCameraRestart() {
+        if (state.value.exposureCompensation == 0) return
+        PLog.d(TAG, "Reset exposure compensation for camera restart")
+        cameraController.setExposureCompensation(0)
     }
 
     private fun restorePreviewLutAfterResume() {

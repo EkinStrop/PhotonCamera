@@ -67,10 +67,8 @@ fun ParameterRuler(
         getScaleValues(parameter, minValue, maxValue)
     }
 
-    LaunchedEffect(isAdjustable, currentValue) {
-        if (!isAdjustable) {
-            selectedValue = currentValueState
-        }
+    LaunchedEffect(parameter, currentValue) {
+        selectedValue = currentValueState
     }
 
     Box(
