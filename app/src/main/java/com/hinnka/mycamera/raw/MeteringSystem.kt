@@ -105,7 +105,7 @@ object MeteringSystem {
         lumas.sort()
         val p998 = lumas[(pixelCount * 0.998f).toInt().coerceIn(0, pixelCount - 1)]
 
-        val highlightAnchorGain = 2f.pow(ACR3_AVERAGE_TONE_CURVE_EV) / p998.coerceAtLeast(0.01f)
+        val highlightAnchorGain = 2f.pow(ACR3_AVERAGE_TONE_CURVE_EV + droMode.captureExposureReductionEv) / p998.coerceAtLeast(0.01f)
         val safeTotalWeight = totalWeight.coerceAtLeast(0.001)
         val linearAvgLuma = sanitizeAverageLuma((weightedLumaSum / safeTotalWeight).toFloat(), targetLuma)
         val logAvgLuma = sanitizeAverageLuma(exp2((weightedLogLumaSum / safeTotalWeight).toFloat()), targetLuma)
