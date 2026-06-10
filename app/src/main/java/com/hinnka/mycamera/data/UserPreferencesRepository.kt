@@ -122,6 +122,7 @@ data class UserPreferences(
     val categoryOrder: List<String> = emptyList(), // 分类排序
     val lutSelectorMode: LutSelectorMode = LutSelectorMode.Style,
     val defaultFocalLength: Float = 0f, // 默认焦段 (mm)，0表示不设置
+    val zoomDisplayMode: String = "FOCAL_LENGTH",
     val useMFNR: Boolean = false, // 是否使用多帧降噪
     val multiFrameCount: Int = MultiFrameConfig.DEFAULT_FRAME_COUNT, // 多帧降噪帧数
     val useMultipleExposure: Boolean = false, // 是否启用多重曝光
@@ -277,6 +278,7 @@ class UserPreferencesRepository(private val context: Context) {
 
         // 默认焦段 Key
         private val DEFAULT_FOCAL_LENGTH = floatPreferencesKey("default_focal_length")
+        private val ZOOM_DISPLAY_MODE = stringPreferencesKey("zoom_display_mode")
 
         // 多帧合成 Key
         private val USE_MULTI_FRAME = booleanPreferencesKey("use_multi_frame")
@@ -415,6 +417,7 @@ class UserPreferencesRepository(private val context: Context) {
                     LutSelectorMode.valueOf(preferences[LUT_SELECTOR_MODE] ?: LutSelectorMode.Style.name)
                 }.getOrDefault(LutSelectorMode.Style),
                 defaultFocalLength = preferences[DEFAULT_FOCAL_LENGTH] ?: 0f,
+                zoomDisplayMode = preferences[ZOOM_DISPLAY_MODE] ?: "FOCAL_LENGTH",
                 useMFNR = preferences[USE_MULTI_FRAME] ?: false,
                 multiFrameCount = preferences[MULTI_FRAME_COUNT]
                     ?.coerceIn(MultiFrameConfig.MIN_FRAME_COUNT, MultiFrameConfig.MAX_FRAME_COUNT)
@@ -1066,6 +1069,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveDefaultFocalLength(focalLength: Float) {
         context.dataStore.edit { preferences ->
             preferences[DEFAULT_FOCAL_LENGTH] = focalLength
+        }
+    }
+
+    suspend fun saveZoomDisplayMode(mode: String) {
+        context.dataStore.edit { preferences ->
+            preferences[ZOOM_DISPLAY_MODE] = mode
         }
     }
 

@@ -51,7 +51,17 @@ import kotlin.math.roundToInt
  */
 enum class ZoomDisplayMode {
     ZOOM_RATIO,      // 显示 0.6x, 1x, 2x 等
-    FOCAL_LENGTH     // 显示 35mm, 50mm, 85mm 等
+    FOCAL_LENGTH;    // 显示 35mm, 50mm, 85mm 等
+
+    fun next(): ZoomDisplayMode {
+        return if (this == ZOOM_RATIO) FOCAL_LENGTH else ZOOM_RATIO
+    }
+
+    companion object {
+        fun fromPersistedName(name: String?): ZoomDisplayMode {
+            return entries.firstOrNull { it.name == name } ?: FOCAL_LENGTH
+        }
+    }
 }
 
 @Composable
@@ -65,8 +75,7 @@ fun ZoomControlBar(
     onFilterClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // 显示模式状态
-    var displayMode by remember { mutableStateOf(ZoomDisplayMode.FOCAL_LENGTH) }
+    val displayMode by viewModel.zoomDisplayMode.collectAsState()
 
     val currentCameraIdState by rememberUpdatedState(currentCameraId)
 
@@ -222,11 +231,7 @@ fun ZoomControlBar(
             // Display Mode Toggle (Left)
             IconButton(
                 onClick = {
-                    displayMode = if (displayMode == ZoomDisplayMode.ZOOM_RATIO) {
-                        ZoomDisplayMode.FOCAL_LENGTH
-                    } else {
-                        ZoomDisplayMode.ZOOM_RATIO
-                    }
+                    viewModel.saveZoomDisplayMode(displayMode.next())
                 },
                 modifier = Modifier.size(32.dp)
             ) {

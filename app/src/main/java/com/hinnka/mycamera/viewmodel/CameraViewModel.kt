@@ -54,6 +54,7 @@ import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.raw.SpectralFilmTuning
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
 import com.hinnka.mycamera.ui.camera.CameraGLSurfaceView
+import com.hinnka.mycamera.ui.camera.ZoomDisplayMode
 import com.hinnka.mycamera.utils.*
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAudioInputManager
@@ -784,6 +785,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val useHeicExport: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.useHeicExport }
 
     val defaultFocalLength: Flow<Float> = userPreferencesRepository.userPreferences.map { it.defaultFocalLength }
+    val zoomDisplayMode: StateFlow<ZoomDisplayMode> = userPreferencesRepository.userPreferences
+        .map { ZoomDisplayMode.fromPersistedName(it.zoomDisplayMode) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ZoomDisplayMode.FOCAL_LENGTH)
     val customFocalLengths: Flow<List<Float>> = userPreferencesRepository.userPreferences.map { it.customFocalLengths }
     val hiddenFocalLengths: Flow<List<Float>> = userPreferencesRepository.userPreferences.map { it.hiddenFocalLengths }
     val customLensIds: Flow<List<String>> = userPreferencesRepository.userPreferences.map { it.customLensIds }
@@ -3501,6 +3505,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setDefaultFocalLength(focalLength: Float) {
         viewModelScope.launch {
             userPreferencesRepository.saveDefaultFocalLength(focalLength)
+        }
+    }
+
+    fun saveZoomDisplayMode(mode: ZoomDisplayMode) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveZoomDisplayMode(mode.name)
         }
     }
 

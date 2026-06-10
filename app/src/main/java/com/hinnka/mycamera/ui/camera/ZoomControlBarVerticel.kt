@@ -55,8 +55,7 @@ fun ZoomControlBarVerticel(
     onFilterClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // 显示模式状态
-    var displayMode by remember { mutableStateOf(ZoomDisplayMode.FOCAL_LENGTH) }
+    val displayMode by viewModel.zoomDisplayMode.collectAsState()
 
     val currentCameraIdState by rememberUpdatedState(currentCameraId)
 
@@ -208,11 +207,7 @@ fun ZoomControlBarVerticel(
             // Display Mode Toggle (Top)
             IconButton(
                 onClick = {
-                    displayMode = if (displayMode == ZoomDisplayMode.ZOOM_RATIO) {
-                        ZoomDisplayMode.FOCAL_LENGTH
-                    } else {
-                        ZoomDisplayMode.ZOOM_RATIO
-                    }
+                    viewModel.saveZoomDisplayMode(displayMode.next())
                 },
                 modifier = Modifier.size(32.dp)
             ) {
