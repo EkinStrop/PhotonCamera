@@ -376,6 +376,9 @@
     <string name="settings_background_description">更改應用背景圖</string>
     <string name="settings_custom_background">自訂...</string>
     <string name="settings_default_focal_length_description">設定啟動 App 時自動切換到的焦段</string>
+    <string name="settings_main_camera_id">主攝 ID</string>
+    <string name="settings_main_camera_id_description">選擇將哪個 1x 後置相機 ID 作為主攝。</string>
+    <string name="settings_main_camera_id_option">相機 ID %1$s</string>
     <string name="settings_custom_lens_ids">自訂鏡頭 ID</string>
     <string name="settings_custom_lens_ids_description">手動新增相機 ID，多個 ID 用逗號分隔。偵測可用後會加入鏡頭列表並顯示特殊標識。</string>
     <string name="settings_lens_id_blacklist">鏡頭 ID 黑名單</string>

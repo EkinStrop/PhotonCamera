@@ -174,6 +174,7 @@ data class UserPreferences(
     val customFocalLengths: List<Float> = emptyList(), // 自定义焦段 (35mm等效)，最多8个
     val customLensIds: List<String> = emptyList(), // 自定义镜头 ID，逗号分隔存储
     val lensIdBlacklist: List<String> = emptyList(), // 主动探测黑名单镜头 ID，逗号分隔存储
+    val preferredMainCameraId: String? = null, // 用户选择的主摄 ID
     val hiddenFocalLengths: List<Float> = emptyList(), // 隐藏的焦段 (35mm等效)
     val referencePhotoUrl: String? = null,
     val deleteExported: Boolean = true,
@@ -333,6 +334,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val CUSTOM_FOCAL_LENGTHS = stringPreferencesKey("custom_focal_lengths")
         private val CUSTOM_LENS_IDS = stringPreferencesKey("custom_lens_ids")
         private val LENS_ID_BLACKLIST = stringPreferencesKey("lens_id_blacklist")
+        private val PREFERRED_MAIN_CAMERA_ID = stringPreferencesKey("preferred_main_camera_id")
         private val HIDDEN_FOCAL_LENGTHS = stringPreferencesKey("hidden_focal_lengths")
         private val USE_HDR_SCREEN_MODE = booleanPreferencesKey("use_hdr_screen_mode")
         private val REFERENCE_PHOTO_URL = stringPreferencesKey("reference_photo_url")
@@ -492,6 +494,7 @@ class UserPreferencesRepository(private val context: Context) {
                     ?: listOf(35f, 50f, 85f, 200f),
                 customLensIds = parseLensIds(preferences[CUSTOM_LENS_IDS]),
                 lensIdBlacklist = parseLensIds(preferences[LENS_ID_BLACKLIST]),
+                preferredMainCameraId = preferences[PREFERRED_MAIN_CAMERA_ID]?.takeIf { it.isNotBlank() },
                 hiddenFocalLengths = preferences[HIDDEN_FOCAL_LENGTHS]
                     ?.split(",")?.filter { it.isNotEmpty() }
                     ?.mapNotNull { it.toFloatOrNull() }
@@ -1107,6 +1110,17 @@ class UserPreferencesRepository(private val context: Context) {
                 .filter { it.isNotEmpty() }
                 .distinct()
                 .joinToString(",")
+        }
+    }
+
+    suspend fun savePreferredMainCameraId(cameraId: String?) {
+        context.dataStore.edit { preferences ->
+            val normalizedCameraId = cameraId?.trim()?.takeIf { it.isNotEmpty() }
+            if (normalizedCameraId == null) {
+                preferences.remove(PREFERRED_MAIN_CAMERA_ID)
+            } else {
+                preferences[PREFERRED_MAIN_CAMERA_ID] = normalizedCameraId
+            }
         }
     }
 

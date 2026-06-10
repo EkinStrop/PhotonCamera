@@ -107,6 +107,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.hinnka.mycamera.BuildConfig
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.data.AiFocusTargetMode
 import com.hinnka.mycamera.data.VolumeKeyAction
@@ -223,6 +224,7 @@ fun SettingsScreen(
     val defaultFocalLength by viewModel.defaultFocalLength.collectAsState(initial = 0f)
     val customLensIds by viewModel.customLensIds.collectAsState(initial = emptyList())
     val lensIdBlacklist by viewModel.lensIdBlacklist.collectAsState(initial = emptyList())
+    val preferredMainCameraId by viewModel.preferredMainCameraId.collectAsState(initial = null)
     val multiFrameCount by viewModel.multiFrameCount.collectAsState()
     val useMultipleExposure by viewModel.useMultipleExposure.collectAsState()
     val multipleExposureCount by viewModel.multipleExposureCount.collectAsState()
@@ -278,6 +280,7 @@ fun SettingsScreen(
 
     var selectedTab by remember { mutableStateOf(SettingsTab.CAMERA) }
     var isRawSliderAdjusting by remember { mutableStateOf(false) }
+    var mainCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
     var rawNlmNoiseFactorUi by remember { mutableStateOf(rawNlmNoiseFactor) }
     var rawExposureCompensationUi by remember { mutableStateOf(rawExposureCompensation) }
     var rawBlackPointCorrectionUi by remember { mutableStateOf(rawBlackPointCorrection) }
@@ -292,6 +295,14 @@ fun SettingsScreen(
             rawExposureCompensationUi = rawExposureCompensation
             rawBlackPointCorrectionUi = rawBlackPointCorrection
             rawWhitePointCorrectionUi = rawWhitePointCorrection
+        }
+    }
+
+    LaunchedEffect(customLensIds, lensIdBlacklist) {
+        mainCameraIdOptions = runCatching {
+            viewModel.discoverMainCameraIdOptions()
+        }.getOrElse {
+            emptyList()
         }
     }
 
@@ -767,6 +778,42 @@ fun SettingsScreen(
                             currentFocalLength = defaultFocalLength,
                             onFocalLengthSelected = { viewModel.setDefaultFocalLength(it) }
                         )
+
+                        if (mainCameraIdOptions.size > 1) {
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.1f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+
+                            val currentMainCameraId = state.availableCameras.firstOrNull {
+                                it.lensType == LensType.BACK_MAIN && abs(it.intrinsicZoomRatio - 1f) <= 0.01f
+                            }?.cameraId
+                            val selectedMainCameraId = preferredMainCameraId
+                                ?.takeIf { mainCameraIdOptions.contains(it) }
+                                ?: currentMainCameraId?.takeIf { mainCameraIdOptions.contains(it) }
+                                ?: mainCameraIdOptions.first()
+                            val mainCameraIdLabels = mainCameraIdOptions.map { cameraId ->
+                                cameraId to stringResource(R.string.settings_main_camera_id_option, cameraId)
+                            }
+                            val selectedMainCameraLabel = mainCameraIdLabels
+                                .firstOrNull { it.first == selectedMainCameraId }
+                                ?.second
+                                ?: selectedMainCameraId
+
+                            DropdownSettingItem(
+                                title = stringResource(R.string.settings_main_camera_id),
+                                description = stringResource(R.string.settings_main_camera_id_description),
+                                value = selectedMainCameraLabel,
+                                options = mainCameraIdLabels.map { it.second },
+                                isLoading = false,
+                                onExpanded = {},
+                                onOptionSelected = { label ->
+                                    mainCameraIdLabels.firstOrNull { it.second == label }?.first?.let {
+                                        viewModel.setPreferredMainCameraId(it)
+                                    }
+                                }
+                            )
+                        }
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),

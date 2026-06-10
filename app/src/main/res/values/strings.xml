@@ -613,6 +613,9 @@
     <string name="update_install_permission_hint">Allow this app to install unknown apps, then tap Install again.</string>
     <string name="settings_default_focal_length">Default Focal Length</string>
     <string name="settings_default_focal_length_description">Set the focal length to automatically switch to when the app starts.</string>
+    <string name="settings_main_camera_id">Main Camera ID</string>
+    <string name="settings_main_camera_id_description">Choose which 1x rear camera ID is used as the main camera.</string>
+    <string name="settings_main_camera_id_option">Camera ID %1$s</string>
     <string name="settings_custom_lens_ids">Custom Lens IDs</string>
     <string name="settings_custom_lens_ids_description">Add camera IDs manually, separated by commas. Available IDs will appear in the lens list with a special marker.</string>
     <string name="settings_lens_id_blacklist">Lens ID Blacklist</string>

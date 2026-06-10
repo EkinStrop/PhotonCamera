@@ -792,6 +792,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val hiddenFocalLengths: Flow<List<Float>> = userPreferencesRepository.userPreferences.map { it.hiddenFocalLengths }
     val customLensIds: Flow<List<String>> = userPreferencesRepository.userPreferences.map { it.customLensIds }
     val lensIdBlacklist: Flow<List<String>> = userPreferencesRepository.userPreferences.map { it.lensIdBlacklist }
+    val preferredMainCameraId: Flow<String?> = userPreferencesRepository.userPreferences.map { it.preferredMainCameraId }
     val userPreferences: StateFlow<UserPreferences> = userPreferencesRepository.userPreferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, UserPreferences())
     val jpgBaselineLutId: StateFlow<String?> = userPreferencesRepository.userPreferences
@@ -3533,6 +3534,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 .filter { it.isNotEmpty() }
                 .distinct()
             userPreferencesRepository.saveLensIdBlacklist(lensIds)
+            cameraController.refreshCameraList()
+        }
+    }
+
+    suspend fun discoverMainCameraIdOptions(): List<String> = withContext(Dispatchers.IO) {
+        CameraDiscovery(getApplication()).discoverMainCameraIdOptions()
+    }
+
+    fun setPreferredMainCameraId(cameraId: String?) {
+        viewModelScope.launch {
+            userPreferencesRepository.savePreferredMainCameraId(cameraId)
             cameraController.refreshCameraList()
         }
     }
