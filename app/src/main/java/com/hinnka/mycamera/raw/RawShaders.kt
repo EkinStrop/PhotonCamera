@@ -75,7 +75,7 @@ object RawShaders {
      * Process chain:
      * 1. Linear RGB input in working space
      * 2. DCP hue/sat map and look table
-     * 3. Local SDR tone mapping on working-linear data
+     * 3. Unified SDR highlight tone mapping on working-linear data
      * 4. DCP tone curve or ACR3 curve (mutually exclusive)
      * 5. Working space -> Linear sRGB
      * 6. Linear sRGB -> sRGB
@@ -340,7 +340,7 @@ object RawShaders {
             return dcpHsvToRgb(hsv);
         }
 
-        float highlightRolloffLuma(float luma) {
+        float highlightShoulderLuma(float luma) {
             if (uHighlightWhitePoint <= 1.0) return luma;
 
             float start = 0.4;
@@ -354,15 +354,6 @@ object RawShaders {
 
             return mix(luma, start + y * (uHighlightWhitePoint - start),
                        smoothstep(start, uHighlightWhitePoint, luma));
-        }
-        
-        vec3 highlightRolloff(vec3 color) {
-            if (uHighlightWhitePoint <= 1.0) return color;
-        
-            float luma = luminance(color);
-            float newLuma = highlightRolloffLuma(luma);
-        
-            return color * (newLuma / max(luma, 1e-6));
         }
 
         vec3 linearToProPhoto(vec3 color) {
@@ -392,27 +383,28 @@ object RawShaders {
             return proPhotoToLinear(lutResult);
         }
 
-        vec3 combinedLocalToneMapping(vec3 sceneLinear, float originalLuma) {
-            float toneInputLuma = luminance(sceneLinear);
-            float highlightAnchor = max(originalLuma, toneInputLuma);
+        vec3 highlightToneMapping(vec3 sceneLinear) {
+            float sourceLuma = luminance(sceneLinear);
+            float shoulderLuma = min(highlightShoulderLuma(sourceLuma), 1.0);
             float guidedHighlightMask = uHighlightBaseEnabled
                 ? clamp(texture(uHighlightBaseTexture, vTexCoord).r, 0.0, 1.0)
-                : smoothstep(0.4, 0.75, highlightAnchor);
-            float tonalHighlightMask = smoothstep(0.4, 0.75, highlightAnchor);
+                : smoothstep(0.4, 0.75, sourceLuma);
+            float tonalHighlightMask = smoothstep(0.4, 0.75, sourceLuma);
             float gainMask = smoothstep(1.05, 1.35, uHighlightExposureGain);
             float highlightMask = max(guidedHighlightMask, tonalHighlightMask * 0.35) * gainMask;
 
             float exposureGain = max(uHighlightExposureGain, 1.0);
             float exposureCancel = 1.0 / exposureGain;
             float pivot = 0.35;
-            float compressedLuma = highlightAnchor <= pivot
-                ? toneInputLuma
-                : pivot + (toneInputLuma - pivot) * exposureCancel;
+            float exposureCompressedLuma = sourceLuma <= pivot
+                ? sourceLuma
+                : pivot + (sourceLuma - pivot) * exposureCancel;
+            exposureCompressedLuma = min(exposureCompressedLuma, 1.0);
 
-            float mappedLuma = mix(toneInputLuma, compressedLuma, highlightMask);
-            mappedLuma = min(mappedLuma, 1.0);
+            float localProtectedLuma = min(shoulderLuma, exposureCompressedLuma);
+            float mappedLuma = mix(shoulderLuma, localProtectedLuma, highlightMask);
 
-            return clamp(sceneLinear * (mappedLuma / max(toneInputLuma, 1e-5)), 0.0, 1.0);
+            return clamp(sceneLinear * (mappedLuma / max(sourceLuma, 1e-5)), 0.0, 1.0);
         }
 
         void main() {
@@ -429,9 +421,7 @@ object RawShaders {
                 color *= 2.0;
                 color = applySpectralFilm(color);
             } else {
-                float originalLuma = luminance(color);
-                color = highlightRolloff(color);
-                color = combinedLocalToneMapping(color, originalLuma);
+                color = highlightToneMapping(color);
                 color = applyAdobeCurve(color);
             }
 
