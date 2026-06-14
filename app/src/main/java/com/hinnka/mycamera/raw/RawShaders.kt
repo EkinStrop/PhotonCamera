@@ -71,18 +71,40 @@ object RawShaders {
         }
     """.trimIndent()
 
-    /**
-     * Combined Processing Shader
-     *
-     * Process chain:
-     * 1. Linear RGB input in working space
-     * 2. DCP hue/sat map and look table
-     * 3. Shared local shadows/highlights in working RGB, before curve clipping
-     * 4. Highlight rolloff + DCP tone curve or ACR3 curve
-     * 5. Working space -> Linear sRGB
-     * 6. Linear sRGB -> sRGB
-     */
-    val COMBINED_FRAGMENT_SHADER = """
+    fun combinedFragmentShaderFor(colorEngine: RawColorEngine): String {
+        return when (colorEngine) {
+            RawColorEngine.AgX -> combinedFragmentShader(
+                engineUniforms = AGX_COMBINED_UNIFORMS,
+                engineFunctions = "$CUBE_LUT_FUNCTIONS\n$AGX_COMBINED_FUNCTIONS"
+            )
+
+            RawColorEngine.AdobeCurve -> combinedFragmentShader(
+                engineUniforms = ADOBE_COMBINED_UNIFORMS,
+                engineFunctions =
+                    "$CURVE_COMBINED_FUNCTIONS\n$DCP_COMBINED_FUNCTIONS\n$ADOBE_COMBINED_FUNCTIONS"
+            )
+
+            RawColorEngine.SpectralFilm -> combinedFragmentShader(
+                engineUniforms = SPECTRAL_FILM_COMBINED_UNIFORMS,
+                engineFunctions = SPECTRAL_FILM_COMBINED_FUNCTIONS
+            )
+
+            RawColorEngine.DarktableSigmoid -> combinedFragmentShader(
+                engineUniforms = OUTPUT_TRANSFORM_COMBINED_UNIFORMS,
+                engineFunctions = DARKTABLE_SIGMOID_COMBINED_FUNCTIONS
+            )
+
+            RawColorEngine.DarktableFilmic -> combinedFragmentShader(
+                engineUniforms = OUTPUT_TRANSFORM_COMBINED_UNIFORMS,
+                engineFunctions = DARKTABLE_FILMIC_COMBINED_FUNCTIONS
+            )
+        }
+    }
+
+    private fun combinedFragmentShader(
+        engineUniforms: String,
+        engineFunctions: String
+    ): String = """
         #version 300 es
         precision highp float;
         precision highp sampler3D;
@@ -91,63 +113,89 @@ object RawShaders {
         out vec4 fragColor;
         
         uniform sampler2D uInputTexture;
-        uniform sampler2D uCurveTexture;
-        uniform sampler3D uDcpHueSatTexture;
-        uniform sampler3D uDcpLookTableTexture;
-        uniform sampler3D uSpectralFilmTexture;
-        uniform sampler3D uAgxBaseSrgbTexture;
-        uniform mat3 uOutputTransform;
-        uniform float uCurveSize;
-        uniform bool uCurveEnabled;
         uniform vec2 uTexelSize;
         uniform float uHighlights;
         uniform float uShadows;
+        
+        $engineUniforms
+
+        vec3 linearToSrgb(vec3 color) {
+            vec3 clampedColor = max(color, vec3(0.0));
+            vec3 low = clampedColor * 12.92;
+            vec3 high = 1.055 * pow(clampedColor, vec3(1.0 / 2.4)) - 0.055;
+            bvec3 useHigh = greaterThan(clampedColor, vec3(0.0031308));
+            return vec3(
+                useHigh.r ? high.r : low.r,
+                useHigh.g ? high.g : low.g,
+                useHigh.b ? high.b : low.b
+            );
+        }
+
+        $engineFunctions
+
+        vec3 sampleToneSource(vec2 uv) {
+            vec3 sampleColor = texture(uInputTexture, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+            return applyEngineTone(sampleColor);
+        }
+
+        vec3 shRgbToXyz(vec3 rgb) {
+            return mat3(
+                0.7976749, 0.2880402, 0.0000000,
+                0.1351917, 0.7118741, 0.0000000,
+                0.0313534, 0.0000857, 0.8252100
+            ) * rgb;
+        }
+
+        vec3 shXyzToRgb(vec3 xyz) {
+            return mat3(
+                1.3459433, -0.5445989, 0.0000000,
+               -0.2556075,  1.5081673, 0.0000000,
+               -0.0511118,  0.0205351, 1.2118128
+            ) * xyz;
+        }
+
+        ${ShadowsHighlightsShader.GLSL}
+
+        void main() {
+            vec3 color = texture(uInputTexture, vTexCoord).rgb;
+            color = applyEngineTone(color);
+            color = applyShadowsHighlights(color, vTexCoord);
+            color = linearToSrgb(color);
+            fragColor = vec4(color, 1.0);
+        }
+    """.trimIndent()
+
+    private val OUTPUT_TRANSFORM_COMBINED_UNIFORMS = """
+        uniform mat3 uOutputTransform;
+    """.trimIndent()
+
+    private val ADOBE_COMBINED_UNIFORMS = """
+        uniform sampler2D uCurveTexture;
+        uniform sampler3D uDcpHueSatTexture;
+        uniform sampler3D uDcpLookTableTexture;
+        uniform mat3 uOutputTransform;
+        uniform float uCurveSize;
+        uniform bool uCurveEnabled;
         uniform bool uDcpHueSatEnabled;
         uniform bool uDcpLookTableEnabled;
         uniform ivec3 uDcpHueSatDivisions;
         uniform ivec3 uDcpLookTableDivisions;
         uniform int uDcpHueSatEncoding;
         uniform int uDcpLookTableEncoding;
-        uniform int uSpectralFilmSize;
+    """.trimIndent()
+
+    private val AGX_COMBINED_UNIFORMS = """
+        uniform sampler3D uAgxBaseSrgbTexture;
         uniform int uAgxLutSize;
-        uniform int uRawColorEngine;
+    """.trimIndent()
 
-        const int RAW_COLOR_ENGINE_ADOBE_CURVE = 0;
-        const int RAW_COLOR_ENGINE_AGX = 1;
-        const int RAW_COLOR_ENGINE_SPECTRAL_FILM = 2;
-        const int RAW_COLOR_ENGINE_DARKTABLE_SIGMOID = 3;
-        const int RAW_COLOR_ENGINE_DARKTABLE_FILMIC = 4;
-        const float AGX_LOG_MIN = -12.47393;
-        const float AGX_LOG_MAX = 12.5260688117;
-        const float DT_SIGMOID_WHITE_TARGET = 1.0;
-        const float DT_SIGMOID_PAPER_EXPOSURE = 0.354355423;
-        const float DT_SIGMOID_FILM_FOG = 0.00142637086;
-        const float DT_SIGMOID_FILM_POWER = 1.5;
-        const float DT_SIGMOID_PAPER_POWER = 1.0;
-        const float DT_SIGMOID_HUE_PRESERVATION = 1.0;
-        const float DT_FILMIC_NORM_MIN = 0.0000152587890625;
-        const float DT_FILMIC_INPUT_MIN = 0.0009185798271;
-        const float DT_FILMIC_INPUT_MAX = 4.352042729;
-        const float DT_FILMIC_GREY_SOURCE = 0.1845;
-        const float DT_FILMIC_BLACK_SOURCE = -7.65;
-        const float DT_FILMIC_DYNAMIC_RANGE = 12.21;
-        const float DT_FILMIC_OUTPUT_POWER = 3.614815775;
-        const float DT_FILMIC_DISPLAY_BLACK = 0.0001517634;
-        const float DT_FILMIC_DISPLAY_WHITE = 1.0;
-        const float DT_FILMIC_LATITUDE_MIN = 0.6264986897;
-        const float DT_FILMIC_LATITUDE_MAX = 0.6265610375;
-        const float DISPLAY_HEADROOM_ROLLOFF_DEPTH = 0.005;
-        const float DISPLAY_HEADROOM_ROLLOFF_RANGE = 0.5;
-        const vec3 DT_FILMIC_M1 = vec3(0.08781340895, -0.1315144048, -0.271791843);
-        const vec3 DT_FILMIC_M2 = vec3(0.0, 1.387062713, 1.433801098);
-        const vec3 DT_FILMIC_M3 = vec3(1.36863996, -1.920153105, 0.0);
-        const vec3 DT_FILMIC_M4 = vec3(0.7402100865, 4.205175692, 0.0);
-        const vec3 DT_FILMIC_M5 = vec3(-1.171914069, -2.540570894, 0.0);
-        
-        float luminance(vec3 color) {
-            return max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-        }
+    private val SPECTRAL_FILM_COMBINED_UNIFORMS = """
+        uniform sampler3D uSpectralFilmTexture;
+        uniform mat3 uOutputTransform;
+        uniform int uSpectralFilmSize;
+    """.trimIndent()
 
+    private val CURVE_COMBINED_FUNCTIONS = """
         float sampleCurve(float value) {
             if (!uCurveEnabled || uCurveSize <= 1.0) {
                 return value;
@@ -155,12 +203,6 @@ object RawShaders {
             float clampedValue = clamp(value, 0.0, 1.0);
             float coordX = clampedValue * ((uCurveSize - 1.0) / uCurveSize) + (0.5 / uCurveSize);
             return texture(uCurveTexture, vec2(coordX, 0.5)).r;
-        }
-
-        vec3 applyCurve(vec3 color) {
-            float luma = luminance(color);
-            float scale = sampleCurve(luma) / max(luma, 0.00001);
-            return clamp(color * scale, 0.0, 1.0);
         }
 
         void adobeRgbTone(inout float maxValue, inout float midValue, inout float minValue) {
@@ -206,19 +248,9 @@ object RawShaders {
 
             return clamp(vec3(r, g, b), 0.0, 1.0);
         }
+    """.trimIndent()
 
-        vec3 linearToSrgb(vec3 color) {
-            vec3 clampedColor = max(color, vec3(0.0));
-            vec3 low = clampedColor * 12.92;
-            vec3 high = 1.055 * pow(clampedColor, vec3(1.0 / 2.4)) - 0.055;
-            bvec3 useHigh = greaterThan(clampedColor, vec3(0.0031308));
-            return vec3(
-                useHigh.r ? high.r : low.r,
-                useHigh.g ? high.g : low.g,
-                useHigh.b ? high.b : low.b
-            );
-        }
-
+    private val DCP_COMBINED_FUNCTIONS = """
         float encodeValue(float value, int encoding) {
             value = clamp(value, 0.0, 1.0);
             if (encoding == 1) {
@@ -376,33 +408,46 @@ object RawShaders {
             return dcpHsvToRgb(hsv);
         }
 
-        vec3 linearToProPhoto(vec3 color) {
-            vec3 clamped = max(color, vec3(0.0));
-            vec3 isHigh = step(vec3(0.001953125), clamped);
-            vec3 lowPart = 16.0 * clamped;
-            vec3 highPart = pow(clamped, vec3(1.0 / 1.8));
-            return mix(lowPart, highPart, isHigh);
-        }
-
-        vec3 proPhotoToLinear(vec3 color) {
-            vec3 clamped = clamp(color, 0.0, 1.0);
-            vec3 isHigh = step(vec3(0.03125), clamped);
-            vec3 lowPart = clamped / 16.0;
-            vec3 highPart = pow(clamped, vec3(1.8));
-            return mix(lowPart, highPart, isHigh);
-        }
-
-        vec3 applySpectralFilm(vec3 color) {
-            if (uSpectralFilmSize <= 1) {
-                return color;
+        vec3 applyDcpMaps(vec3 color) {
+            if (uDcpHueSatEnabled) {
+                color = applyDcpHsvMap(color, uDcpHueSatTexture, uDcpHueSatDivisions, uDcpHueSatEncoding);
             }
-            vec3 normalizedColor = color / 2.88;
-            vec3 encodedColor = linearToProPhoto(normalizedColor);
-            vec3 lutCoord = clamp(encodedColor, 0.0, 1.0);
-            vec3 lutResult = texture(uSpectralFilmTexture, lutCoord).rgb;
-            return proPhotoToLinear(lutResult);
+            if (uDcpLookTableEnabled) {
+                color = applyDcpHsvMap(color, uDcpLookTableTexture, uDcpLookTableDivisions, uDcpLookTableEncoding);
+            }
+            return color;
+        }
+    """.trimIndent()
+
+    private val ADOBE_COMBINED_FUNCTIONS = """
+        float proPhotoLuminance(vec3 color) {
+            return max(dot(color, vec3(0.2880402, 0.7118741, 0.0000857)), 1e-5);
         }
 
+        float highlightRolloffLuma(float luma) {
+            const float rolloffStart = 0.2;
+            const float rolloffRange = 1.0 - rolloffStart;
+            if (luma <= rolloffStart) return luma;
+
+            float x = (luma - rolloffStart) / rolloffRange;
+            return 1.0 - rolloffRange / (1.0 + x);
+        }
+
+        vec3 highlightRolloff(vec3 color) {
+            float luma = proPhotoLuminance(color);
+            float newLuma = highlightRolloffLuma(luma);
+            return color * (newLuma / max(luma, 1e-6));
+        }
+
+        vec3 applyEngineTone(vec3 color) {
+            color = applyDcpMaps(color);
+            color = highlightRolloff(color);
+            color = applyAdobeCurve(color);
+            return uOutputTransform * color;
+        }
+    """.trimIndent()
+
+    private val CUBE_LUT_FUNCTIONS = """
         vec3 fetchCubeLut(sampler3D lutTexture, int lutSize, ivec3 coord) {
             ivec3 maxCoord = ivec3(max(lutSize - 1, 0));
             return texelFetch(lutTexture, clamp(coord, ivec3(0), maxCoord), 0).rgb;
@@ -446,10 +491,11 @@ object RawShaders {
                 }
             }
         }
+    """.trimIndent()
 
-        vec3 sampleAgxBaseSrgb(vec3 coord) {
-            return sampleCubeLut(uAgxBaseSrgbTexture, uAgxLutSize, coord);
-        }
+    private val AGX_COMBINED_FUNCTIONS = """
+        const float AGX_LOG_MIN = -12.47393;
+        const float AGX_LOG_MAX = 12.5260688117;
 
         vec3 agxLogEncode(vec3 color) {
             vec3 safeColor = max(color, vec3(exp2(AGX_LOG_MIN)));
@@ -460,15 +506,57 @@ object RawShaders {
             );
         }
 
-        vec3 applyAgX(vec3 color) {
+        vec3 applyEngineTone(vec3 color) {
             if (uAgxLutSize <= 1) {
-                return uOutputTransform * applyAdobeCurve(color);
+                return max(color, vec3(0.0));
             }
             vec3 egamut = max(color, vec3(0.0));
             vec3 agxLog = agxLogEncode(egamut);
-            vec3 rec1886Encoded = sampleAgxBaseSrgb(agxLog);
+            vec3 rec1886Encoded = sampleCubeLut(uAgxBaseSrgbTexture, uAgxLutSize, agxLog);
             return pow(max(rec1886Encoded, vec3(0.0)), vec3(2.4));
         }
+    """.trimIndent()
+
+    private val SPECTRAL_FILM_COMBINED_FUNCTIONS = """
+        vec3 linearToProPhoto(vec3 color) {
+            vec3 clamped = max(color, vec3(0.0));
+            vec3 isHigh = step(vec3(0.001953125), clamped);
+            vec3 lowPart = 16.0 * clamped;
+            vec3 highPart = pow(clamped, vec3(1.0 / 1.8));
+            return mix(lowPart, highPart, isHigh);
+        }
+
+        vec3 proPhotoToLinear(vec3 color) {
+            vec3 clamped = clamp(color, 0.0, 1.0);
+            vec3 isHigh = step(vec3(0.03125), clamped);
+            vec3 lowPart = clamped / 16.0;
+            vec3 highPart = pow(clamped, vec3(1.8));
+            return mix(lowPart, highPart, isHigh);
+        }
+
+        vec3 applySpectralFilm(vec3 color) {
+            if (uSpectralFilmSize <= 1) {
+                return color;
+            }
+            vec3 normalizedColor = color / 2.88;
+            vec3 encodedColor = linearToProPhoto(normalizedColor);
+            vec3 lutCoord = clamp(encodedColor, 0.0, 1.0);
+            vec3 lutResult = texture(uSpectralFilmTexture, lutCoord).rgb;
+            return proPhotoToLinear(lutResult);
+        }
+
+        vec3 applyEngineTone(vec3 color) {
+            return uOutputTransform * applySpectralFilm(color);
+        }
+    """.trimIndent()
+
+    private val DARKTABLE_SIGMOID_COMBINED_FUNCTIONS = """
+        const float DT_SIGMOID_WHITE_TARGET = 1.0;
+        const float DT_SIGMOID_PAPER_EXPOSURE = 0.354355423;
+        const float DT_SIGMOID_FILM_FOG = 0.00142637086;
+        const float DT_SIGMOID_FILM_POWER = 1.5;
+        const float DT_SIGMOID_PAPER_POWER = 1.0;
+        const float DT_SIGMOID_HUE_PRESERVATION = 1.0;
 
         vec3 desaturateNegativeValues(vec3 color) {
             float pixelAverage = max((color.r + color.g + color.b) / 3.0, 0.0);
@@ -585,6 +673,31 @@ object RawShaders {
             return preserveSigmoidHueAndEnergy(positiveColor, perChannel);
         }
 
+        vec3 applyEngineTone(vec3 color) {
+            return uOutputTransform * applyDarktableSigmoid(color);
+        }
+    """.trimIndent()
+
+    private val DARKTABLE_FILMIC_COMBINED_FUNCTIONS = """
+        const float DT_FILMIC_NORM_MIN = 0.0000152587890625;
+        const float DT_FILMIC_INPUT_MIN = 0.0009185798271;
+        const float DT_FILMIC_INPUT_MAX = 4.352042729;
+        const float DT_FILMIC_GREY_SOURCE = 0.1845;
+        const float DT_FILMIC_BLACK_SOURCE = -7.65;
+        const float DT_FILMIC_DYNAMIC_RANGE = 12.21;
+        const float DT_FILMIC_OUTPUT_POWER = 3.614815775;
+        const float DT_FILMIC_DISPLAY_BLACK = 0.0001517634;
+        const float DT_FILMIC_DISPLAY_WHITE = 1.0;
+        const float DT_FILMIC_LATITUDE_MIN = 0.6264986897;
+        const float DT_FILMIC_LATITUDE_MAX = 0.6265610375;
+        const float DISPLAY_HEADROOM_ROLLOFF_DEPTH = 0.005;
+        const float DISPLAY_HEADROOM_ROLLOFF_RANGE = 0.5;
+        const vec3 DT_FILMIC_M1 = vec3(0.08781340895, -0.1315144048, -0.271791843);
+        const vec3 DT_FILMIC_M2 = vec3(0.0, 1.387062713, 1.433801098);
+        const vec3 DT_FILMIC_M3 = vec3(1.36863996, -1.920153105, 0.0);
+        const vec3 DT_FILMIC_M4 = vec3(0.7402100865, 4.205175692, 0.0);
+        const vec3 DT_FILMIC_M5 = vec3(-1.171914069, -2.540570894, 0.0);
+
         float darktableFilmicLogEncode(float value) {
             float safeValue = max(value, DT_FILMIC_NORM_MIN);
             return clamp(
@@ -650,6 +763,12 @@ object RawShaders {
             return ratios * darktableFilmicNormScalar(toneNorm);
         }
 
+        vec3 applyDarktableFilmic(vec3 color) {
+            vec3 naiveRgb = darktableFilmicRgbTone(color);
+            vec3 maxRgb = darktableFilmicMaxRgbTone(color);
+            return 0.5 * naiveRgb + 0.5 * maxRgb;
+        }
+
         float displayHeadroomRolloffScalar(float value) {
             if (value <= 1.0) {
                 return value;
@@ -669,102 +788,8 @@ object RawShaders {
             return color * (rolledPeak / max(peak, 1e-6));
         }
 
-        vec3 applyDarktableFilmic(vec3 color) {
-            vec3 naiveRgb = darktableFilmicRgbTone(color);
-            vec3 maxRgb = darktableFilmicMaxRgbTone(color);
-            return 0.5 * naiveRgb + 0.5 * maxRgb;
-        }
-
-        float proPhotoLuminance(vec3 color) {
-            return max(dot(color, vec3(0.2880402, 0.7118741, 0.0000857)), 1e-5);
-        }
-
-        float highlightRolloffLuma(float luma) {
-            const float rolloffStart = 0.2;
-            const float rolloffRange = 1.0 - rolloffStart;
-            if (luma <= rolloffStart) return luma;
-
-            float x = (luma - rolloffStart) / rolloffRange;
-            return 1.0 - rolloffRange / (1.0 + x);
-        }
-
-        vec3 highlightRolloff(vec3 color) {
-            float luma = proPhotoLuminance(color);
-            float newLuma = highlightRolloffLuma(luma);
-            return color * (newLuma / max(luma, 1e-6));
-        }
-        
-        vec3 applyDcpMaps(vec3 color) {
-            if (uDcpHueSatEnabled) {
-                color = applyDcpHsvMap(color, uDcpHueSatTexture, uDcpHueSatDivisions, uDcpHueSatEncoding);
-            }
-            if (uDcpLookTableEnabled) {
-                color = applyDcpHsvMap(color, uDcpLookTableTexture, uDcpLookTableDivisions, uDcpLookTableEncoding);
-            }
-            return color;
-        }
-
-        vec3 applyDisplayTone(vec3 color) {
-            if (uRawColorEngine == RAW_COLOR_ENGINE_AGX) {
-                return applyAgX(color);
-            }
-            if (uRawColorEngine == RAW_COLOR_ENGINE_DARKTABLE_SIGMOID) {
-                return applyDarktableSigmoid(color);
-            }
-            if (uRawColorEngine == RAW_COLOR_ENGINE_DARKTABLE_FILMIC) {
-                return applyDarktableFilmic(color);
-            }
-            if (uRawColorEngine == RAW_COLOR_ENGINE_SPECTRAL_FILM && uSpectralFilmSize > 1) {
-                return applySpectralFilm(color);
-            }
-            color = applyDcpMaps(color);
-            color = highlightRolloff(color);
-            return applyAdobeCurve(color);
-        }
-
-        vec3 applyOutputTransformAfterDisplayTone(vec3 color) {
-            if (uRawColorEngine == RAW_COLOR_ENGINE_AGX) {
-                return color;
-            }
-            vec3 outputColor = uOutputTransform * color;
-            if (uRawColorEngine == RAW_COLOR_ENGINE_DARKTABLE_FILMIC) {
-                return displayHeadroomRolloff(outputColor);
-            }
-            return outputColor;
-        }
-        
-        vec3 sampleToneSource(vec2 uv) {
-            vec3 sampleColor = texture(uInputTexture, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
-            vec3 color = applyDisplayTone(sampleColor);
-            color = applyOutputTransformAfterDisplayTone(color);
-            return color;
-        }
-
-        vec3 shRgbToXyz(vec3 rgb) {
-            return mat3(
-                0.7976749, 0.2880402, 0.0000000,
-                0.1351917, 0.7118741, 0.0000000,
-                0.0313534, 0.0000857, 0.8252100
-            ) * rgb;
-        }
-
-        vec3 shXyzToRgb(vec3 xyz) {
-            return mat3(
-                1.3459433, -0.5445989, 0.0000000,
-               -0.2556075,  1.5081673, 0.0000000,
-               -0.0511118,  0.0205351, 1.2118128
-            ) * xyz;
-        }
-
-        ${ShadowsHighlightsShader.GLSL}
-
-        void main() {
-            vec3 color = texture(uInputTexture, vTexCoord).rgb;
-            color = applyDisplayTone(color);
-            color = applyOutputTransformAfterDisplayTone(color);
-            color = applyShadowsHighlights(color, vTexCoord);
-            color = linearToSrgb(color);
-            fragColor = vec4(color, 1.0);
+        vec3 applyEngineTone(vec3 color) {
+            return displayHeadroomRolloff(uOutputTransform * applyDarktableFilmic(color));
         }
     """.trimIndent()
 

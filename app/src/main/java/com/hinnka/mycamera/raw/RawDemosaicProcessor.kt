@@ -208,7 +208,7 @@ class RawDemosaicProcessor {
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
 
     // GL 资源
-    private var combinedProgram = 0
+    private val combinedPrograms = IntArray(RawColorEngine.entries.size)
     private var sharpenProgram = 0
     private var passthroughProgram = 0
     private var hdrReferenceProgram = 0
@@ -1161,7 +1161,7 @@ class RawDemosaicProcessor {
             // 5. 第二步：Combined Pass (HDR Linear -> LDR sRGB + LUT)
             setupCombinedFramebuffer(actualWidth, actualHeight)
             val combinedStart = System.currentTimeMillis()
-            renderCombinedPass(
+            val combinedRendered = renderCombinedPass(
                 metadata = actualMetadata,
                 inputTextureId = outputTexture,
                 dcpRenderPlan = resolvedDcpRenderPlan,
@@ -1171,6 +1171,10 @@ class RawDemosaicProcessor {
                 workingColorSpace = rawWorkingColorSpace,
                 shadowsHighlightsParams = shadowsHighlightsParams
             )
+            if (!combinedRendered) {
+                PLog.e(TAG, "Combined Pass failed for colorEngine=$colorEngine")
+                return@withContext null
+            }
             PLog.d(TAG, "Combined Pass took: ${System.currentTimeMillis() - combinedStart}ms")
             // outputTexture 已被 combinedPass 消费，提前释放
             if (gfTexId[1] != 0) {
@@ -1244,6 +1248,15 @@ class RawDemosaicProcessor {
         initialize()
     }
 
+    private inline fun <T> measureRawGlInitStep(name: String, block: () -> T): T {
+        val start = System.currentTimeMillis()
+        try {
+            return block()
+        } finally {
+            PLog.d(TAG, "RAW GL init $name took: ${System.currentTimeMillis() - start}ms")
+        }
+    }
+
     /**
      * 初始化 EGL 环境
      */
@@ -1251,8 +1264,11 @@ class RawDemosaicProcessor {
         if (isInitialized) return true
 
         try {
+            val initializeStart = System.currentTimeMillis()
             // 获取 EGL Display
-            eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+            eglDisplay = measureRawGlInitStep("eglGetDisplay") {
+                EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+            }
             if (eglDisplay == EGL14.EGL_NO_DISPLAY) {
                 PLog.e(TAG, "Unable to get EGL display")
                 return false
@@ -1260,7 +1276,10 @@ class RawDemosaicProcessor {
 
             // 初始化 EGL
             val version = IntArray(2)
-            if (!EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) {
+            val eglInitialized = measureRawGlInitStep("eglInitialize") {
+                EGL14.eglInitialize(eglDisplay, version, 0, version, 1)
+            }
+            if (!eglInitialized) {
                 PLog.e(TAG, "Unable to initialize EGL")
                 return false
             }
@@ -1278,7 +1297,8 @@ class RawDemosaicProcessor {
 
             val configs = arrayOfNulls<EGLConfig>(1)
             val numConfigs = IntArray(1)
-            if (!EGL14.eglChooseConfig(
+            val configChosen = measureRawGlInitStep("eglChooseConfig") {
+                EGL14.eglChooseConfig(
                     eglDisplay,
                     configAttribs,
                     0,
@@ -1288,7 +1308,8 @@ class RawDemosaicProcessor {
                     numConfigs,
                     0
                 )
-            ) {
+            }
+            if (!configChosen) {
                 PLog.e(TAG, "Unable to choose EGL config")
                 return false
             }
@@ -1300,8 +1321,9 @@ class RawDemosaicProcessor {
                 EGL14.EGL_CONTEXT_CLIENT_VERSION, 3,
                 EGL14.EGL_NONE
             )
-            eglContext =
+            eglContext = measureRawGlInitStep("eglCreateContext") {
                 EGL14.eglCreateContext(eglDisplay, config, EGL14.EGL_NO_CONTEXT, contextAttribs, 0)
+            }
             if (eglContext == EGL14.EGL_NO_CONTEXT) {
                 PLog.e(TAG, "Unable to create EGL context")
                 return false
@@ -1313,21 +1335,28 @@ class RawDemosaicProcessor {
                 EGL14.EGL_HEIGHT, 1,
                 EGL14.EGL_NONE
             )
-            eglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, config, surfaceAttribs, 0)
+            eglSurface = measureRawGlInitStep("eglCreatePbufferSurface") {
+                EGL14.eglCreatePbufferSurface(eglDisplay, config, surfaceAttribs, 0)
+            }
             if (eglSurface == EGL14.EGL_NO_SURFACE) {
                 PLog.e(TAG, "Unable to create EGL surface")
                 return false
             }
 
             // 激活上下文
-            if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+            val madeCurrent = measureRawGlInitStep("eglMakeCurrent") {
+                EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+            }
+            if (!madeCurrent) {
                 PLog.e(TAG, "Unable to make EGL current")
                 return false
             }
 
             // 初始化着色器和缓冲区
-            initShaderProgram()
-            if (combinedProgram == 0 || sharpenProgram == 0 || passthroughProgram == 0 ||
+            measureRawGlInitStep("initShaderProgram") {
+                initShaderProgram()
+            }
+            if (sharpenProgram == 0 || passthroughProgram == 0 ||
                 chromaDenoiseProgram == 0 ||
                 rcdPopulateProgram == 0 || rcdStep1Program == 0 || rcdStep2Program == 0 ||
                 rcdStep3Program == 0 || rcdStep40Program == 0 || rcdStep41Program == 0 ||
@@ -1336,7 +1365,7 @@ class RawDemosaicProcessor {
             ) {
                 PLog.e(
                     TAG, "Critical shader programs failed to compile or link. " +
-                            "combined=$combinedProgram sharpen=$sharpenProgram pass=$passthroughProgram " +
+                            "sharpen=$sharpenProgram pass=$passthroughProgram " +
                             "chromaDenoise=$chromaDenoiseProgram " +
                             "populate=$rcdPopulateProgram step1=$rcdStep1Program step2=$rcdStep2Program " +
                             "step3=$rcdStep3Program step40=$rcdStep40Program step41=$rcdStep41Program " +
@@ -1345,20 +1374,26 @@ class RawDemosaicProcessor {
                 )
                 return false
             }
-            initBuffers()
+            measureRawGlInitStep("initBuffers") {
+                initBuffers()
+            }
 
             // 创建静默遮挡图
-            dummyShadingTextureId = createDummyShadingTexture()
+            dummyShadingTextureId = measureRawGlInitStep("createDummyShadingTexture") {
+                createDummyShadingTexture()
+            }
 
             // Query hardware texture size limit
             val maxTexSizeArr = IntArray(1)
-            GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, maxTexSizeArr, 0)
+            measureRawGlInitStep("queryLimits") {
+                GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, maxTexSizeArr, 0)
+            }
             maxTextureSize = maxTexSizeArr[0]
             PLog.d(TAG, "GL_MAX_TEXTURE_SIZE = $maxTextureSize")
             logGlResourceLimits()
 
             isInitialized = true
-            PLog.d(TAG, "RawDemosaicProcessor initialized")
+            PLog.d(TAG, "RawDemosaicProcessor initialized, took=${System.currentTimeMillis() - initializeStart}ms")
             return true
 
         } catch (e: Exception) {
@@ -1368,34 +1403,28 @@ class RawDemosaicProcessor {
     }
 
     private fun initShaderProgram() {
-        val vShader = compileShader(GLES30.GL_VERTEX_SHADER, RawShaders.VERTEX_SHADER)
+        val vShader = compileShader(
+            GLES30.GL_VERTEX_SHADER,
+            RawShaders.VERTEX_SHADER,
+            "rawVertex"
+        )
 
         // 1. DHT Multi-Pass Programs (替代旧的单 pass AHD)
         // initDhtPrograms(vShader)
 
-        // 2. Combined Processing Program
-        val fShaderCombined =
-            compileShader(GLES30.GL_FRAGMENT_SHADER, RawShaders.COMBINED_FRAGMENT_SHADER)
-        if (vShader != 0 && fShaderCombined != 0) {
-            combinedProgram = GLES30.glCreateProgram()
-            GLES30.glAttachShader(combinedProgram, vShader)
-            GLES30.glAttachShader(combinedProgram, fShaderCombined)
-            GLES30.glLinkProgram(combinedProgram)
-            if (!logProgramLinkResult(combinedProgram, "combinedProgram")) {
-                combinedProgram = 0
-            }
-
-            GLES30.glDeleteShader(fShaderCombined)
-        }
-
         val fShaderHdrReference =
-            compileShader(GLES30.GL_FRAGMENT_SHADER, RawShaders.HDR_REFERENCE_FRAGMENT_SHADER)
+            compileShader(
+                GLES30.GL_FRAGMENT_SHADER,
+                RawShaders.HDR_REFERENCE_FRAGMENT_SHADER,
+                "hdrReferenceFragment"
+            )
         if (vShader != 0 && fShaderHdrReference != 0) {
             hdrReferenceProgram = GLES30.glCreateProgram()
             GLES30.glAttachShader(hdrReferenceProgram, vShader)
             GLES30.glAttachShader(hdrReferenceProgram, fShaderHdrReference)
+            val linkStart = System.currentTimeMillis()
             GLES30.glLinkProgram(hdrReferenceProgram)
-            if (!logProgramLinkResult(hdrReferenceProgram, "hdrReferenceProgram")) {
+            if (!logProgramLinkResult(hdrReferenceProgram, "hdrReferenceProgram", linkStart)) {
                 hdrReferenceProgram = 0
             }
 
@@ -1404,13 +1433,18 @@ class RawDemosaicProcessor {
 
         // 2.2 Sharpen Program
         val fShaderSharpen =
-            compileShader(GLES30.GL_FRAGMENT_SHADER, RawShaders.SHARPEN_FRAGMENT_SHADER)
+            compileShader(
+                GLES30.GL_FRAGMENT_SHADER,
+                RawShaders.SHARPEN_FRAGMENT_SHADER,
+                "sharpenFragment"
+            )
         if (vShader != 0 && fShaderSharpen != 0) {
             sharpenProgram = GLES30.glCreateProgram()
             GLES30.glAttachShader(sharpenProgram, vShader)
             GLES30.glAttachShader(sharpenProgram, fShaderSharpen)
+            val linkStart = System.currentTimeMillis()
             GLES30.glLinkProgram(sharpenProgram)
-            if (!logProgramLinkResult(sharpenProgram, "sharpenProgram")) {
+            if (!logProgramLinkResult(sharpenProgram, "sharpenProgram", linkStart)) {
                 sharpenProgram = 0
             }
 
@@ -1422,13 +1456,18 @@ class RawDemosaicProcessor {
 
         // 2.75 RAW 默认色度降噪 Program
         val fShaderChromaDenoise =
-            compileShader(GLES30.GL_FRAGMENT_SHADER, ChromaDenoiseShaders.PASS_CHROMA_DENOISE)
+            compileShader(
+                GLES30.GL_FRAGMENT_SHADER,
+                ChromaDenoiseShaders.PASS_CHROMA_DENOISE,
+                "rawChromaDenoiseFragment"
+            )
         if (vShader != 0 && fShaderChromaDenoise != 0) {
             chromaDenoiseProgram = GLES30.glCreateProgram()
             GLES30.glAttachShader(chromaDenoiseProgram, vShader)
             GLES30.glAttachShader(chromaDenoiseProgram, fShaderChromaDenoise)
+            val linkStart = System.currentTimeMillis()
             GLES30.glLinkProgram(chromaDenoiseProgram)
-            if (!logProgramLinkResult(chromaDenoiseProgram, "rawChromaDenoiseProgram")) {
+            if (!logProgramLinkResult(chromaDenoiseProgram, "rawChromaDenoiseProgram", linkStart)) {
                 chromaDenoiseProgram = 0
             }
 
@@ -1437,13 +1476,18 @@ class RawDemosaicProcessor {
 
         // 3. Passthrough Program
         val fShaderPass =
-            compileShader(GLES30.GL_FRAGMENT_SHADER, RawShaders.PASSTHROUGH_FRAGMENT_SHADER)
+            compileShader(
+                GLES30.GL_FRAGMENT_SHADER,
+                RawShaders.PASSTHROUGH_FRAGMENT_SHADER,
+                "passthroughFragment"
+            )
         if (vShader != 0 && fShaderPass != 0) {
             passthroughProgram = GLES30.glCreateProgram()
             GLES30.glAttachShader(passthroughProgram, vShader)
             GLES30.glAttachShader(passthroughProgram, fShaderPass)
+            val linkStart = System.currentTimeMillis()
             GLES30.glLinkProgram(passthroughProgram)
-            if (!logProgramLinkResult(passthroughProgram, "passthroughProgram")) {
+            if (!logProgramLinkResult(passthroughProgram, "passthroughProgram", linkStart)) {
                 passthroughProgram = 0
             }
 
@@ -1456,8 +1500,47 @@ class RawDemosaicProcessor {
         GLES30.glDeleteShader(vShader)
         PLog.d(
             TAG,
-            "Shader programs created: combined=$combinedProgram, passthrough=$passthroughProgram"
+            "Shader programs created: passthrough=$passthroughProgram"
         )
+    }
+
+    private fun getOrCreateCombinedProgram(colorEngine: RawColorEngine): Int {
+        val cachedProgram = combinedPrograms[colorEngine.ordinal]
+        if (cachedProgram != 0) return cachedProgram
+
+        val vShader = compileShader(
+            GLES30.GL_VERTEX_SHADER,
+            RawShaders.VERTEX_SHADER,
+            "combined${colorEngine.name}Vertex"
+        )
+        val fragmentSource = RawShaders.combinedFragmentShaderFor(colorEngine)
+        val fShader = compileShader(
+            GLES30.GL_FRAGMENT_SHADER,
+            fragmentSource,
+            "combined${colorEngine.name}Fragment"
+        )
+        if (vShader == 0 || fShader == 0) {
+            if (vShader != 0) GLES30.glDeleteShader(vShader)
+            if (fShader != 0) GLES30.glDeleteShader(fShader)
+            return 0
+        }
+
+        val program = GLES30.glCreateProgram()
+        GLES30.glAttachShader(program, vShader)
+        GLES30.glAttachShader(program, fShader)
+        val linkStart = System.currentTimeMillis()
+        GLES30.glLinkProgram(program)
+        val linked = logProgramLinkResult(
+            program,
+            "combined${colorEngine.name}Program",
+            linkStart
+        )
+        GLES30.glDeleteShader(vShader)
+        GLES30.glDeleteShader(fShader)
+        if (!linked) return 0
+
+        combinedPrograms[colorEngine.ordinal] = program
+        return program
     }
 
     private val FRAGMENT_SHADER_LINEAR_RCD = """
@@ -1809,13 +1892,18 @@ class RawDemosaicProcessor {
         rawAeBaseProgram = compileComputeProgram(RAW_AE_BASE_COMPUTE_SHADER, "RAW_AE_BASE")
         rawAeMertensProgram = compileComputeProgram(RAW_AE_MERTENS_COMPUTE_SHADER, "RAW_AE_MERTENS")
 
-        val fShaderLinearRcd = compileShader(GLES30.GL_FRAGMENT_SHADER, FRAGMENT_SHADER_LINEAR_RCD)
+        val fShaderLinearRcd = compileShader(
+            GLES30.GL_FRAGMENT_SHADER,
+            FRAGMENT_SHADER_LINEAR_RCD,
+            "linearRcdFragment"
+        )
         if (vShader != 0 && fShaderLinearRcd != 0) {
             linearRcdProgram = GLES30.glCreateProgram()
             GLES30.glAttachShader(linearRcdProgram, vShader)
             GLES30.glAttachShader(linearRcdProgram, fShaderLinearRcd)
+            val linkStart = System.currentTimeMillis()
             GLES30.glLinkProgram(linearRcdProgram)
-            if (!logProgramLinkResult(linearRcdProgram, "linearRcdProgram")) {
+            if (!logProgramLinkResult(linearRcdProgram, "linearRcdProgram", linkStart)) {
                 linearRcdProgram = 0
             }
             GLES30.glDeleteShader(fShaderLinearRcd)
@@ -1823,6 +1911,7 @@ class RawDemosaicProcessor {
     }
 
     private fun compileComputeProgram(source: String, name: String): Int {
+        val compileStart = System.currentTimeMillis()
         val shader = GLES31.glCreateShader(GLES31.GL_COMPUTE_SHADER)
         GLES31.glShaderSource(shader, source)
         GLES31.glCompileShader(shader)
@@ -1831,31 +1920,49 @@ class RawDemosaicProcessor {
         GLES31.glGetShaderiv(shader, GLES31.GL_COMPILE_STATUS, compiled, 0)
         if (compiled[0] == 0) {
             val error = GLES31.glGetShaderInfoLog(shader)
-            PLog.e(TAG, "Compute Shader $name compilation failed: $error")
+            PLog.e(
+                TAG,
+                "Compute Shader $name compilation failed after " +
+                    "${System.currentTimeMillis() - compileStart}ms, chars=${source.length}: $error"
+            )
             GLES31.glDeleteShader(shader)
             return 0
         }
+        PLog.d(
+            TAG,
+            "Compute Shader $name compile ok, chars=${source.length}, " +
+                "took=${System.currentTimeMillis() - compileStart}ms"
+        )
 
         val program = GLES31.glCreateProgram()
         GLES31.glAttachShader(program, shader)
+        val linkStart = System.currentTimeMillis()
         GLES31.glLinkProgram(program)
 
         val linked = IntArray(1)
         GLES31.glGetProgramiv(program, GLES31.GL_LINK_STATUS, linked, 0)
         if (linked[0] == 0) {
             val error = GLES31.glGetProgramInfoLog(program)
-            PLog.e(TAG, "Compute Program $name linking failed: $error")
+            PLog.e(
+                TAG,
+                "Compute Program $name linking failed after " +
+                    "${System.currentTimeMillis() - linkStart}ms: $error"
+            )
             GLES31.glDeleteProgram(program)
             GLES31.glDeleteShader(shader)
             return 0
         }
 
         GLES31.glDeleteShader(shader)
-        PLog.d(TAG, "Compute Program $name created: $program")
+        PLog.d(
+            TAG,
+            "Compute Program $name created: $program, linkTook=${System.currentTimeMillis() - linkStart}ms"
+        )
         return program
     }
 
-    private fun compileShader(type: Int, source: String): Int {
+    private fun compileShader(type: Int, source: String, name: String = "shader"): Int {
+        val compileStart = System.currentTimeMillis()
         val shader = GLES30.glCreateShader(type)
         GLES30.glShaderSource(shader, source)
         GLES30.glCompileShader(shader)
@@ -1864,10 +1971,19 @@ class RawDemosaicProcessor {
         GLES30.glGetShaderiv(shader, GLES30.GL_COMPILE_STATUS, compiled, 0)
         if (compiled[0] == 0) {
             val error = GLES30.glGetShaderInfoLog(shader)
-            PLog.e(TAG, "Shader compilation failed: $error")
+            PLog.e(
+                TAG,
+                "Shader $name compilation failed after " +
+                    "${System.currentTimeMillis() - compileStart}ms, type=$type, chars=${source.length}: $error"
+            )
             GLES30.glDeleteShader(shader)
             return 0
         }
+        PLog.d(
+            TAG,
+            "Shader $name compile ok, type=$type, chars=${source.length}, " +
+                "took=${System.currentTimeMillis() - compileStart}ms"
+        )
         return shader
     }
 
@@ -3514,21 +3630,21 @@ class RawDemosaicProcessor {
         return textureId
     }
 
-    private fun bindDcpCombinedResources(dcpRenderPlan: DcpRenderPlan?) {
+    private fun bindDcpCombinedResources(program: Int, dcpRenderPlan: DcpRenderPlan?) {
         val hueSatMap = dcpRenderPlan?.hueSatMap?.takeIf { it.isValid }
         val lookTable = dcpRenderPlan?.lookTable?.takeIf { it.isValid }
 
         PLog.d(TAG, "bindDcpCombinedResources: hueSatMap=${hueSatMap?.values?.size}")
         PLog.d(TAG, "bindDcpCombinedResources: lookTable=${lookTable?.values?.size}")
 
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatTexture"), 2)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableTexture"), 3)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uDcpHueSatTexture"), 2)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uDcpLookTableTexture"), 3)
         GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEnabled"),
+            GLES30.glGetUniformLocation(program, "uDcpHueSatEnabled"),
             if (hueSatMap != null) 1 else 0
         )
         GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEnabled"),
+            GLES30.glGetUniformLocation(program, "uDcpLookTableEnabled"),
             if (lookTable != null) 1 else 0
         )
 
@@ -3538,26 +3654,26 @@ class RawDemosaicProcessor {
                 uploadDcp3DTexture({ dcpHueSatTextureId }, { dcpHueSatTextureId = it }, hueSatMap)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, textureId)
             GLES30.glUniform3i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatDivisions"),
+                GLES30.glGetUniformLocation(program, "uDcpHueSatDivisions"),
                 hueSatMap.hueDivisions,
                 hueSatMap.satDivisions,
                 hueSatMap.valueDivisions
             )
             GLES30.glUniform1i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEncoding"),
+                GLES30.glGetUniformLocation(program, "uDcpHueSatEncoding"),
                 hueSatMap.encoding
             )
         } else {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, ensureDummyDcp3DTexture())
             GLES30.glUniform3i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatDivisions"),
+                GLES30.glGetUniformLocation(program, "uDcpHueSatDivisions"),
                 1,
                 1,
                 1
             )
             GLES30.glUniform1i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpHueSatEncoding"),
+                GLES30.glGetUniformLocation(program, "uDcpHueSatEncoding"),
                 DcpHueSatMap.ENCODING_LINEAR
             )
         }
@@ -3571,26 +3687,26 @@ class RawDemosaicProcessor {
             )
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, textureId)
             GLES30.glUniform3i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableDivisions"),
+                GLES30.glGetUniformLocation(program, "uDcpLookTableDivisions"),
                 lookTable.hueDivisions,
                 lookTable.satDivisions,
                 lookTable.valueDivisions
             )
             GLES30.glUniform1i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEncoding"),
+                GLES30.glGetUniformLocation(program, "uDcpLookTableEncoding"),
                 lookTable.encoding
             )
         } else {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, ensureDummyDcp3DTexture())
             GLES30.glUniform3i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableDivisions"),
+                GLES30.glGetUniformLocation(program, "uDcpLookTableDivisions"),
                 1,
                 1,
                 1
             )
             GLES30.glUniform1i(
-                GLES30.glGetUniformLocation(combinedProgram, "uDcpLookTableEncoding"),
+                GLES30.glGetUniformLocation(program, "uDcpLookTableEncoding"),
                 DcpHueSatMap.ENCODING_LINEAR
             )
         }
@@ -3654,10 +3770,10 @@ class RawDemosaicProcessor {
         return spectralFilmTextureId
     }
 
-    private fun bindSpectralFilmCombinedResource(lut: SpectralFilmLut?) {
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uSpectralFilmTexture"), 6)
+    private fun bindSpectralFilmCombinedResource(program: Int, lut: SpectralFilmLut?) {
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uSpectralFilmTexture"), 6)
         GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uSpectralFilmSize"),
+            GLES30.glGetUniformLocation(program, "uSpectralFilmSize"),
             lut?.size ?: 1
         )
         GLES30.glActiveTexture(GLES30.GL_TEXTURE6)
@@ -3719,13 +3835,13 @@ class RawDemosaicProcessor {
         return agxLutTextureId
     }
 
-    private fun bindAgxCombinedResource(agxLut: AgxLut?) {
+    private fun bindAgxCombinedResource(program: Int, agxLut: AgxLut?) {
         GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uAgxBaseSrgbTexture"),
+            GLES30.glGetUniformLocation(program, "uAgxBaseSrgbTexture"),
             AGX_BASE_SRGB_TEXTURE_UNIT
         )
         GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uAgxLutSize"),
+            GLES30.glGetUniformLocation(program, "uAgxLutSize"),
             agxLut?.size ?: 1
         )
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + AGX_BASE_SRGB_TEXTURE_UNIT)
@@ -3751,11 +3867,15 @@ class RawDemosaicProcessor {
         shadowsHighlightsParams: ShadowsHighlightsParams = ShadowsHighlightsParams.NEUTRAL,
         viewportWidth: Int = metadata.width,
         viewportHeight: Int = metadata.height
-    ) {
-        val baseCurve = dcpRenderPlan?.toneCurveLut ?: ACR3Curve.samples()
+    ): Boolean {
         val outputTransform = computeWorkingToOutputTransform(workingColorSpace, ColorSpace.SRGB)
+        val program = getOrCreateCombinedProgram(colorEngine)
+        if (program == 0) {
+            PLog.e(TAG, "Unable to create combined program for colorEngine=$colorEngine")
+            return false
+        }
 
-        GLES30.glUseProgram(combinedProgram)
+        GLES30.glUseProgram(program)
         checkGlError("renderCombinedPass glUseProgram")
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, combinedFramebufferId)
         checkGlError("renderCombinedPass glBindFramebuffer")
@@ -3766,59 +3886,64 @@ class RawDemosaicProcessor {
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTextureId)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uInputTexture"), 0)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uInputTexture"), 0)
 
-        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-        uploadCurveTexture(baseCurve)
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, curveTextureId)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(combinedProgram, "uCurveTexture"), 1)
-        GLES30.glUniform1f(
-            GLES30.glGetUniformLocation(combinedProgram, "uCurveSize"),
-            baseCurve.size.toFloat()
-        )
-        GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uCurveEnabled"),
-            1
-        )
         GLES30.glUniform2f(
-            GLES30.glGetUniformLocation(combinedProgram, "uTexelSize"),
+            GLES30.glGetUniformLocation(program, "uTexelSize"),
             1.0f / maxOf(1, viewportWidth).toFloat(),
             1.0f / maxOf(1, viewportHeight).toFloat()
         )
-        bindShadowsHighlightsUniforms(shadowsHighlightsParams)
+        bindShadowsHighlightsUniforms(program, shadowsHighlightsParams)
         checkGlError("renderCombinedPass base uniforms")
 
-        bindDcpCombinedResources(dcpRenderPlan)
-        bindSpectralFilmCombinedResource(
-            if (colorEngine == RawColorEngine.SpectralFilm) spectralFilmLut else null
-        )
-        bindAgxCombinedResource(
-            agxLut = if (colorEngine == RawColorEngine.AgX) agxLut else null
-        )
-        GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(combinedProgram, "uRawColorEngine"),
-            colorEngine.shaderId
-        )
+        when (colorEngine) {
+            RawColorEngine.AdobeCurve -> {
+                val baseCurve = dcpRenderPlan?.toneCurveLut ?: ACR3Curve.samples()
+                bindCurveCombinedResource(program, baseCurve)
+                bindDcpCombinedResources(program, dcpRenderPlan)
+            }
+
+            RawColorEngine.AgX -> bindAgxCombinedResource(program, agxLut)
+            RawColorEngine.SpectralFilm -> bindSpectralFilmCombinedResource(program, spectralFilmLut)
+            RawColorEngine.DarktableSigmoid,
+            RawColorEngine.DarktableFilmic -> Unit
+        }
 
         GLES30.glUniformMatrix3fv(
-            GLES30.glGetUniformLocation(combinedProgram, "uOutputTransform"),
+            GLES30.glGetUniformLocation(program, "uOutputTransform"),
             1, false, transposeMatrix3x3(outputTransform), 0
         )
 
         val identityMatrix = FloatArray(16)
         GlMatrix.setIdentityM(identityMatrix, 0)
         GLES30.glUniformMatrix4fv(
-            GLES30.glGetUniformLocation(combinedProgram, "uTexMatrix"),
+            GLES30.glGetUniformLocation(program, "uTexMatrix"),
             1, false, identityMatrix, 0
         )
         checkGlError("renderCombinedPass matrices")
-        drawQuad(combinedProgram)
+        drawQuad(program)
         checkGlError("renderCombinedPass")
+        return true
     }
 
-    private fun bindShadowsHighlightsUniforms(params: ShadowsHighlightsParams) {
-        val highlightsLocation = GLES30.glGetUniformLocation(combinedProgram, "uHighlights")
-        val shadowsLocation = GLES30.glGetUniformLocation(combinedProgram, "uShadows")
+    private fun bindCurveCombinedResource(program: Int, baseCurve: FloatArray) {
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        uploadCurveTexture(baseCurve)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, curveTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uCurveTexture"), 1)
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(program, "uCurveSize"),
+            baseCurve.size.toFloat()
+        )
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(program, "uCurveEnabled"),
+            1
+        )
+    }
+
+    private fun bindShadowsHighlightsUniforms(program: Int, params: ShadowsHighlightsParams) {
+        val highlightsLocation = GLES30.glGetUniformLocation(program, "uHighlights")
+        val shadowsLocation = GLES30.glGetUniformLocation(program, "uShadows")
         ShadowsHighlightsShader.bindUniformLocations(
             highlightsLocation = highlightsLocation,
             shadowsLocation = shadowsLocation,
@@ -3836,16 +3961,20 @@ class RawDemosaicProcessor {
             )
         }
         GLES30.glUniform1f(
-            GLES30.glGetUniformLocation(combinedProgram, "uCurveWhitePoint"),
+            GLES30.glGetUniformLocation(program, "uCurveWhitePoint"),
             params.curveWhitePoint
         )
         GLES30.glUniform1f(
-            GLES30.glGetUniformLocation(combinedProgram, "uCurveShoulderStart"),
+            GLES30.glGetUniformLocation(program, "uCurveShoulderStart"),
             0.4f
         )
     }
 
-    private fun logProgramLinkResult(program: Int, name: String): Boolean {
+    private fun logProgramLinkResult(
+        program: Int,
+        name: String,
+        linkStart: Long = System.currentTimeMillis()
+    ): Boolean {
         if (program == 0) {
             PLog.e(TAG, "$name creation failed")
             return false
@@ -3853,11 +3982,15 @@ class RawDemosaicProcessor {
         val linked = IntArray(1)
         GLES30.glGetProgramiv(program, GLES30.GL_LINK_STATUS, linked, 0)
         if (linked[0] == 0) {
-            PLog.e(TAG, "$name link failed: ${GLES30.glGetProgramInfoLog(program)}")
+            PLog.e(
+                TAG,
+                "$name link failed after ${System.currentTimeMillis() - linkStart}ms: " +
+                    GLES30.glGetProgramInfoLog(program)
+            )
             GLES30.glDeleteProgram(program)
             return false
         } else {
-            PLog.d(TAG, "$name link ok")
+            PLog.d(TAG, "$name link ok, took=${System.currentTimeMillis() - linkStart}ms")
             return true
         }
     }
@@ -4803,7 +4936,12 @@ class RawDemosaicProcessor {
 
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
 
-        if (combinedProgram != 0) GLES30.glDeleteProgram(combinedProgram)
+        for (i in combinedPrograms.indices) {
+            if (combinedPrograms[i] != 0) {
+                GLES30.glDeleteProgram(combinedPrograms[i])
+                combinedPrograms[i] = 0
+            }
+        }
         if (sharpenProgram != 0) GLES30.glDeleteProgram(sharpenProgram)
         if (passthroughProgram != 0) GLES30.glDeleteProgram(passthroughProgram)
         if (hdrReferenceProgram != 0) GLES30.glDeleteProgram(hdrReferenceProgram)
