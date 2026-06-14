@@ -58,6 +58,7 @@ import kotlin.io.extension
 import kotlin.io.inputStream
 import kotlin.io.readBytes
 import kotlin.io.walkBottomUp
+import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.system.measureTimeMillis
 import kotlin.use
@@ -85,7 +86,7 @@ object GalleryManager {
     private const val DETAIL_HDR_FILE = "detail_hdr.jpg"
     private const val MULTIPLE_EXPOSURE_DIR = "multiple_exposure_sessions"
     private const val MULTIPLE_EXPOSURE_PREVIEW_FILE = "preview.jpg"
-    private const val RAW_HDR_DNG_BASELINE_EXPOSURE_EV = 2.0f
+    private const val RAW_HDR_DNG_BASELINE_EXPOSURE_EV_FALLBACK = 2.5f
 
     data class VideoRecordInfo(
         val uri: Uri,
@@ -2309,6 +2310,10 @@ object GalleryManager {
             rawHdrFusionResult = fusionResult
 
             val fusedBayerBuffer = fusionResult.fusedBayerBuffer ?: return@withContext false
+            val rawHdrBaselineExposureEv = calculateRawHdrDngBaselineExposureEv(
+                referenceResult = zeroResult,
+                captureResults = listOf(lowResult, zeroResult, highResult)
+            )
             val dngWritten = try {
                 trySaveStackedRawDng(
                     context = context,
@@ -2327,7 +2332,7 @@ object GalleryManager {
                     metadata = metadata,
                     shouldAutoSave = shouldAutoSave,
                     exportDngWithRawExport = exportDngWithRawExport,
-                    baselineExposureEv = RAW_HDR_DNG_BASELINE_EXPOSURE_EV
+                    baselineExposureEv = rawHdrBaselineExposureEv
                 )
             } finally {
                 fusionResult.fusedBayerBuffer = null
@@ -2395,6 +2400,32 @@ object GalleryManager {
             valueDomain = RawHdrFusionProcessor.sensorValueDomain(),
             onUploaded = onUploaded,
         )
+    }
+
+    private fun calculateRawHdrDngBaselineExposureEv(
+        referenceResult: CaptureResult,
+        captureResults: List<CaptureResult>,
+    ): Float {
+        val referenceProduct = rawExposureProduct(referenceResult)
+            .takeIf { it.isFinite() && it > 0.0 }
+            ?: return RAW_HDR_DNG_BASELINE_EXPOSURE_EV_FALLBACK
+        val baseProduct = captureResults
+            .mapNotNull { result ->
+                rawExposureProduct(result).takeIf { it.isFinite() && it > 0.0 }
+            }
+            .minOrNull()
+            ?: return RAW_HDR_DNG_BASELINE_EXPOSURE_EV_FALLBACK
+        val baselineExposureEv = if (baseProduct < referenceProduct) {
+            (ln(referenceProduct / baseProduct) / ln(2.0)).toFloat()
+        } else {
+            0f
+        }.coerceIn(0f, 8f)
+        PLog.d(
+            TAG,
+            "RAW HDR DNG baseline exposure: ${baselineExposureEv}EV, " +
+                    "referenceProduct=$referenceProduct, baseProduct=$baseProduct"
+        )
+        return baselineExposureEv
     }
 
     private fun rawExposureProduct(captureResult: CaptureResult): Double {

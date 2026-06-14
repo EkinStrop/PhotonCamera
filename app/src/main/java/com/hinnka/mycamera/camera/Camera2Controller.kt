@@ -3797,8 +3797,14 @@ class Camera2Controller(private val context: Context) {
     private fun calculateHdrBracketExposureCompensation(state: CameraState, evOffset: Float): Int {
         val evStep = state.getExposureCompensationStep().takeIf { it > 0f } ?: return state.exposureCompensation
         val range = state.getExposureCompensationRange()
-        val steps = (evOffset / evStep).roundToInt()
+        val steps = roundHdrBracketCompensationSteps(evOffset, evStep)
         return (state.exposureCompensation + steps).coerceIn(range.lower, range.upper)
+    }
+
+    private fun roundHdrBracketCompensationSteps(evOffset: Float, evStep: Float): Int {
+        if (evOffset == 0f) return 0
+        val magnitude = (abs(evOffset / evStep) + 0.0001f).roundToInt()
+        return if (evOffset < 0f) -magnitude else magnitude
     }
 
     private fun copyStillFocusSettingsFromPreview(builder: CaptureRequest.Builder) {
