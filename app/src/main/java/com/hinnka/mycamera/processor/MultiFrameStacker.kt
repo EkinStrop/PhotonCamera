@@ -31,13 +31,6 @@ data class RawStackResult(
 object MultiFrameStacker {
     private const val TAG = "MultiFrameStacker"
 
-    private data class CachedVulkanStacker(
-        val ptr: Long,
-        val width: Int,
-        val height: Int,
-        val enableSuperResolution: Boolean,
-    )
-
     private data class CachedVulkanRawStacker(
         val ptr: Long,
         val width: Int,
@@ -79,7 +72,6 @@ object MultiFrameStacker {
         }
     }
 
-    private var cachedVulkanStacker: CachedVulkanStacker? = null
     private var cachedVulkanRawStacker: CachedVulkanRawStacker? = null
 
     init {
@@ -117,49 +109,38 @@ object MultiFrameStacker {
         val targetW = dimensions.width() * scale
         val targetH = dimensions.height() * scale
 
+        val inputFormat = images[0].format
         if (useVulkan) {
+            if (enableSuperResolution) {
+                PLog.w(TAG, "GLES streaming stacker does not support SR yet; Vulkan/legacy fallback disabled")
+                images.forEach { it.close() }
+                return null
+            }
+            if (!GlesYuvStacker.supportsImageFormat(inputFormat)) {
+                PLog.w(TAG, "GLES streaming stacker does not support image format=$inputFormat; Vulkan/legacy fallback disabled")
+                images.forEach { it.close() }
+                return null
+            }
             PLog.i(
                 TAG,
-                "Starting Vulkan stacking process for ${images.size} frames ($width x $height). SR=$enableSuperResolution"
+                "Starting GLES streaming stacking process for ${images.size} frames ($width x $height)"
             )
-            val stackerPtr = obtainVulkanStacker(width, height, enableSuperResolution, resetForUse = true)
-            if (stackerPtr != 0L) {
-                try {
-                    for (image in images) {
-                        image.use {
-                            val hardwareBuffer = it.image.hardwareBuffer
-                            if (hardwareBuffer != null) {
-                                addVulkanFrameNative(stackerPtr, hardwareBuffer)
-                            } else {
-                                PLog.w(TAG, "Image has no hardware buffer, skipping")
-                            }
-                        }
-                    }
-                    PLog.d(TAG, "Stack frames processed")
-
-                    val previewBitmap = try {
-                        createBitmap(targetW, targetH, colorSpace = colorSpace)
-                    } catch (e: OutOfMemoryError) {
-                        PLog.e(TAG, "OOM creating Vulkan stack bitmap ($targetW x $targetH)", e)
-                        return null
-                    }
-
-                    val processOk = processVulkanStackNative(stackerPtr, previewBitmap, rotation)
-                    if (!processOk) {
-                        PLog.w(TAG, "Vulkan stack processing failed, invalidating cached stacker")
-                        previewBitmap.recycle()
-                        invalidateCachedVulkanStacker(stackerPtr)
-                        return null
-                    } else {
-                        PLog.i(TAG, "Vulkan stacking completed in ${System.currentTimeMillis() - startTime}ms")
-                        return previewBitmap
-                    }
-                } catch (e: Exception) {
-                    PLog.e(TAG, "Error during Vulkan stacking", e)
-                    invalidateCachedVulkanStacker(stackerPtr)
-                    return null
-                }
+            val glesBitmap = GlesYuvStacker(
+                width = width,
+                height = height,
+                outputWidth = targetW,
+                outputHeight = targetH,
+                rotation = rotation,
+                colorSpace = colorSpace,
+                inputFormat = inputFormat,
+            ).process(images)
+            if (glesBitmap != null) {
+                images.forEach { it.close() }
+                return glesBitmap
             }
+            PLog.w(TAG, "GLES streaming stacker failed; Vulkan/legacy fallback disabled")
+            images.forEach { it.close() }
+            return null
         }
 
         // Fallback or legacy path
@@ -214,32 +195,7 @@ object MultiFrameStacker {
     }
 
     @Synchronized
-    fun prewarmVulkanStacker(
-        width: Int,
-        height: Int,
-        enableSuperResolution: Boolean = false,
-    ): Boolean {
-        val stackerPtr = obtainVulkanStacker(width, height, enableSuperResolution, resetForUse = false)
-        val success = stackerPtr != 0L
-        if (success) {
-            PLog.i(
-                TAG,
-                "Prewarmed Vulkan stacker for ${width}x$height SR=$enableSuperResolution"
-            )
-        }
-        return success
-    }
-
-    @Synchronized
-    fun releaseCachedVulkanStacker() {
-        cachedVulkanStacker?.let {
-            releaseVulkanStackerNative(it.ptr)
-            PLog.i(
-                TAG,
-                "Released cached Vulkan stacker for ${it.width}x${it.height} SR=${it.enableSuperResolution}"
-            )
-        }
-        cachedVulkanStacker = null
+    fun releaseCachedVulkanRawStacker() {
         cachedVulkanRawStacker?.let {
             releaseVulkanRawStackerNative(it.ptr)
             PLog.i(
@@ -248,49 +204,6 @@ object MultiFrameStacker {
             )
         }
         cachedVulkanRawStacker = null
-    }
-
-    private fun obtainVulkanStacker(
-        width: Int,
-        height: Int,
-        enableSuperResolution: Boolean,
-        resetForUse: Boolean,
-    ): Long {
-        val cached = cachedVulkanStacker
-        if (cached != null &&
-            cached.width == width &&
-            cached.height == height &&
-            cached.enableSuperResolution == enableSuperResolution
-        ) {
-            if (!resetForUse || resetVulkanStackerNative(cached.ptr)) {
-                return cached.ptr
-            }
-            PLog.w(TAG, "Failed to reset cached Vulkan stacker, recreating")
-            releaseVulkanStackerNative(cached.ptr)
-            cachedVulkanStacker = null
-        } else if (cached != null) {
-            releaseVulkanStackerNative(cached.ptr)
-            cachedVulkanStacker = null
-        }
-
-        val stackerPtr = createVulkanStackerNative(width, height, enableSuperResolution)
-        if (stackerPtr != 0L) {
-            cachedVulkanStacker = CachedVulkanStacker(
-                ptr = stackerPtr,
-                width = width,
-                height = height,
-                enableSuperResolution = enableSuperResolution,
-            )
-        }
-        return stackerPtr
-    }
-
-    private fun invalidateCachedVulkanStacker(stackerPtr: Long) {
-        val cached = cachedVulkanStacker
-        if (cached != null && cached.ptr == stackerPtr) {
-            releaseVulkanStackerNative(stackerPtr)
-            cachedVulkanStacker = null
-        }
     }
 
     private fun obtainVulkanRawStacker(
@@ -534,16 +447,6 @@ object MultiFrameStacker {
     )
 
     private external fun releaseStackerNative(stackerPtr: Long)
-
-    private external fun createVulkanStackerNative(width: Int, height: Int, enableSuperRes: Boolean): Long
-    private external fun addVulkanFrameNative(
-        stackerPtr: Long,
-        hardwareBuffer: android.hardware.HardwareBuffer
-    ): Boolean
-
-    private external fun processVulkanStackNative(stackerPtr: Long, outBitmap: Bitmap?, rotation: Int): Boolean
-    private external fun releaseVulkanStackerNative(stackerPtr: Long)
-    private external fun resetVulkanStackerNative(stackerPtr: Long): Boolean
 
     private external fun createRawStackerNative(width: Int, height: Int, enableSuperRes: Boolean): Long
     private external fun stageRawFrameNative(stackerPtr: Long, rawData: ByteBuffer, rowStride: Int, cfaPattern: Int)

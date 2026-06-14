@@ -29,7 +29,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.model.SafeImage
-import com.hinnka.mycamera.processor.MultiFrameStacker
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.video.CaptureMode
@@ -44,9 +43,6 @@ import com.hinnka.mycamera.video.VideoRecorder
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoRecordingState
 import com.hinnka.mycamera.video.VideoStabilizationMode
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -1020,21 +1016,6 @@ class Camera2Controller(private val context: Context) {
                     }, cameraHandler)
                 }
 
-                if ((state.value.useMFNR || state.value.useMFSR) &&
-                    captureFormat != ImageFormat.RAW_SENSOR
-                ) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val prewarmOk = MultiFrameStacker.prewarmVulkanStacker(
-                            width = captureSize.width,
-                            height = captureSize.height,
-                            enableSuperResolution = state.value.useMFSR,
-                        )
-                        PLog.i(
-                            TAG,
-                            "Vulkan stacker prewarm after ImageReader creation: size=${captureSize.width}x${captureSize.height}, SR=${state.value.useMFSR}, ok=$prewarmOk"
-                        )
-                    }
-                }
             } else {
                 safeCloseImageReader(imageReader)
                 imageReader = null

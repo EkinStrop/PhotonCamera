@@ -10,8 +10,7 @@
  * VulkanRawStacker - GPU-accelerated RAW image stacking using Vulkan
  *
  * This class processes RAW sensor data (Bayer pattern) using Vulkan compute
- * shaders. It follows the same design pattern as VulkanImageStacker but
- * optimized for 16-bit RAW data.
+ * shaders and is optimized for 16-bit RAW data.
  */
 class VulkanRawStacker {
 public:

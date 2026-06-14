@@ -28,8 +28,6 @@
 #include "math_utils.h"
 #include "stacking_utils.h"
 #include "vulkan_raw_stacker.h"
-#include "vulkan_stacker.h"
-#include <android/hardware_buffer_jni.h>
 
 #ifndef LOG_TAG
 #define LOG_TAG "native-lib"
@@ -1156,103 +1154,6 @@ Java_com_hinnka_mycamera_processor_MultiFrameStacker_releaseStackerNative(
     JNIEnv *env, jobject /* this */, jlong stackerPtr) {
   auto *stacker = reinterpret_cast<ImageStacker *>(stackerPtr);
   delete stacker;
-}
-
-/**
- * Vulkan Stacking JNI Interface
- */
-JNIEXPORT jlong JNICALL
-Java_com_hinnka_mycamera_processor_MultiFrameStacker_createVulkanStackerNative(
-    JNIEnv *env, jobject /* this */, jint width, jint height,
-    jboolean enableSuperRes) {
-  try {
-    auto *stacker = new VulkanImageStacker(width, height, enableSuperRes);
-    return reinterpret_cast<jlong>(stacker);
-  } catch (const std::exception &e) {
-    LOGE("createVulkanStackerNative failed: %s", e.what());
-  } catch (...) {
-    LOGE("createVulkanStackerNative failed with unknown error");
-  }
-  return 0;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_hinnka_mycamera_processor_MultiFrameStacker_addVulkanFrameNative(
-    JNIEnv *env, jobject /* this */, jlong stackerPtr, jobject hardwareBuffer) {
-  auto *stacker = reinterpret_cast<VulkanImageStacker *>(stackerPtr);
-  if (!stacker || !hardwareBuffer)
-    return JNI_FALSE;
-
-  AHardwareBuffer *buffer =
-      AHardwareBuffer_fromHardwareBuffer(env, hardwareBuffer);
-  if (!buffer)
-    return JNI_FALSE;
-
-  try {
-    bool success = stacker->addFrame(buffer);
-    return success ? JNI_TRUE : JNI_FALSE;
-  } catch (const std::exception &e) {
-    LOGE("addVulkanFrameNative failed: %s", e.what());
-  } catch (...) {
-    LOGE("addVulkanFrameNative failed with unknown error");
-  }
-  return JNI_FALSE;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_hinnka_mycamera_processor_MultiFrameStacker_processVulkanStackNative(
-    JNIEnv *env, jobject /* this */, jlong stackerPtr, jobject outBitmap,
-    jint rotation) {
-  auto *stacker = reinterpret_cast<VulkanImageStacker *>(stackerPtr);
-  if (!stacker)
-    return JNI_FALSE;
-
-  AndroidBitmapInfo info;
-  void *bitmapPixels = nullptr;
-  if (outBitmap &&
-      (AndroidBitmap_getInfo(env, outBitmap, &info) < 0 ||
-       AndroidBitmap_lockPixels(env, outBitmap, &bitmapPixels) < 0)) {
-    return JNI_FALSE;
-  }
-
-  bool success = false;
-  try {
-    success =
-        stacker->processStack(static_cast<uint32_t *>(bitmapPixels), info.width,
-                              info.height, info.stride, rotation);
-  } catch (const std::exception &e) {
-    LOGE("processVulkanStackNative failed: %s", e.what());
-  } catch (...) {
-    LOGE("processVulkanStackNative failed with unknown error");
-  }
-
-  if (outBitmap) {
-    AndroidBitmap_unlockPixels(env, outBitmap);
-  }
-  return success ? JNI_TRUE : JNI_FALSE;
-}
-
-JNIEXPORT void JNICALL
-Java_com_hinnka_mycamera_processor_MultiFrameStacker_releaseVulkanStackerNative(
-    JNIEnv *env, jobject /* this */, jlong stackerPtr) {
-  auto *stacker = reinterpret_cast<VulkanImageStacker *>(stackerPtr);
-  delete stacker;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_com_hinnka_mycamera_processor_MultiFrameStacker_resetVulkanStackerNative(
-    JNIEnv *env, jobject /* this */, jlong stackerPtr) {
-  auto *stacker = reinterpret_cast<VulkanImageStacker *>(stackerPtr);
-  if (!stacker)
-    return JNI_FALSE;
-  try {
-    return stacker->resetForReuse() ? JNI_TRUE : JNI_FALSE;
-  } catch (const std::exception &e) {
-    LOGE("resetVulkanStackerNative failed: %s", e.what());
-  } catch (...) {
-    LOGE("resetVulkanStackerNative failed with unknown error");
-  }
-  return JNI_FALSE;
 }
 
 /**

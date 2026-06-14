@@ -31,11 +31,6 @@ if(NOT GLSL_COMPILER)
 endif()
 
 set(SHADER_SOURCES
-    shaders/accumulate.comp
-    shaders/align_tiles.comp
-    shaders/build_pyramid.comp
-    shaders/normalize.comp
-    shaders/structure_tensor.comp
     shaders/align_lk.comp
     shaders/raw_structure_tensor.comp
     shaders/robustness_raw.comp
@@ -46,7 +41,6 @@ set(SHADER_SOURCES
     shaders/normalize_green_hr.comp
     shaders/color_gather_raw.comp
     shaders/normalize_color_hr.comp
-    shaders/yuv_to_rgba.comp
 )
 
 set(GENERATED_SHADER_HEADERS "")
@@ -93,7 +87,6 @@ add_library(my-native-lib SHARED
     lut_processor.cpp
     vulkan_manager.cpp
     vulkan_utils.cpp
-    vulkan_stacker.cpp
     vulkan_raw_stacker.cpp
     dcp_parser.cpp
     ${LIBRAW_SOURCES}
@@ -128,6 +121,8 @@ target_link_libraries(
     log
     jnigraphics
     android
+    EGL
+    GLESv3
     vulkan
     z
 )
