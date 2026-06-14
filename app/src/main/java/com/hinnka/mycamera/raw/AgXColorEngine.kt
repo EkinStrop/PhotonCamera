@@ -6,37 +6,28 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
-data class AgxLut(
+data class RawEngineLut(
     val name: String,
     val sourceKey: String,
     val size: Int,
     val rgbaFloatBuffer: FloatBuffer
 )
 
-object AgXColorEngine {
-    private const val TAG = "AgXColorEngine"
-    private const val BASE_SRGB_ASSET = "agx/AgX_Base_sRGB.plut"
+typealias AgxLut = RawEngineLut
+typealias ArriLut = RawEngineLut
+
+object RawEngineLutLoader {
     private const val MAGIC_PLUT = 0x54554C50
     private const val DATA_TYPE_UINT8 = 0
     private const val DATA_TYPE_UINT16 = 1
 
-    @Volatile
-    private var cachedBaseSrgb: AgxLut? = null
-
-    fun loadBaseSrgbLut(context: Context): AgxLut? {
-        cachedBaseSrgb?.let { return it }
-        return synchronized(this) {
-            cachedBaseSrgb ?: loadPlut(context, BASE_SRGB_ASSET)?.also { cachedBaseSrgb = it }
-        }
-    }
-
-    private fun loadPlut(context: Context, assetPath: String): AgxLut? {
+    fun loadPlut(context: Context, assetPath: String, tag: String): RawEngineLut? {
         val startTime = System.currentTimeMillis()
         return try {
             val bytes = context.assets.open(assetPath).use { it.readBytes() }
             val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
             if (buffer.remaining() < 16) {
-                PLog.e(TAG, "PLUT $assetPath is too short: ${bytes.size} bytes")
+                PLog.e(tag, "PLUT $assetPath is too short: ${bytes.size} bytes")
                 return null
             }
 
@@ -46,8 +37,8 @@ object AgXColorEngine {
             val dataType = buffer.int
             if (magic != MAGIC_PLUT || size <= 1 || dataType !in setOf(DATA_TYPE_UINT8, DATA_TYPE_UINT16)) {
                 PLog.e(
-                    TAG,
-                    "Invalid AgX PLUT $assetPath: magic=$magic version=$version size=$size dataType=$dataType"
+                    tag,
+                    "Invalid PLUT $assetPath: magic=$magic version=$version size=$size dataType=$dataType"
                 )
                 return null
             }
@@ -63,7 +54,7 @@ object AgXColorEngine {
             val componentCount = texelCount * 3
             val payloadBytes = componentCount * if (dataType == DATA_TYPE_UINT16) 2 else 1
             if (buffer.remaining() < payloadBytes) {
-                PLog.e(TAG, "AgX PLUT $assetPath payload too short: remaining=${buffer.remaining()} expected=$payloadBytes")
+                PLog.e(tag, "PLUT $assetPath payload too short: remaining=${buffer.remaining()} expected=$payloadBytes")
                 return null
             }
 
@@ -81,18 +72,18 @@ object AgXColorEngine {
             uploadBuffer.position(0)
 
             PLog.d(
-                TAG,
-                "Loaded AgX PLUT ${assetPath.substringAfterLast('/')} ($size^3) in " +
+                tag,
+                "Loaded PLUT ${assetPath.substringAfterLast('/')} ($size^3) in " +
                     "${System.currentTimeMillis() - startTime}ms"
             )
-            AgxLut(
+            RawEngineLut(
                 name = assetPath.substringAfterLast('/').substringBeforeLast('.'),
                 sourceKey = "$assetPath:$version:$dataType:$size:$payloadBytes",
                 size = size,
                 rgbaFloatBuffer = uploadBuffer.apply { position(0) }
             )
         } catch (e: Exception) {
-            PLog.e(TAG, "Failed to load AgX PLUT from $assetPath", e)
+            PLog.e(tag, "Failed to load PLUT from $assetPath", e)
             null
         }
     }
@@ -102,6 +93,22 @@ object AgXColorEngine {
             (buffer.short.toInt() and 0xFFFF) / 65535f
         } else {
             (buffer.get().toInt() and 0xFF) / 255f
+        }
+    }
+}
+
+object AgXColorEngine {
+    private const val TAG = "AgXColorEngine"
+    private const val BASE_SRGB_ASSET = "agx/AgX_Base_sRGB.plut"
+
+    @Volatile
+    private var cachedBaseSrgb: AgxLut? = null
+
+    fun loadBaseSrgbLut(context: Context): AgxLut? {
+        cachedBaseSrgb?.let { return it }
+        return synchronized(this) {
+            cachedBaseSrgb ?: RawEngineLutLoader.loadPlut(context, BASE_SRGB_ASSET, TAG)
+                ?.also { cachedBaseSrgb = it }
         }
     }
 }
