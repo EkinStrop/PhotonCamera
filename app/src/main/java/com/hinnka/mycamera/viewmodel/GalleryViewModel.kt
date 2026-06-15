@@ -329,7 +329,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private set
     var editRawBaselineLutId = MutableStateFlow<String?>(null)
         private set
-    var editRawColorEngine = MutableStateFlow(RawColorEngine.AgX)
+    var editRawColorEngine = MutableStateFlow(RawColorEngine.AdobeCurve)
         private set
     var editRawSpectralFilmStock = MutableStateFlow<String?>(null)
         private set
@@ -1737,7 +1737,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editRawDROMode.value = "OFF"
                 editRawDcpId.value = null
                 editRawBaselineLutId.value = null
-                editRawColorEngine.value = RawColorEngine.AgX
+                editRawColorEngine.value = RawColorEngine.AdobeCurve
                 editRawSpectralFilmStock.value = "kodak_portra_400"
                 editRawSpectralFilmPrint.value = "kodak_portra_endura"
                 editRawSpectralFilmCDensityGain.value = 1f
@@ -1782,7 +1782,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         editRawDROMode.value = "OFF"
         editRawDcpId.value = null
         editRawBaselineLutId.value = null
-        editRawColorEngine.value = RawColorEngine.AgX
+        editRawColorEngine.value = RawColorEngine.AdobeCurve
         editRawSpectralFilmStock.value = null
         editRawSpectralFilmPrint.value = null
         editRawSpectralFilmCDensityGain.value = 1f

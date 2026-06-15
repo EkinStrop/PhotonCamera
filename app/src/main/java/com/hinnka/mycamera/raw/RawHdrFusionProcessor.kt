@@ -109,7 +109,8 @@ object RawHdrFusionProcessor {
             returned = true
             PLog.d(
                 TAG,
-                "RAW HDR fusion took ${elapsed}ms, size=${width}x$height, deghostMask=$enableDeghostMask, exposureScales=${exposureScales.joinToString()}"
+                "RAW HDR fusion took ${elapsed}ms, size=${width}x$height, deghostMask=$enableDeghostMask, " +
+                        "exposureScales=${exposureScales.joinToString()}, valueDomains=${frames.joinToString { it.valueDomain.toString() }}"
             )
             RawHdrFusionResult(
                 fusedBayerBuffer = outputBuffer,
@@ -589,6 +590,28 @@ object RawHdrFusionProcessor {
             return rawToNormalized(rawSample(frame, p), channel, uValueDomain[frame]);
         }
 
+        ivec2 bayerTileBase(ivec2 p) {
+            int x = p.x - (p.x / 2) * 2;
+            int y = p.y - (p.y / 2) * 2;
+            return p - ivec2(x, y);
+        }
+
+        float frameTileMaxNorm(int frame, ivec2 p) {
+            ivec2 base = bayerTileBase(p);
+            float maxNorm = 0.0;
+            for (int y = 0; y <= 1; y++) {
+                for (int x = 0; x <= 1; x++) {
+                    ivec2 q = clamp(base + ivec2(x, y), ivec2(0), uSize - ivec2(1));
+                    maxNorm = max(maxNorm, frameNorm(frame, q, channelIndex(q)));
+                }
+            }
+            return maxNorm;
+        }
+
+        float frameHighlightGate(int frame, ivec2 p) {
+            return 1.0 - smoothstep(0.90, 0.995, frameTileMaxNorm(frame, p));
+        }
+
         int clampSameParity(int coord, int offset, int maxCoord) {
             int q = coord + offset;
             if (q < 0) q = coord - offset;
@@ -630,7 +653,7 @@ object RawHdrFusionProcessor {
             float sigma = sqrt(noiseVariance(frame, norm, channel));
             float snr = scaledSignal / max(sigma, 0.000001);
             float shadowGate = smoothstep(2.0, 6.0, snr);
-            float highlightGate = 1.0 - smoothstep(0.90, 0.995, norm);
+            float highlightGate = frameHighlightGate(frame, p);
             return clamp(shadowGate * highlightGate, 0.0, 1.0);
         }
 
@@ -716,7 +739,7 @@ object RawHdrFusionProcessor {
             scaledSignal = norm * scale;
 
             float shadowGate = smoothstep(0.002, 0.035, norm);
-            float highlightGate = 1.0 - smoothstep(0.90, 0.995, norm);
+            float highlightGate = frameHighlightGate(frame, p);
             float clipWeight = max(0.0, shadowGate * highlightGate);
 
             float centered = exp(-((norm - 0.5) * (norm - 0.5)) / (2.0 * 0.22 * 0.22));

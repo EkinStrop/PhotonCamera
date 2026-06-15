@@ -370,7 +370,7 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AgX,
+        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): Bitmap? = withContext(glDispatcher) {
@@ -440,7 +440,7 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AgX,
+        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
     ): Bitmap? = withContext(glDispatcher) {
         try {
             if (!isInitialized) {
@@ -504,7 +504,7 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AgX,
+        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): RawHdrRenderResult? = withContext(glDispatcher) {

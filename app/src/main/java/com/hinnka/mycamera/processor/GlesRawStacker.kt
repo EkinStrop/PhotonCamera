@@ -104,6 +104,7 @@ class GlesRawStacker(
             ensureGles31()
             initPrograms()
             initResources()
+            applyRawRenderState()
             PLog.d(
                 TAG,
                 "GLES RAW stack frames=${images.size} size=${width}x$height plane=${planeWidth}x$planeHeight grid=${gridWidth}x$gridHeight"
@@ -544,6 +545,7 @@ class GlesRawStacker(
         )
         GLES30.glDrawBuffers(1, intArrayOf(GLES30.GL_COLOR_ATTACHMENT0), 0)
         GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDisable(GLES30.GL_DITHER)
         checkFramebuffer(label)
     }
 
@@ -701,6 +703,15 @@ class GlesRawStacker(
             }
             throw IllegalStateException("$label GL error: 0x${first.toString(16)}")
         }
+    }
+
+    private fun applyRawRenderState() {
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDisable(GLES30.GL_DITHER)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDisable(GLES30.GL_STENCIL_TEST)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
     }
 
     private fun groupCount(value: Int): Int = (value + LOCAL_SIZE - 1) / LOCAL_SIZE

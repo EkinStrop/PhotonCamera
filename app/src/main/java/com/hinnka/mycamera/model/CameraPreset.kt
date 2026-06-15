@@ -26,7 +26,7 @@ data class CameraPreset(
     val frameId: String? = null,
     // Quick RAW 功能
     val rawDcpId: String? = null,
-    val rawColorEngine: String = RawColorEngine.AgX.name,
+    val rawColorEngine: String = RawColorEngine.AdobeCurve.name,
     val rawSpectralFilmStock: String? = null,
     val rawSpectralFilmPrint: String? = null,
     val rawDROMode: String = "OFF",
@@ -71,7 +71,6 @@ data class CameraPreset(
                 useRaw = false,
                 useMFNR = false,
                 rawDcpId = null,
-                rawColorEngine = RawColorEngine.AgX.name,
                 rawDROMode = "DR100",
                 isBuiltIn = true
             ),
@@ -87,7 +86,6 @@ data class CameraPreset(
                 useRaw = false,
                 useMFNR = true,
                 rawDcpId = null,
-                rawColorEngine = RawColorEngine.AgX.name,
                 rawDROMode = "DR100",
                 isBuiltIn = true
             ),
@@ -112,7 +110,6 @@ data class CameraPreset(
                 useRaw = true,
                 useMFNR = false,
                 rawDcpId = null,
-                rawColorEngine = RawColorEngine.AgX.name,
                 rawDROMode = "DR100",
                 isBuiltIn = true
             ),
@@ -129,7 +126,6 @@ data class CameraPreset(
                 aspectRatio = AspectRatio.XPAN.name,
                 useRaw = true,
                 rawDcpId = null,
-                rawColorEngine = RawColorEngine.AgX.name,
                 rawDROMode = "DR100",
                 isBuiltIn = true
             ),
@@ -166,7 +162,6 @@ data class CameraPreset(
                 frameId = "black_border",
                 useRaw = false,
                 rawDcpId = null,
-                rawColorEngine = RawColorEngine.AgX.name,
                 rawDROMode = "DR100",
                 isBuiltIn = true
             ),

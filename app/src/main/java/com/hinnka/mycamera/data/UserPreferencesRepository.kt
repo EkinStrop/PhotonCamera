@@ -86,7 +86,7 @@ data class UserPreferences(
     val rawBaselineLutConfigured: Boolean = false,
     val phantomBaselineLutId: String? = null,
     val rawDcpId: String? = null,
-    val rawColorEngine: RawColorEngine = RawColorEngine.AgX,
+    val rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
     val rawNlmNoiseFactor: Float = 0f,
     val rawExposureCompensation: Float = 0f,
     val rawAutoExposure: Boolean = true,

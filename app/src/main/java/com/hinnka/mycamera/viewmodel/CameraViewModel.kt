@@ -801,7 +801,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, 1)
     val rawColorEngine: StateFlow<RawColorEngine> = userPreferencesRepository.userPreferences
         .map { it.rawColorEngine }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, RawColorEngine.AgX)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, RawColorEngine.AdobeCurve)
     val rawSpectralFilmStock: StateFlow<String?> = userPreferencesRepository.userPreferences
         .map { it.rawSpectralFilmStock }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -1777,7 +1777,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             rawBlackLevelMode = userPrefs?.rawBlackLevelModes?.get(currentCameraId) ?: "Default",
             rawCustomBlackLevel = userPrefs?.rawCustomBlackLevels?.get(currentCameraId) ?: 0f,
             cameraId = currentCameraId,
-            rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AgX,
+            rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AdobeCurve,
             spectralFilmStock = spectralFilmSettings.stock,
             spectralFilmPrint = spectralFilmSettings.print,
             spectralFilmCDensityGain = spectralFilmSettings.tuning.cDensityGain,
@@ -3793,7 +3793,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawBlackLevelMode = userPrefs?.rawBlackLevelModes?.get(currentCameraId) ?: "Default",
                 rawCustomBlackLevel = userPrefs?.rawCustomBlackLevels?.get(currentCameraId) ?: 0f,
                 cameraId = currentCameraId,
-                rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AgX,
+                rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AdobeCurve,
                 spectralFilmStock = spectralFilmSettings.stock,
                 spectralFilmPrint = spectralFilmSettings.print,
                 spectralFilmCDensityGain = spectralFilmSettings.tuning.cDensityGain,
@@ -3928,7 +3928,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawBlackLevelMode = userPrefs?.rawBlackLevelModes?.get(currentCameraId) ?: "Default",
                 rawCustomBlackLevel = userPrefs?.rawCustomBlackLevels?.get(currentCameraId) ?: 0f,
                 cameraId = currentCameraId,
-                rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AgX,
+                rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AdobeCurve,
                 spectralFilmStock = spectralFilmSettings.stock,
                 spectralFilmPrint = spectralFilmSettings.print,
                 spectralFilmCDensityGain = spectralFilmSettings.tuning.cDensityGain,
@@ -4079,7 +4079,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 rawBlackLevelMode = userPrefs?.rawBlackLevelModes?.get(currentCameraId) ?: "Default",
                 rawCustomBlackLevel = userPrefs?.rawCustomBlackLevels?.get(currentCameraId) ?: 0f,
                 cameraId = currentCameraId,
-                rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AgX,
+                rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AdobeCurve,
                 spectralFilmStock = spectralFilmSettings.stock,
                 spectralFilmPrint = spectralFilmSettings.print,
                 spectralFilmCDensityGain = spectralFilmSettings.tuning.cDensityGain,
@@ -4521,7 +4521,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             rawBlackLevelMode = userPrefs?.rawBlackLevelModes?.get(currentCameraId) ?: "Default",
             rawCustomBlackLevel = userPrefs?.rawCustomBlackLevels?.get(currentCameraId) ?: 0f,
             cameraId = currentCameraId,
-            rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AgX,
+            rawColorEngine = userPrefs?.rawColorEngine ?: RawColorEngine.AdobeCurve,
             spectralFilmStock = spectralFilmSettings.stock,
             spectralFilmPrint = spectralFilmSettings.print,
             spectralFilmCDensityGain = spectralFilmSettings.tuning.cDensityGain,
