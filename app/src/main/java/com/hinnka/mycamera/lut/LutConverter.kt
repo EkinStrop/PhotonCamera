@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import com.hinnka.mycamera.color.TransferCurve
 import com.hinnka.mycamera.raw.ColorSpace
+import com.hinnka.mycamera.utils.BoundedTextLineReader
 import com.hinnka.mycamera.utils.PLog
 // LutConfig is in the same package (com.hinnka.mycamera.lut), no import needed
 import kotlin.math.roundToInt
@@ -22,6 +23,7 @@ import kotlin.math.roundToInt
  */
 object LutConverter {
 
+    private const val TAG = "LutConverter"
     private const val MAGIC_PLUT = "PLUT"
     private const val MAGIC_PLUT_INT = 0x54554C50  // 'PLUT' in Little Endian
     private const val VERSION = 3
@@ -63,7 +65,7 @@ object LutConverter {
 
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            PLog.e(TAG, "Failed to convert cube LUT", e)
             false
         }
     }
@@ -388,7 +390,7 @@ object LutConverter {
         }
 
         inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-            reader.forEachLine { line ->
+            BoundedTextLineReader.forEachLine(reader) { line ->
                 val trimmed = line.trim()
 
                 // 跳过空行和注释

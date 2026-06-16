@@ -2,6 +2,7 @@ package com.hinnka.mycamera.raw
 
 import android.content.Context
 import com.hinnka.mycamera.lut.LutConfig
+import com.hinnka.mycamera.utils.BoundedTextLineReader
 import com.hinnka.mycamera.utils.PLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -444,14 +445,14 @@ object SpectralFilmProfile {
             var dst = 0
 
             context.assets.open(assetPath).use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream)).useLines { lines ->
-                    for (line in lines) {
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    BoundedTextLineReader.forEachLine(reader) { line ->
                         val trimmed = line.trim()
                         if (trimmed.isEmpty() || trimmed.startsWith("#") ||
                             trimmed.startsWith("TITLE") || trimmed.startsWith("LUT_3D_SIZE") ||
                             trimmed.startsWith("DOMAIN_MIN") || trimmed.startsWith("DOMAIN_MAX")
                         ) {
-                            continue
+                            return@forEachLine
                         }
                         val parts = trimmed.split("\\s+".toRegex())
                         if (parts.size >= 3 && dst < totalSize) {
