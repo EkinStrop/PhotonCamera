@@ -756,7 +756,7 @@ class GlesRawStacker(
         private const val ALIGN_SAMPLE_STEP = 2
         private const val LK_REFINE_PASSES = 2
         private const val FLOW_SMOOTH_PASSES = 2
-        private const val FLOW_OUTLIER_THRESHOLD_PX = 24.0f
+        private const val FLOW_OUTLIER_THRESHOLD_PX = 12.0f
         private const val NON_REFERENCE_FRAME_WEIGHT = 0.92f
 
         private val FULLSCREEN_VERTEX_SHADER = """
@@ -1114,10 +1114,10 @@ class GlesRawStacker(
                 float snr = lambda1 / max(2.0 * noiseVar * 9.0, 1e-12);
                 float flatness = 1.0 - smoothstep(0.35, 4.0, snr);
                 float anisotropy = 1.0 + sqrt(max(lambda1 - lambda2, 0.0) / max(lambda1 + lambda2, 1e-7));
-                float kDetail = 0.30;
+                float kDetail = 0.26;
                 float kDenoise = 1.0;
                 float kShrink = 3.0;
-                float kStretch = 5.0;
+                float kStretch = 3.6;
                 float k1Base = anisotropy > 1.6 ? 1.0 / kShrink : 1.0;
                 float k2Base = anisotropy > 1.6 ? kStretch : 1.0;
                 float preK1 = kDetail * mix(k1Base, kDenoise, flatness);
@@ -1227,10 +1227,10 @@ class GlesRawStacker(
                         float c = curProxy(vec2(rp) + flow);
                         float diff = r - c;
                         float d2 = diff * diff;
-                        float noiseFloor = mix(4.5 * sigma2, sigma2Noise, edgeRelax);
+                        float noiseFloor = mix(4.5 * sigma2, 0.75 * sigma2Noise, edgeRelax);
                         float den = mix(sigma2, sigma2Noise, edgeRelax);
                         float residual = max(0.0, d2 - noiseFloor) / max(den, 1e-10);
-                        float tau = 1.0 + 1.2 * edgeRelax;
+                        float tau = 1.0 + 0.75 * edgeRelax;
                         float robust = exp(-0.5 * pow(residual / tau, 8.0)) * globalPenalty;
                         float w = (x == 0 && y == 0) ? 2.0 : 1.0;
                         sumR += robust * w;
@@ -1241,7 +1241,7 @@ class GlesRawStacker(
                 }
                 float avgR = sumR / max(weightSum, 1.0);
                 float minMix = mix(0.35, 0.15, edgeRelax);
-                float centerMix = mix(0.35, 0.55, edgeRelax);
+                float centerMix = mix(0.35, 0.65, edgeRelax);
                 float outR = clamp(minMix * minR + centerMix * centerR + (1.0 - minMix - centerMix) * avgR, 0.0, 1.0);
                 imageStore(uRobustness, p, vec4(outR));
             }
@@ -1288,14 +1288,14 @@ class GlesRawStacker(
                 float meanR = robustSum / max(count, 1.0);
                 float weak = weakCount / max(count, 1.0);
                 float detail = detailSum / max(count, 1.0);
-                float robustNorm = clamp((meanR - 0.58) / 0.24, 0.0, 1.0);
-                float weakPenalty = clamp(1.0 - max(0.0, weak - 0.10) / 0.30, 0.0, 1.0);
-                float detailBoost = detail > 0.055 ? 1.0 : (detail > 0.025 ? 0.70 : 0.35);
-                float mask = clamp((0.55 * robustNorm + 0.45 * weakPenalty) * (0.55 + 0.45 * detailBoost), 0.0, 1.0);
+                float robustNorm = clamp((meanR - 0.62) / 0.22, 0.0, 1.0);
+                float weakPenalty = clamp(1.0 - max(0.0, weak - 0.08) / 0.26, 0.0, 1.0);
+                float detailBoost = detail > 0.055 ? 0.85 : (detail > 0.025 ? 0.55 : 0.30);
+                float mask = clamp((0.60 * robustNorm + 0.40 * weakPenalty) * (0.55 + 0.45 * detailBoost), 0.0, 1.0);
                 if (detail > 0.055) {
-                    mask = max(mask, 0.35);
+                    mask = max(mask, 0.28 * robustNorm);
                 } else if (detail > 0.025) {
-                    mask = max(mask, 0.20);
+                    mask = max(mask, 0.14 * robustNorm);
                 }
                 fragColor = mask;
             }
@@ -1524,6 +1524,13 @@ class GlesRawStacker(
                 return clamp(a.r / max(a.g, 1e-5), 0.0, 1.0);
             }
 
+            float finalSmoothAmount(float variance, float noise, float detailDeviation) {
+                float flatness = 1.0 - smoothstep(0.00025, 0.0035, variance);
+                float noiseStd = sqrt(max(noise, 1e-10));
+                float detailKeep = smoothstep(1.4 * noiseStd + 0.0025, 3.2 * noiseStd + 0.010, detailDeviation);
+                return 0.38 * flatness * (1.0 - 0.85 * detailKeep);
+            }
+
             void main() {
                 ivec2 p = ivec2(gl_FragCoord.xy);
                 int bayerIndex = bayerIndexAt(uCfaPattern, p);
@@ -1548,8 +1555,8 @@ class GlesRawStacker(
                 float variance = max(mean2 - mean * mean, 0.0);
                 float noise = max(uNoiseAlpha * fused + uNoiseBeta, uNoiseBeta) / max(a.g, 1.0);
                 float wienerGain = max(variance - noise, 0.0) / max(variance, 1e-6);
-                float flatness = 1.0 - smoothstep(0.0004, 0.006, variance);
-                fused = mix(fused, mean + wienerGain * (fused - mean), 0.55 * flatness);
+                float detailDeviation = abs(fused - mean);
+                fused = mix(fused, mean + wienerGain * (fused - mean), finalSmoothAmount(variance, noise, detailDeviation));
                 fused = clamp(fused, 0.0, 1.0);
 
                 uint raw = uint(floor(fused * 65535.0 + 0.5));
