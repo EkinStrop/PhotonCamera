@@ -381,7 +381,7 @@ fun SettingsScreen(
     }
 
     val restoreLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
             coroutineScope.launch {
@@ -401,7 +401,7 @@ fun SettingsScreen(
     }
 
     val importDcpLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
+        ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         if (uris.isNotEmpty()) {
             viewModel.importRawDcps(uris) { importedDcps, failedCount ->
@@ -1446,7 +1446,7 @@ fun SettingsScreen(
                         spectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
                         spectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
                         onSelectDcp = { viewModel.setRawDcpId(it) },
-                        onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
+                        onImportDcp = { importDcpLauncher.launch("*/*") },
                         onDeleteDcp = { dcp ->
                             viewModel.deleteRawDcp(dcp.id) { success ->
                                 android.widget.Toast.makeText(
@@ -1811,7 +1811,7 @@ fun SettingsScreen(
                             },
                             enabled = backupOperation == null,
                             showProgress = backupOperation == BackupOperation.RESTORE,
-                            onClick = { restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }
+                            onClick = { restoreLauncher.launch("*/*") }
                         )
                     }
 

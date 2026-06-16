@@ -308,7 +308,7 @@ fun GalleryEditScreen(
     }
 
     val rawDcpLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
+        contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         val photo = currentPhoto ?: return@rememberLauncherForActivityResult
@@ -1122,7 +1122,7 @@ fun GalleryEditScreen(
                                             }
                                         },
                                         onImportDcp = {
-                                            rawDcpLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                            rawDcpLauncher.launch("*/*")
                                         },
                                         onDeleteDcp = { dcp ->
                                             val isDeletingSelectedDcp = editRawDcpId == dcp.id

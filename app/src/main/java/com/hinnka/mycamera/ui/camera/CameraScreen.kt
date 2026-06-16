@@ -258,7 +258,7 @@ fun CameraScreen(
     )
 
     val dcpImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments(),
+        contract = ActivityResultContracts.GetMultipleContents(),
         onResult = { uris ->
             if (uris.isNotEmpty()) {
                 viewModel.importRawDcps(uris) { _, _ -> }
@@ -1320,7 +1320,7 @@ fun CameraScreen(
             rawSpectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
             rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
             onRawDcpChange = { viewModel.setRawDcpId(it) },
-            onImportRawDcp = { dcpImportLauncher.launch(arrayOf("*/*")) },
+            onImportRawDcp = { dcpImportLauncher.launch("*/*") },
             onDeleteRawDcp = { dcp ->
                 viewModel.deleteRawDcp(dcp.id) { success ->
                     android.widget.Toast.makeText(

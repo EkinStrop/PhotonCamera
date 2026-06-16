@@ -42,7 +42,7 @@ fun WatermarkEditSheet(
 
     val context = LocalContext.current
     val fontPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             val fontPath = onImportFont(it)
@@ -222,7 +222,7 @@ fun WatermarkEditSheet(
                                 Surface(
                                     onClick = {
                                         if (id == "Custom") {
-                                            fontPicker.launch(arrayOf("font/*", "application/octet-stream"))
+                                            fontPicker.launch("*/*")
                                         } else {
                                             properties["DEVICE_MODEL_FONT"] = id
                                             onPropertiesChange(properties.toMap())

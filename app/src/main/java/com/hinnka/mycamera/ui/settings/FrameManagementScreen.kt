@@ -95,7 +95,7 @@ fun FrameManagementScreen(
 
     // JSON 边框配置文件选择器
     val frameJsonPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             isImporting = true
@@ -231,7 +231,7 @@ fun FrameManagementScreen(
                         text = { Text(stringResource(R.string.import_frame_json)) },
                         onClick = {
                             showCreateMenu = false
-                            frameJsonPicker.launch(arrayOf("application/json", "text/plain", "*/*"))
+                            frameJsonPicker.launch("*/*")
                         }
                     )
                 }

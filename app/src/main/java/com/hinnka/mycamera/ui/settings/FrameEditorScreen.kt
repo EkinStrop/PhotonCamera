@@ -142,7 +142,7 @@ fun FrameEditorScreen(
     var pendingLogoElementId by remember { mutableStateOf<String?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
@@ -161,7 +161,7 @@ fun FrameEditorScreen(
     }
 
     val fontPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         val targetId = pendingFontElementId ?: return@rememberLauncherForActivityResult
         pendingFontElementId = null
@@ -385,7 +385,7 @@ fun FrameEditorScreen(
                 0 -> FrameBasicTab(
                     draft = draft,
                     onDraftChange = { draft = it },
-                    onPickImage = { imagePicker.launch(arrayOf("image/png", "image/webp", "image/*")) },
+                    onPickImage = { imagePicker.launch("*/*") },
                     modifier = Modifier.weight(1f)
                 )
 
@@ -396,7 +396,7 @@ fun FrameEditorScreen(
                     onShowAddMenuChange = { showAddElementMenu = it },
                     onImportFont = { draftId ->
                         pendingFontElementId = draftId
-                        fontPicker.launch(arrayOf("font/*", "application/octet-stream"))
+                        fontPicker.launch("*/*")
                     },
                     onImportLogo = { draftId ->
                         pendingLogoElementId = draftId
