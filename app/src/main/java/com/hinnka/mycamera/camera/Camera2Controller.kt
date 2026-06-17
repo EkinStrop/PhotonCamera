@@ -1504,7 +1504,8 @@ class Camera2Controller(private val context: Context) {
     private fun applyBaseCameraSettings(
         builder: CaptureRequest.Builder,
         isCapture: Boolean = false,
-        isRawCapture: Boolean = false
+        isRawCapture: Boolean = false,
+        disableZslForHdrCapture: Boolean = false
     ) {
         val currentState = _state.value
 
@@ -1547,7 +1548,9 @@ class Camera2Controller(private val context: Context) {
             )
         }
 
-        setZslDisabledIfSupported(builder)
+        if (disableZslForHdrCapture) {
+            setZslDisabledIfSupported(builder)
+        }
         applyVendorCaptureSettings(builder, isCapture)
     }
 
@@ -1584,9 +1587,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun setZslDisabledIfSupported(builder: CaptureRequest.Builder) {
         if (!isZslControlAvailable()) return
-        if (_state.value.useHdrComposition && !_state.value.useRaw) {
-            builder.set(CaptureRequest.CONTROL_ENABLE_ZSL, false)
-        }
+        builder.set(CaptureRequest.CONTROL_ENABLE_ZSL, false)
     }
 
     private fun isZslControlAvailable(): Boolean {
@@ -3679,7 +3680,12 @@ class Camera2Controller(private val context: Context) {
             val requests = evOffsets.mapIndexed { index, evOffset ->
                 device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(reader.surface)
-                    applyBaseCameraSettings(this, isCapture = true, isRawCapture = isRawCapture)
+                    applyBaseCameraSettings(
+                        builder = this,
+                        isCapture = true,
+                        isRawCapture = isRawCapture,
+                        disableZslForHdrCapture = !isRawCapture
+                    )
                     applyHdrBracketExposure(this, currentState, evOffset, manualBaseExposure)
                     set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
                     set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
