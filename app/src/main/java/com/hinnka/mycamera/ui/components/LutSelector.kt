@@ -315,7 +315,7 @@ fun LutSelector(
             ) {
                 LazyRow(
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
                     items(categoryTabs, key = { it.stableKey() }) { category ->
@@ -329,8 +329,8 @@ fun LutSelector(
 
                         Text(
                             text = categoryName,
-                            color = if (isSelected) Color(0xFFFF6B35) else Color.White.copy(alpha = 0.5f),
-                            fontSize = 12.sp,
+                            color = if (isSelected) Color(0xFFFF6B35) else Color.White.copy(alpha = 0.7f),
+                            fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             modifier = Modifier
                                 .clickable(
@@ -339,7 +339,7 @@ fun LutSelector(
                                 ) {
                                     selectedCategory = category
                                 }
-                                .padding(vertical = 4.dp)
+                                .padding(horizontal = 4.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -433,7 +433,7 @@ private fun LutSelectorModeTab(
             .background(if (isSelected) Color.White.copy(alpha = 0.18f) else Color.Transparent)
             .border(
                 width = 1.dp,
-                color = if (isSelected) Color.White.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.18f),
+                color = if (isSelected) Color.White.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.15f),
                 shape = RoundedCornerShape(14.dp)
             )
             .clickable(
@@ -447,9 +447,9 @@ private fun LutSelectorModeTab(
     ) {
         Text(
             text = text,
-            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.58f),
+            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
             fontSize = 12.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
         )
         if (badgeText != null) {
             Text(

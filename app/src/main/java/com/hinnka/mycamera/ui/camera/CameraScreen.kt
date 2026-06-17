@@ -1406,7 +1406,17 @@ fun CameraScreen(
                                 Modifier
                                     .padding(bottom = 48.dp)
                                     .background(Color.Black)
-                            } else Modifier
+                            } else {
+                                Modifier.background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            Color.Black.copy(alpha = 0.2f),
+                                            Color.Black.copy(alpha = 0.6f)
+                                        )
+                                    )
+                                )
+                            }
                         )
                         .padding(horizontal = 8.dp)
                         .padding(4.dp),
