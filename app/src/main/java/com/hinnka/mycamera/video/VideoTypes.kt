@@ -17,6 +17,7 @@ enum class VideoStabilizationMode(val displayName: String) {
 
 enum class CaptureMode {
     PHOTO,
+    QUICK_SHOT,
     VIDEO
 }
 

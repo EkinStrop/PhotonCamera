@@ -4,6 +4,8 @@ import android.graphics.Rect
 import android.util.Range
 import android.util.Size
 import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.QuickShotCapabilities
+import com.hinnka.mycamera.video.QuickShotConfig
 import com.hinnka.mycamera.video.VideoCapabilities
 import com.hinnka.mycamera.video.VideoConfig
 import com.hinnka.mycamera.video.VideoRecordingState
@@ -351,6 +353,8 @@ data class CameraState(
     val isP3Supported: Boolean = false,
     val currentDynamicRangeProfile: String = "STANDARD",
     val captureMode: CaptureMode = CaptureMode.PHOTO,
+    val quickShotConfig: QuickShotConfig = QuickShotConfig(),
+    val quickShotCapabilities: QuickShotCapabilities = QuickShotCapabilities(),
     val videoConfig: VideoConfig = VideoConfig(),
     val videoCapabilities: VideoCapabilities = VideoCapabilities(),
     val videoRecordingState: VideoRecordingState = VideoRecordingState(),
@@ -432,7 +436,7 @@ data class CameraState(
 
     fun getPreviewAspectRatio(): Float {
         return when (captureMode) {
-            CaptureMode.PHOTO -> aspectRatio.getValue(isLandscape = false)
+            CaptureMode.PHOTO, CaptureMode.QUICK_SHOT -> aspectRatio.getValue(isLandscape = false)
             CaptureMode.VIDEO -> videoConfig.aspectRatio.getPortraitAspectRatio(
                 videoCapabilities.openGatePortraitAspectRatio
             )

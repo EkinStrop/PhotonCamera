@@ -93,6 +93,7 @@ class LutRenderer : GLSurfaceView.Renderer {
         private const val TEXTURE_COORD_COMPONENT_COUNT = 2
         private const val BYTES_PER_FLOAT = 4
         private const val BYTES_PER_SHORT = 2
+        private const val DEFAULT_PREVIEW_CAPTURE_MAX_LONG_EDGE = 1080
     }
 
     // 着色器程序 ID
@@ -522,7 +523,7 @@ class LutRenderer : GLSurfaceView.Renderer {
     private var captureWidth = 512
     private var captureHeight = 512
     private var captureAspectRatio = 0f
-    private val maxCaptureSize = 1080 // 预览图最大尺寸
+    private var captureMaxLongEdge = DEFAULT_PREVIEW_CAPTURE_MAX_LONG_EDGE
     private var lastCaptureWidth = 0
     private var lastCaptureHeight = 0
 
@@ -2618,11 +2619,11 @@ class LutRenderer : GLSurfaceView.Renderer {
         }
 
         if (targetAspectRatio >= 1f) {
-            captureWidth = maxCaptureSize
-            captureHeight = (maxCaptureSize / targetAspectRatio).toInt()
+            captureWidth = captureMaxLongEdge
+            captureHeight = (captureMaxLongEdge / targetAspectRatio).toInt()
         } else {
-            captureHeight = maxCaptureSize
-            captureWidth = (maxCaptureSize * targetAspectRatio).toInt()
+            captureHeight = captureMaxLongEdge
+            captureWidth = (captureMaxLongEdge * targetAspectRatio).toInt()
         }
         captureWidth = captureWidth.coerceAtLeast(1)
         captureHeight = captureHeight.coerceAtLeast(1)
@@ -2633,7 +2634,9 @@ class LutRenderer : GLSurfaceView.Renderer {
      * 请求捕获预览帧
      * 会在下一帧渲染后捕获并通过回调返回
      */
-    fun capturePreviewFrame() {
+    fun capturePreviewFrame(maxLongEdge: Int = DEFAULT_PREVIEW_CAPTURE_MAX_LONG_EDGE) {
+        captureMaxLongEdge = maxLongEdge.coerceAtLeast(1)
+        updateCaptureSize()
         shouldCapturePreview = true
     }
 

@@ -31,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.QuickShotCapabilities
+import com.hinnka.mycamera.video.QuickShotConfig
+import com.hinnka.mycamera.video.QuickShotResolutionPreset
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoCapabilities
 import com.hinnka.mycamera.video.VideoConfig
@@ -50,6 +53,9 @@ fun CameraTopBar(
     onHistogramToggle: () -> Unit,
     useLivePhoto: Boolean,
     onLivePhotoToggle: () -> Unit,
+    quickShotConfig: QuickShotConfig,
+    quickShotCapabilities: QuickShotCapabilities,
+    onQuickShotResolutionClick: () -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
@@ -69,6 +75,23 @@ fun CameraTopBar(
             onVideoStabilizationToggle = onVideoStabilizationToggle,
             onVideoResolutionClick = onVideoResolutionClick,
             onVideoFpsClick = onVideoFpsClick,
+            onSettingsClick = onSettingsClick,
+            modifier = modifier
+        )
+        return
+    }
+
+    if (captureMode == CaptureMode.QUICK_SHOT) {
+        QuickShotTopBar(
+            flashMode = flashMode,
+            onFlashToggle = onFlashToggle,
+            timerSeconds = timerSeconds,
+            onTimerToggle = onTimerToggle,
+            showHistogram = showHistogram,
+            onHistogramToggle = onHistogramToggle,
+            quickShotConfig = quickShotConfig,
+            quickShotCapabilities = quickShotCapabilities,
+            onQuickShotResolutionClick = onQuickShotResolutionClick,
             onSettingsClick = onSettingsClick,
             modifier = modifier
         )
@@ -121,6 +144,94 @@ fun CameraTopBar(
                 contentDescription = stringResource(R.string.settings_use_live_photo),
                 modifier = Modifier.size(20.dp).autoRotate(),
                 tint = if (useLivePhoto) Color.Yellow else Color.White
+            )
+        }
+
+        IconButton(onClick = onHistogramToggle) {
+            Icon(
+                imageVector = Icons.Default.BarChart,
+                contentDescription = stringResource(R.string.histogram),
+                modifier = Modifier.size(20.dp).autoRotate(),
+                tint = if (showHistogram) Color.Yellow else Color.White
+            )
+        }
+
+        IconButton(onClick = onSettingsClick) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = stringResource(R.string.settings),
+                modifier = Modifier.size(20.dp).autoRotate(),
+                tint = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickShotTopBar(
+    flashMode: Int,
+    onFlashToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerToggle: () -> Unit,
+    showHistogram: Boolean,
+    onHistogramToggle: () -> Unit,
+    quickShotConfig: QuickShotConfig,
+    quickShotCapabilities: QuickShotCapabilities,
+    onQuickShotResolutionClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 32.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onFlashToggle) {
+            Icon(
+                imageVector = when (flashMode) {
+                    0 -> Icons.Default.FlashOff
+                    1 -> Icons.Default.FlashOn
+                    2 -> Icons.Default.FlashlightOn
+                    else -> Icons.Default.FlashOff
+                },
+                modifier = Modifier.size(20.dp).autoRotate(),
+                contentDescription = stringResource(R.string.flash),
+                tint = Color.White
+            )
+        }
+
+        IconButton(onClick = onTimerToggle) {
+            if (timerSeconds > 0) {
+                Text(
+                    text = "${timerSeconds}s",
+                    color = Color.Yellow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.autoRotate()
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = stringResource(R.string.timer),
+                    modifier = Modifier.size(20.dp).autoRotate(),
+                    tint = Color.White
+                )
+            }
+        }
+
+        IconButton(
+            onClick = onQuickShotResolutionClick,
+            enabled = quickShotCapabilities.availableResolutions.size > 1
+        ) {
+            Text(
+                text = quickShotResolutionLabel(quickShotConfig.resolution),
+                color = if (quickShotCapabilities.availableResolutions.size > 1) Color.White else Color.White.copy(alpha = 0.5f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.autoRotate()
             )
         }
 
@@ -245,6 +356,14 @@ private fun VideoParameterCluster(
 
             ParameterText("${videoConfig.fps.fps} fps", onFpsClick)
         }
+    }
+}
+
+@Composable
+private fun quickShotResolutionLabel(resolution: QuickShotResolutionPreset): String {
+    return when (resolution) {
+        QuickShotResolutionPreset.FULL -> stringResource(R.string.quick_shot_resolution_full)
+        else -> resolution.displayName
     }
 }
 

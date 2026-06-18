@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Pause
@@ -79,6 +80,7 @@ import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.QuickShotResolutionPreset
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -208,6 +210,7 @@ fun CameraScreen(
     val rawSpectralFilmPrint by viewModel.rawSpectralFilmPrint.collectAsState()
     val multipleExposureState = viewModel.multipleExposureState
     val canStartShutterAnimation by viewModel.canStartShutterAnimation.collectAsState()
+    val currentCaptureModeForEffects by rememberUpdatedState(state.captureMode)
     var previewRecipeParamsOverride by remember(currentLutId) { mutableStateOf<ColorRecipeParams?>(null) }
     var pendingCaptureAnimationBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
@@ -318,7 +321,7 @@ fun CameraScreen(
     LaunchedEffect(Unit) {
         viewModel.imageSavedEvent.collect {
             galleryViewModel.refreshLatestPhoto()
-            if (!enableDevelopAnimation) {
+            if (!enableDevelopAnimation || currentCaptureModeForEffects != CaptureMode.PHOTO) {
                 pendingCaptureAnimationBitmap = null
                 captureAnimationSnapshot = null
                 MyCameraApplication.updateWidgets(context)
@@ -506,7 +509,9 @@ fun CameraScreen(
         canStartShutterAnimation
     ) {
         val canRevealInitialPreview =
-            canStartShutterAnimation || state.captureMode == CaptureMode.VIDEO
+            canStartShutterAnimation ||
+                state.captureMode == CaptureMode.VIDEO ||
+                state.captureMode == CaptureMode.QUICK_SHOT
         if (hasPlayedInitialPreviewTransition || !state.isPreviewActive || !canRevealInitialPreview) return@LaunchedEffect
         previewTransitionActive = true
         delay(InitialPreviewTransitionDelayMillis)
@@ -519,7 +524,7 @@ fun CameraScreen(
     var showGhostPermissionDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.captureMode) {
-        if (state.captureMode == CaptureMode.VIDEO) {
+        if (state.captureMode != CaptureMode.PHOTO) {
             showVideoParameterRuler = false
         }
     }
@@ -616,6 +621,7 @@ fun CameraScreen(
         val backgroundPainter = rememberBackgroundPainter(viewModel)
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
+        val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
         val videoAspectRatio =
             state.videoConfig.aspectRatio.getPortraitAspectRatio(state.videoCapabilities.openGatePortraitAspectRatio)
 
@@ -660,6 +666,11 @@ fun CameraScreen(
                 },
                 useLivePhoto = useLivePhoto,
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
+                quickShotConfig = state.quickShotConfig,
+                quickShotCapabilities = state.quickShotCapabilities,
+                onQuickShotResolutionClick = {
+                    cycleQuickShotResolution(state)?.let(viewModel::setQuickShotResolution)
+                },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
@@ -1001,7 +1012,7 @@ fun CameraScreen(
                         }
 
                         // 实时直方图 (Overlaid on preview if enabled)
-                        if (state.captureMode == CaptureMode.PHOTO && state.histogram != null && viewModel.showHistogram) {
+                        if (isPhotoStyleMode && state.histogram != null && viewModel.showHistogram) {
                             HistogramView(
                                 histogram = state.histogram,
                                 modifier = Modifier
@@ -1036,14 +1047,14 @@ fun CameraScreen(
                             )
                         }
 
-                        if (burstCapturingCount > 0) {
+                        if (state.burstCapturing && burstCapturingCount > 0) {
                             BurstCaptureOverlay(
                                 count = burstCapturingCount,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
 
-                        if (useMultipleExposure) {
+                        if (useMultipleExposure && state.captureMode == CaptureMode.PHOTO) {
                             MultipleExposureOverlay(
                                 state = multipleExposureState,
                                 onFinish = { viewModel.finishMultipleExposureSession() },
@@ -1053,8 +1064,8 @@ fun CameraScreen(
                             )
                         }
 
-                        // Zoom bar overlaid on preview (only in Photo mode)
-                        if (state.captureMode == CaptureMode.PHOTO) {
+                        // Zoom bar overlaid on preview for photo-style modes.
+                        if (isPhotoStyleMode) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1072,7 +1083,7 @@ fun CameraScreen(
                         color = Color.Black
                     )
                 }
-                if (state.captureMode == CaptureMode.PHOTO) {
+                if (isPhotoStyleMode) {
                     parameterRuler()
                 }
             }
@@ -1237,7 +1248,7 @@ fun CameraScreen(
 
 
                     AnimatedVisibility(
-                        visible = !isXpan && state.captureMode == CaptureMode.PHOTO,
+                        visible = !isXpan && isPhotoStyleMode,
                     ) {
                         parameterBar { param ->
                             selectedParameter = param
@@ -1306,6 +1317,9 @@ fun CameraScreen(
             videoAudioInputId = state.videoConfig.audioInputId,
             videoAudioInputOptions = videoAudioInputOptions,
             onVideoAudioInputChange = { viewModel.setVideoAudioInputId(it) },
+            quickShotResolution = state.quickShotConfig.resolution,
+            quickShotCapabilities = state.quickShotCapabilities,
+            onQuickShotResolutionChange = { runPreviewTransition { viewModel.setQuickShotResolution(it) } },
             useRaw = useRaw && state.isRawSupported,
             onRawToggle = { viewModel.setUseRaw(it) },
             isRawSupported = state.isRawSupported,
@@ -1697,7 +1711,8 @@ fun Controls(
                     isCapturing = state.isCapturing,
                     isVideoRecording = state.videoRecordingState.isRecording,
                     isPaused = state.videoRecordingState.isPaused,
-                    allowLongPress = state.captureMode == CaptureMode.PHOTO && !useMultipleExposure,
+                    allowLongPress = (state.captureMode == CaptureMode.PHOTO && !useMultipleExposure) ||
+                        state.captureMode == CaptureMode.QUICK_SHOT,
                     multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                     multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
                             multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
@@ -1937,7 +1952,7 @@ private fun CaptureModeSwitcher(
 
     Box(
         modifier = Modifier
-            .width(100.dp)
+            .width(148.dp)
             .height(30.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White.copy(alpha = 0.12f))
@@ -1945,7 +1960,11 @@ private fun CaptureModeSwitcher(
     ) {
         val knobWidth = 48.dp
         val knobOffset by animateDpAsState(
-            targetValue = if (captureMode == CaptureMode.PHOTO) 0.dp else 48.dp,
+            targetValue = when (captureMode) {
+                CaptureMode.PHOTO -> 0.dp
+                CaptureMode.QUICK_SHOT -> 48.dp
+                CaptureMode.VIDEO -> 96.dp
+            },
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcher"
         )
@@ -1965,13 +1984,23 @@ private fun CaptureModeSwitcher(
                 icon = Icons.Default.CameraAlt,
                 selected = captureMode == CaptureMode.PHOTO,
                 enabled = enabled,
+                contentDescription = stringResource(R.string.capture_mode_photo),
                 onClick = { onModeSelected(CaptureMode.PHOTO) },
+                modifier = Modifier.weight(1f)
+            )
+            ModeSwitcherItem(
+                icon = Icons.Default.Bolt,
+                selected = captureMode == CaptureMode.QUICK_SHOT,
+                enabled = enabled,
+                contentDescription = stringResource(R.string.capture_mode_quick_shot),
+                onClick = { onModeSelected(CaptureMode.QUICK_SHOT) },
                 modifier = Modifier.weight(1f)
             )
             ModeSwitcherItem(
                 icon = Icons.Default.Videocam,
                 selected = captureMode == CaptureMode.VIDEO,
                 enabled = enabled,
+                contentDescription = stringResource(R.string.capture_mode_video),
                 onClick = { onModeSelected(CaptureMode.VIDEO) },
                 modifier = Modifier.weight(1f)
             )
@@ -1984,6 +2013,7 @@ private fun ModeSwitcherItem(
     icon: ImageVector,
     selected: Boolean,
     enabled: Boolean,
+    contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1996,7 +2026,7 @@ private fun ModeSwitcherItem(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            contentDescription = contentDescription,
             tint = if (selected) Color.Black else Color.White,
             modifier = Modifier.size(18.dp)
         )
@@ -2005,6 +2035,10 @@ private fun ModeSwitcherItem(
 
 private fun cycleVideoResolution(state: CameraState): VideoResolutionPreset? {
     return nextOption(state.videoConfig.resolution, state.videoCapabilities.availableResolutions)
+}
+
+private fun cycleQuickShotResolution(state: CameraState): QuickShotResolutionPreset? {
+    return nextOption(state.quickShotConfig.resolution, state.quickShotCapabilities.availableResolutions)
 }
 
 private fun cycleVideoFps(state: CameraState): VideoFpsPreset? {

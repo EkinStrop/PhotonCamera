@@ -276,6 +276,22 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      * @param callback 捕获完成后的回调，在主线程调用
      */
     fun capturePreviewFrame(callback: (Bitmap) -> Unit) {
+        capturePreviewFrameInternal(maxLongEdge = null, requestRenderImmediately = true, callback = callback)
+    }
+
+    fun capturePreviewFrame(maxLongEdge: Int, callback: (Bitmap) -> Unit) {
+        capturePreviewFrameInternal(maxLongEdge = maxLongEdge, requestRenderImmediately = true, callback = callback)
+    }
+
+    fun captureNextPreviewFrame(maxLongEdge: Int, callback: (Bitmap) -> Unit) {
+        capturePreviewFrameInternal(maxLongEdge = maxLongEdge, requestRenderImmediately = false, callback = callback)
+    }
+
+    private fun capturePreviewFrameInternal(
+        maxLongEdge: Int?,
+        requestRenderImmediately: Boolean,
+        callback: (Bitmap) -> Unit
+    ) {
         renderer.onPreviewFrameCaptured = { bitmap ->
             // 在主线程回调
             post {
@@ -283,8 +299,14 @@ class CameraGLSurfaceView @JvmOverloads constructor(
             }
         }
         queueEvent {
-            renderer.capturePreviewFrame()
-            requestRender()
+            if (maxLongEdge != null) {
+                renderer.capturePreviewFrame(maxLongEdge)
+            } else {
+                renderer.capturePreviewFrame()
+            }
+            if (requestRenderImmediately) {
+                requestRender()
+            }
         }
     }
 

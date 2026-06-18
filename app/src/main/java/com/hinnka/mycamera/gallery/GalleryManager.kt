@@ -3046,6 +3046,54 @@ object GalleryManager {
         }
     }
 
+    suspend fun saveBitmapBurstPhoto(
+        context: Context,
+        photoId: String,
+        bitmap: Bitmap,
+        shouldAutoSave: Boolean = true,
+        photoProcessor: PhotoProcessor,
+        sharpeningValue: Float,
+        noiseReductionValue: Float,
+        chromaNoiseReductionValue: Float,
+        photoQuality: Int = 95
+    ) = withContext(Dispatchers.IO) {
+        val photoDir = getPhotoDir(context, photoId, true)
+        val mainPhotoFile = File(photoDir, PHOTO_FILE)
+        val burstDir = File(photoDir, BURST_DIR)
+        if (!burstDir.exists()) {
+            burstDir.mkdirs()
+        }
+        try {
+            val photoFile = File(burstDir, System.currentTimeMillis().toString() + ".jpg")
+            val metadata = loadMetadata(context, photoId) ?: return@withContext
+
+            FileOutputStream(photoFile).use { outputStream ->
+                writeFinalJpeg(bitmap, outputStream, photoQuality)
+            }
+
+            if (!mainPhotoFile.exists() || mainPhotoFile.length() == 0L) {
+                FileOutputStream(mainPhotoFile).use { outputStream ->
+                    writeFinalJpeg(bitmap, outputStream, photoQuality)
+                }
+                if (shouldAutoSave) {
+                    exportPhoto(
+                        context,
+                        photoId,
+                        bitmap,
+                        photoProcessor,
+                        metadata,
+                        sharpeningValue,
+                        noiseReductionValue,
+                        chromaNoiseReductionValue,
+                        photoQuality
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to save bitmap burst photo", e)
+        }
+    }
+
     /**
      * 获取指定照片的连拍照片文件列表
      */
