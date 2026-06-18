@@ -275,6 +275,8 @@ data class CameraState(
     // 对焦
     val isAutoFocus: Boolean = true,
     val focusDistance: Float = 0f, // 当前对焦距离 (0.0 - minimumFocusDistance)
+    val isHyperfocalFocusEnabled: Boolean = false,
+    val hyperfocalDistanceMeters: Float = 0f,
     val minimumFocusDistance: Float = 0f, // 最小对焦距离
     val focusPoint: Pair<Float, Float>? = null, // normalized coordinates (0-1)
     val focusPointSource: FocusPointSource = FocusPointSource.MANUAL,

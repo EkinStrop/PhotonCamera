@@ -61,7 +61,11 @@ fun CameraParameterBar(
         )
         ParameterItem(
             label = "AF",
-            value = if (state.isAutoFocus) "AUTO" else formatFocusDistance(state.focusDistance),
+            value = when {
+                state.isAutoFocus -> stringResource(R.string.camera_focus_auto)
+                state.isHyperfocalFocusEnabled -> stringResource(R.string.camera_hyperfocal_label)
+                else -> formatFocusDistance(state.focusDistance)
+            },
             labelColor = yellow,
             isSelected = selectedParameter == CameraParameter.FOCUS,
             isEnabled = true,

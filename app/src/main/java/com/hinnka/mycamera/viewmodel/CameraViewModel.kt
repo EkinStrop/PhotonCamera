@@ -2297,6 +2297,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setFocusDistance(distance)
     }
 
+    fun setHyperfocalFocusEnabled(enabled: Boolean) {
+        cameraController.setHyperfocalFocusEnabled(enabled)
+    }
+
     /**
      * 设置变焦倍数
      */

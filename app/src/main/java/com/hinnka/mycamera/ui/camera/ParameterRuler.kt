@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.R
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -53,6 +55,10 @@ fun ParameterRuler(
     isAdjustable: Boolean,
     showAutoButton: Boolean,
     resetValue: Float? = null,
+    showHyperfocalButton: Boolean = false,
+    hyperfocalEnabled: Boolean = false,
+    hyperfocalDistanceMeters: Float = 0f,
+    onHyperfocalToggle: ((Boolean) -> Unit)? = null,
     onValueChange: (Float) -> Unit,
     onAutoModeToggle: () -> Unit,
     modifier: Modifier = Modifier
@@ -101,6 +107,14 @@ fun ParameterRuler(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            }
+
+            if (showHyperfocalButton && onHyperfocalToggle != null) {
+                HyperfocalFocusButton(
+                    enabled = hyperfocalEnabled,
+                    distanceMeters = hyperfocalDistanceMeters,
+                    onToggle = { onHyperfocalToggle(!hyperfocalEnabled) }
+                )
             }
 
             // Ruler scale area
@@ -157,6 +171,62 @@ fun ParameterRuler(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun HyperfocalFocusButton(
+    enabled: Boolean,
+    distanceMeters: Float,
+    onToggle: () -> Unit
+) {
+    val yellow = Color(0xFFFFD700)
+    Button(
+        onClick = onToggle,
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .width(58.dp)
+            .height(34.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (enabled) yellow else Color.Gray.copy(alpha = 0.45f),
+            contentColor = if (enabled) Color.Black else Color.White
+        ),
+        shape = RoundedCornerShape(17.dp),
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = stringResource(R.string.camera_hyperfocal_label),
+                fontSize = 9.sp,
+                lineHeight = 9.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+            if (enabled && distanceMeters > 0f) {
+                Text(
+                    text = formatHyperfocalDistance(distanceMeters),
+                    fontSize = 8.sp,
+                    lineHeight = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun formatHyperfocalDistance(distanceMeters: Float): String {
+    return if (distanceMeters >= 1.0f) {
+        stringResource(R.string.camera_hyperfocal_distance_meters, distanceMeters)
+    } else {
+        stringResource(
+            R.string.camera_hyperfocal_distance_centimeters,
+            (distanceMeters * 100).roundToInt()
+        )
     }
 }
 

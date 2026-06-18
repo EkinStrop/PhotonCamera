@@ -10,9 +10,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraState
 
 @Composable
@@ -61,7 +63,11 @@ fun CameraParameterBarVerticel(
         )
         ParameterItem(
             label = "AF",
-            value = if (state.isAutoFocus) "AUTO" else formatFocusDistance(state.focusDistance),
+            value = when {
+                state.isAutoFocus -> stringResource(R.string.camera_focus_auto)
+                state.isHyperfocalFocusEnabled -> stringResource(R.string.camera_hyperfocal_label)
+                else -> formatFocusDistance(state.focusDistance)
+            },
             labelColor = yellow,
             isSelected = selectedParameter == CameraParameter.FOCUS,
             isEnabled = true,

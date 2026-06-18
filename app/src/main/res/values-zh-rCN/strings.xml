@@ -26,6 +26,10 @@
     <!-- Exposure Controls -->
 
     <!-- Focus -->
+    <string name="camera_focus_auto">AUTO</string>
+    <string name="camera_hyperfocal_label">超焦距</string>
+    <string name="camera_hyperfocal_distance_meters">%.1fm</string>
+    <string name="camera_hyperfocal_distance_centimeters">%dcm</string>
 
     <!-- Aspect Ratio -->
     <string name="aspect_ratio">画面比例</string>

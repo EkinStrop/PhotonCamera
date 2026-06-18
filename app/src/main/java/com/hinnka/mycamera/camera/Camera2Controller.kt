@@ -96,7 +96,19 @@ class Camera2Controller(private val context: Context) {
         private const val SCENE_CHANGE_CONFIRM_FRAMES = 3     // 连续 N 帧检测到变化才确认
         private const val AI_SUBJECT_RECENT_MS = 1800L
         private const val AI_FOCUS_FALLBACK_FRAMES = 6
+        private const val DEFAULT_HYPERFOCAL_FOCAL_LENGTH_MM = 4.0f
+        private const val DEFAULT_HYPERFOCAL_APERTURE = 1.8f
+        private const val HYPERFOCAL_COC_DIAGONAL_DIVISOR = 1500.0
     }
+
+    private data class HyperfocalFocusResult(
+        val cameraId: String,
+        val focalLengthMm: Float,
+        val aperture: Float,
+        val circleOfConfusionMm: Float,
+        val distanceMeters: Float,
+        val focusDistanceDiopters: Float
+    )
 
     private val cameraManager: CameraManager by lazy {
         context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -225,6 +237,8 @@ class Camera2Controller(private val context: Context) {
     private var aiSubjectLastSeenElapsedMs: Long = 0L
     private var aiSubjectLastSeenX: Float = -1f
     private var aiSubjectLastSeenY: Float = -1f
+    private var focusModeBeforeHyperfocal: Boolean? = null
+    private var focusDistanceBeforeHyperfocal: Float? = null
 
     // 高光优先测光：最亮区域坐标（归一化 0-1）及平滑状态
     @Volatile
@@ -704,6 +718,43 @@ class Camera2Controller(private val context: Context) {
         return state.getCurrentCameraInfo()?.getOpenCameraId() ?: state.currentCameraId
     }
 
+    private fun resolveActiveFocusCharacteristics(
+        fallbackCharacteristics: CameraCharacteristics? = cachedCharacteristics
+    ): Pair<String, CameraCharacteristics>? {
+        val state = _state.value
+        val camera = state.getCurrentCameraInfo()
+        val targetZoomRatioByMain = getTargetZoomRatioByMain(state, camera)
+        val candidateIds = buildList {
+            activeOutputPhysicalCameraId?.let(::add)
+            camera?.getBoundPhysicalCameraId(targetZoomRatioByMain)?.let(::add)
+            camera?.baseCameraId?.let(::add)
+            camera?.cameraId?.takeUnless { camera.isVirtualIszLens }?.let(::add)
+            activeOpenCameraId.takeIf { it.isNotEmpty() }?.let(::add)
+            state.currentCameraId.takeIf { it.isNotEmpty() }?.let(::add)
+        }.distinct()
+
+        for (cameraId in candidateIds) {
+            try {
+                return cameraId to cameraManager.getCameraCharacteristics(cameraId)
+            } catch (e: Exception) {
+                PLog.v(TAG, "Failed to load focus characteristics for camera $cameraId: ${e.message}")
+            }
+        }
+
+        return fallbackCharacteristics?.let {
+            val fallbackId = activeOpenCameraId.takeIf { id -> id.isNotEmpty() }
+                ?: state.currentCameraId
+            fallbackId to it
+        }
+    }
+
+    private fun refreshActiveFocusLimit() {
+        val focusCharacteristics = resolveActiveFocusCharacteristics()?.second
+        val minimumFocusDistance =
+            focusCharacteristics?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        _state.value = _state.value.copy(minimumFocusDistance = minimumFocusDistance)
+    }
+
     private fun refreshVideoCapabilities(characteristics: CameraCharacteristics? = null): Size {
         val openCameraId = getCurrentOpenCameraId()
         if (openCameraId.isEmpty()) {
@@ -900,6 +951,11 @@ class Camera2Controller(private val context: Context) {
 
                 val selectableNrModes = buildSelectableNoiseReductionModes(availableNoiseReductionModes)
 
+                val focusCharacteristics = resolveActiveFocusCharacteristics(cachedCharacteristics)?.second
+                    ?: cachedCharacteristics
+                val minimumFocusDistance =
+                    focusCharacteristics?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+
                 _state.value = _state.value.copy(
                     isRawSupported = isRawSupported,
                     isP010Supported = isP010Supported,
@@ -907,8 +963,9 @@ class Camera2Controller(private val context: Context) {
                     availableNrModes = selectableNrModes,
                     currentPreviewSize = previewSize,
                     currentCaptureSize = if (captureMode == CaptureMode.VIDEO) previewSize else _state.value.currentCaptureSize,
-                    minimumFocusDistance = cachedCharacteristics?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+                    minimumFocusDistance = minimumFocusDistance
                 )
+                refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
             } catch (e: Exception) {
                 PLog.e(TAG, "Failed to cache camera characteristics", e)
                 cachedCharacteristics = null
@@ -1522,8 +1579,8 @@ class Camera2Controller(private val context: Context) {
         // 4. 变焦设置
         applyZoomSettings(builder, currentState)
 
-        // 5. 自动对焦设置
-        applyAutoFocusSettings(builder, currentState)
+        // 5. 对焦设置
+        applyFocusSettings(builder, currentState)
 
         if (!isRawCapture) {
             // 6. 图像质量设置（锐化、降噪）
@@ -1624,6 +1681,28 @@ class Camera2Controller(private val context: Context) {
 
         if (_state.value.currentAfMode != afMode) {
             _state.value = _state.value.copy(currentAfMode = afMode)
+        }
+    }
+
+    private fun applyFocusSettings(builder: CaptureRequest.Builder, state: CameraState) {
+        if (state.isAutoFocus) {
+            applyAutoFocusSettings(builder, state)
+            return
+        }
+
+        val clampedDistance = if (state.minimumFocusDistance > 0f) {
+            state.focusDistance.coerceIn(0f, state.minimumFocusDistance)
+        } else {
+            0f
+        }
+
+        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+        builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
+        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+        builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, clampedDistance)
+
+        if (_state.value.currentAfMode != CaptureRequest.CONTROL_AF_MODE_OFF) {
+            _state.value = _state.value.copy(currentAfMode = CaptureRequest.CONTROL_AF_MODE_OFF)
         }
     }
 
@@ -3056,6 +3135,8 @@ class Camera2Controller(private val context: Context) {
         )
 
         activeOutputPhysicalCameraId = desiredPhysicalCameraId
+        refreshActiveFocusLimit()
+        refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
         safeCloseCaptureSession(captureSession, "physical zoom output changed")
         captureSession = null
         createPreviewSession(openGeneration = cameraOpenGeneration)
@@ -3066,15 +3147,14 @@ class Camera2Controller(private val context: Context) {
      * 设置自动对焦开关
      */
     fun setAutoFocus(auto: Boolean) {
-        _state.value = _state.value.copy(isAutoFocus = auto)
+        clearHyperfocalFocusMemory()
+        _state.value = _state.value.copy(
+            isAutoFocus = auto,
+            isHyperfocalFocusEnabled = false,
+            hyperfocalDistanceMeters = 0f
+        )
         previewRequestBuilder?.apply {
-            if (auto) {
-                set(CaptureRequest.CONTROL_AF_MODE, resolveAutoFocusMode(_state.value.captureMode))
-                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
-            } else {
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                set(CaptureRequest.LENS_FOCUS_DISTANCE, _state.value.focusDistance)
-            }
+            applyFocusSettings(this, _state.value)
             updatePreview()
         }
     }
@@ -3087,15 +3167,156 @@ class Camera2Controller(private val context: Context) {
         if (minFocusDistance <= 0) return
 
         val clampedDistance = distance.coerceIn(0f, minFocusDistance)
-        _state.value = _state.value.copy(focusDistance = clampedDistance)
+        clearHyperfocalFocusMemory()
+        _state.value = _state.value.copy(
+            focusDistance = clampedDistance,
+            isHyperfocalFocusEnabled = false,
+            hyperfocalDistanceMeters = 0f
+        )
 
         if (!_state.value.isAutoFocus) {
             previewRequestBuilder?.apply {
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                set(CaptureRequest.LENS_FOCUS_DISTANCE, clampedDistance)
+                applyFocusSettings(this, _state.value)
                 updatePreview()
             }
         }
+    }
+
+    fun setHyperfocalFocusEnabled(enabled: Boolean) {
+        if (enabled) {
+            applyHyperfocalFocus(storePreviousFocus = true, updatePreview = true)
+        } else {
+            restoreFocusBeforeHyperfocal(updatePreview = true)
+        }
+    }
+
+    private fun refreshHyperfocalFocusDistanceIfEnabled(updatePreview: Boolean) {
+        if (!_state.value.isHyperfocalFocusEnabled) return
+        applyHyperfocalFocus(storePreviousFocus = false, updatePreview = updatePreview)
+    }
+
+    private fun applyHyperfocalFocus(
+        storePreviousFocus: Boolean,
+        updatePreview: Boolean
+    ): Boolean {
+        refreshActiveFocusLimit()
+
+        val minFocusDistance = _state.value.minimumFocusDistance
+        if (minFocusDistance <= 0f) {
+            PLog.w(TAG, "Hyperfocal focus unavailable: manual focus is not supported")
+            if (_state.value.isHyperfocalFocusEnabled) {
+                restoreFocusBeforeHyperfocal(updatePreview = updatePreview)
+            }
+            return false
+        }
+
+        val result = calculateHyperfocalFocusResult()
+        if (result == null) {
+            PLog.w(TAG, "Hyperfocal focus unavailable: unable to resolve physical camera optics")
+            if (_state.value.isHyperfocalFocusEnabled) {
+                restoreFocusBeforeHyperfocal(updatePreview = updatePreview)
+            }
+            return false
+        }
+
+        if (storePreviousFocus && !_state.value.isHyperfocalFocusEnabled) {
+            focusModeBeforeHyperfocal = _state.value.isAutoFocus
+            focusDistanceBeforeHyperfocal = _state.value.focusDistance
+        }
+
+        val clampedFocusDistance = result.focusDistanceDiopters.coerceIn(0f, minFocusDistance)
+        _state.value = _state.value.copy(
+            isAutoFocus = false,
+            focusDistance = clampedFocusDistance,
+            isHyperfocalFocusEnabled = true,
+            hyperfocalDistanceMeters = result.distanceMeters
+        )
+
+        if (updatePreview) {
+            previewRequestBuilder?.apply {
+                applyFocusSettings(this, _state.value)
+                updatePreview()
+            }
+        }
+
+        PLog.i(
+            TAG,
+            "Hyperfocal focus enabled: camera=${result.cameraId}, " +
+                    "f=${result.focalLengthMm}mm, N=${result.aperture}, " +
+                    "c=${result.circleOfConfusionMm}mm, H=${result.distanceMeters}m, " +
+                    "focus=${clampedFocusDistance}D"
+        )
+        return true
+    }
+
+    private fun restoreFocusBeforeHyperfocal(updatePreview: Boolean) {
+        val restoreAutoFocus = focusModeBeforeHyperfocal ?: true
+        val restoreFocusDistance = focusDistanceBeforeHyperfocal
+            ?.coerceIn(0f, _state.value.minimumFocusDistance.takeIf { it > 0f } ?: Float.MAX_VALUE)
+            ?: _state.value.focusDistance
+
+        clearHyperfocalFocusMemory()
+        _state.value = _state.value.copy(
+            isAutoFocus = restoreAutoFocus,
+            focusDistance = restoreFocusDistance,
+            isHyperfocalFocusEnabled = false,
+            hyperfocalDistanceMeters = 0f
+        )
+
+        if (updatePreview) {
+            previewRequestBuilder?.apply {
+                applyFocusSettings(this, _state.value)
+                updatePreview()
+            }
+        }
+
+        PLog.i(TAG, "Hyperfocal focus disabled: restoreAutoFocus=$restoreAutoFocus")
+    }
+
+    private fun clearHyperfocalFocusMemory() {
+        focusModeBeforeHyperfocal = null
+        focusDistanceBeforeHyperfocal = null
+    }
+
+    private fun calculateHyperfocalFocusResult(): HyperfocalFocusResult? {
+        val (cameraId, characteristics) = resolveActiveFocusCharacteristics() ?: return null
+
+        val focalLengthMm = characteristics
+            .get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            ?.firstOrNull()
+            ?.takeIf { it.isFinite() && it > 0f }
+            ?: DEFAULT_HYPERFOCAL_FOCAL_LENGTH_MM
+
+        val aperture = characteristics
+            .get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+            ?.firstOrNull()
+            ?.takeIf { it.isFinite() && it > 0f }
+            ?: DEFAULT_HYPERFOCAL_APERTURE
+
+        val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            ?: return null
+        val diagonal = hypot(
+            physicalSize.width.toDouble(),
+            physicalSize.height.toDouble()
+        )
+        if (!diagonal.isFinite() || diagonal <= 0.0) return null
+
+        val circleOfConfusionMm = (diagonal / HYPERFOCAL_COC_DIAGONAL_DIVISOR).toFloat()
+        if (!circleOfConfusionMm.isFinite() || circleOfConfusionMm <= 0f) return null
+
+        val hyperfocalDistanceMm =
+            (focalLengthMm * focalLengthMm) / (aperture * circleOfConfusionMm) + focalLengthMm
+        val hyperfocalDistanceMeters = hyperfocalDistanceMm / 1000f
+        if (!hyperfocalDistanceMeters.isFinite() || hyperfocalDistanceMeters <= 0f) return null
+
+        return HyperfocalFocusResult(
+            cameraId = cameraId,
+            focalLengthMm = focalLengthMm,
+            aperture = aperture,
+            circleOfConfusionMm = circleOfConfusionMm,
+            distanceMeters = hyperfocalDistanceMeters,
+            focusDistanceDiopters = 1f / hyperfocalDistanceMeters
+        )
     }
 
 // ==================== 对焦控制 ====================

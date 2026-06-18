@@ -740,6 +740,12 @@ fun CameraScreen(
                     else -> false
                 },
                 resetValue = selectedParameter.defaultResetValue(),
+                showHyperfocalButton = selectedParameter == CameraParameter.FOCUS && state.minimumFocusDistance > 0f,
+                hyperfocalEnabled = state.isHyperfocalFocusEnabled,
+                hyperfocalDistanceMeters = state.hyperfocalDistanceMeters,
+                onHyperfocalToggle = { enabled ->
+                    viewModel.setHyperfocalFocusEnabled(enabled)
+                },
                 onValueChange = { value ->
                     when (selectedParameter) {
                         CameraParameter.EXPOSURE_COMPENSATION -> viewModel.setExposureCompensation((value / state.getExposureCompensationStep()).roundToInt())
@@ -924,7 +930,7 @@ fun CameraScreen(
                         isHlgInput = if (hlgHardwareCompatibilityEnabled) state.isHLG else false,
                         aperture = if (state.isVirtualApertureEnabled) state.virtualAperture else 0f,
                         isAutoFocus = state.isAutoFocus,
-                        focusPeakingEnabled = focusPeakingEnabled,
+                        focusPeakingEnabled = focusPeakingEnabled && !state.isHyperfocalFocusEnabled,
                         modifier = Modifier.fillMaxSize()
                     )
 
