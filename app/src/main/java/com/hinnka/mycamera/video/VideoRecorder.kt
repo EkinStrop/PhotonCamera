@@ -105,6 +105,8 @@ class VideoRecorder(
     private var requestedCodecMime: String = MediaFormat.MIMETYPE_VIDEO_AVC
     private var requestedOrientationHintDegrees: Int = 0
     private var requestedFlipEncodedFrame: Boolean = false
+    private var requestedRecordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON
+    private var requestedRecordingTreeUri: String? = null
     private var preferredAudioInputId: String = VIDEO_AUDIO_INPUT_AUTO
     private var requestedColorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest()
     private var preparedEncoderColorConfig: VideoEncoderColorConfig? = null
@@ -159,6 +161,8 @@ class VideoRecorder(
         colorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest(),
         orientationHintDegrees: Int = 0,
         flipEncodedFrame: Boolean = false,
+        recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
+        recordingTreeUri: String? = null,
         onError: ((String) -> Unit)? = null,
         onFinished: ((Uri?) -> Unit)? = null
     ): Boolean {
@@ -171,6 +175,8 @@ class VideoRecorder(
         requestedColorConfig = colorConfig
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
         requestedFlipEncodedFrame = flipEncodedFrame
+        requestedRecordingPath = recordingPath
+        requestedRecordingTreeUri = recordingTreeUri?.takeIf { it.isNotBlank() }
         outputDateTakenMs = System.currentTimeMillis()
         this.errorCallback = onError
         this.finishCallback = onFinished
@@ -208,7 +214,8 @@ class VideoRecorder(
         PLog.d(
             TAG,
             "Video recording prepared: ${requestedSize.width}x${requestedSize.height} @ " +
-                "${requestedFps}fps, orientationHint=$requestedOrientationHintDegrees"
+                "${requestedFps}fps, orientationHint=$requestedOrientationHintDegrees, " +
+                "path=${requestedRecordingPath.name}, uri=${requestedRecordingTreeUri?.take(48)}"
         )
         return true
     }
@@ -518,7 +525,9 @@ class VideoRecorder(
     private fun createMuxer() {
         val output = VideoMediaStoreWriter.createPendingVideo(
             context = context,
-            dateTakenMs = outputDateTakenMs
+            dateTakenMs = outputDateTakenMs,
+            recordingPath = requestedRecordingPath,
+            recordingTreeUri = requestedRecordingTreeUri
         ) ?: throw IllegalStateException("Failed to create video output")
         pendingVideoOutput = output
         muxer = MediaMuxer(output.descriptor.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
@@ -1007,13 +1016,13 @@ class VideoRecorder(
         pendingVideoOutput = null
 
         if (!muxerStopSucceeded) {
-            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
+            VideoMediaStoreWriter.discardPendingVideo(context, output)
             return null
         }
 
-        val uri = VideoMediaStoreWriter.publishPendingVideo(context, output.uri)
+        val uri = VideoMediaStoreWriter.publishPendingVideo(context, output)
         if (uri == null) {
-            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
+            VideoMediaStoreWriter.discardPendingVideo(context, output)
         }
         return uri
     }
@@ -1080,7 +1089,7 @@ class VideoRecorder(
                 output.descriptor.close()
             } catch (_: Exception) {
             }
-            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
+            VideoMediaStoreWriter.discardPendingVideo(context, output)
         }
         pendingVideoOutput = null
         isRecording = false
@@ -1153,7 +1162,7 @@ class VideoRecorder(
                 output.descriptor.close()
             } catch (_: Exception) {
             }
-            VideoMediaStoreWriter.discardPendingVideo(context, output.uri)
+            VideoMediaStoreWriter.discardPendingVideo(context, output)
         }
         pendingVideoOutput = null
         try {

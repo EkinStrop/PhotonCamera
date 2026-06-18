@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.video
 
 import android.graphics.Rect
+import android.os.Environment
 import android.util.Size
 import com.hinnka.mycamera.raw.ColorSpace
 import com.hinnka.mycamera.color.TransferCurve
@@ -82,6 +83,17 @@ enum class VideoCodec(val displayName: String, val mimeType: String) {
     H265("H.265", "video/hevc");
 }
 
+enum class VideoRecordingPath(val relativePath: String?) {
+    DCIM_PHOTON(Environment.DIRECTORY_DCIM + "/PhotonCamera"),
+    EXTERNAL_TREE(null);
+
+    companion object {
+        fun fromPersistedName(name: String?): VideoRecordingPath {
+            return entries.firstOrNull { it.name == name } ?: DCIM_PHOTON
+        }
+    }
+}
+
 enum class VideoLogProfile(
     val displayName: String,
     val logCurve: TransferCurve,
@@ -107,6 +119,8 @@ data class VideoConfig(
     val bitrate: VideoBitratePreset = VideoBitratePreset.P1,
     val codec: VideoCodec = VideoCodec.H264,
     val audioInputId: String = VIDEO_AUDIO_INPUT_AUTO,
+    val recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
+    val recordingTreeUri: String? = null,
     val stabilizationMode: VideoStabilizationMode = VideoStabilizationMode.OIS,
     val torchEnabled: Boolean = false
 ) {

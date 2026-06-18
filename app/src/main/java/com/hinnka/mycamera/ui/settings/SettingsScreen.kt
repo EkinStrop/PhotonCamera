@@ -116,6 +116,7 @@ import com.hinnka.mycamera.camera.VendorCaptureValueType
 import com.hinnka.mycamera.data.AiFocusTargetMode
 import com.hinnka.mycamera.data.VolumeKeyAction
 import com.hinnka.mycamera.frame.FrameInfo
+import com.hinnka.mycamera.gallery.PhotoSavePath
 import com.hinnka.mycamera.gallery.HeicExportEncoder
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.LutInfo
@@ -135,6 +136,7 @@ import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
+import com.hinnka.mycamera.video.VideoRecordingPath
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -181,6 +183,29 @@ private fun openExternalUrl(context: Context, url: String) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     runCatching { context.startActivity(intent) }
+}
+
+private fun formatPersistedTreeLabel(uriString: String?): String {
+    if (uriString.isNullOrBlank()) return ""
+    return runCatching {
+        Uri.decode(Uri.parse(uriString).lastPathSegment ?: uriString)
+    }.getOrDefault(uriString)
+}
+
+@Composable
+private fun PhotoSavePath.displayName(): String {
+    return when (this) {
+        PhotoSavePath.DCIM_PHOTON -> stringResource(R.string.settings_storage_path_dcim)
+        PhotoSavePath.EXTERNAL_TREE -> stringResource(R.string.settings_storage_path_external_tree)
+    }
+}
+
+@Composable
+private fun VideoRecordingPath.displayName(): String {
+    return when (this) {
+        VideoRecordingPath.DCIM_PHOTON -> stringResource(R.string.settings_storage_path_dcim)
+        VideoRecordingPath.EXTERNAL_TREE -> stringResource(R.string.settings_storage_path_external_tree)
+    }
 }
 
 @Composable
@@ -267,6 +292,10 @@ fun SettingsScreen(
     val mirrorFrontCamera by viewModel.mirrorFrontCamera.collectAsState(initial = true)
     val widgetTheme by viewModel.widgetTheme.collectAsState()
     val saveLocation by viewModel.saveLocationEnabled.collectAsState(initial = false)
+    val photoSavePath by viewModel.photoSavePath.collectAsState()
+    val photoSaveTreeUri by viewModel.photoSaveTreeUri.collectAsState()
+    val videoRecordingPath by viewModel.videoRecordingPath.collectAsState()
+    val videoRecordingTreeUri by viewModel.videoRecordingTreeUri.collectAsState()
     val openAIApiKey by viewModel.openAIApiKey.collectAsState()
     val openAIUrl by viewModel.openAIUrl.collectAsState()
     val openAIModel by viewModel.openAIModel.collectAsState()
@@ -364,6 +393,26 @@ fun SettingsScreen(
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val isHdrSettingsSupported = remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !DeviceUtil.isHarmonyOS }
     val isHeicExportSupported = remember { HeicExportEncoder.isSupported }
+    val photoSavePathOptions = PhotoSavePath.entries.toList()
+    val photoSavePathLabels = photoSavePathOptions.map { it.displayName() }
+    val photoSaveTreeLabel = remember(photoSaveTreeUri) {
+        formatPersistedTreeLabel(photoSaveTreeUri)
+    }
+    val photoSavePathValue = when {
+        photoSavePath == PhotoSavePath.EXTERNAL_TREE && photoSaveTreeLabel.isNotBlank() ->
+            stringResource(R.string.settings_storage_path_external_selected, photoSaveTreeLabel)
+        else -> photoSavePath.displayName()
+    }
+    val videoRecordingPathOptions = VideoRecordingPath.entries.toList()
+    val videoRecordingPathLabels = videoRecordingPathOptions.map { it.displayName() }
+    val videoRecordingTreeLabel = remember(videoRecordingTreeUri) {
+        formatPersistedTreeLabel(videoRecordingTreeUri)
+    }
+    val videoRecordingPathValue = when {
+        videoRecordingPath == VideoRecordingPath.EXTERNAL_TREE && videoRecordingTreeLabel.isNotBlank() ->
+            stringResource(R.string.settings_storage_path_external_selected, videoRecordingTreeLabel)
+        else -> videoRecordingPath.displayName()
+    }
 
     val backupLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
@@ -440,6 +489,46 @@ fun SettingsScreen(
                         ).show()
                     }
                 }
+            }
+        }
+    }
+
+    val photoSaveTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            val permissionSaved = runCatching {
+                context.contentResolver.takePersistableUriPermission(it, flags)
+            }.isSuccess
+            if (permissionSaved) {
+                viewModel.setPhotoSavePath(PhotoSavePath.EXTERNAL_TREE, it.toString())
+            } else {
+                android.widget.Toast.makeText(
+                    context,
+                    R.string.settings_storage_path_permission_failed,
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    val videoRecordingTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            val permissionSaved = runCatching {
+                context.contentResolver.takePersistableUriPermission(it, flags)
+            }.isSuccess
+            if (permissionSaved) {
+                viewModel.setVideoRecordingPath(VideoRecordingPath.EXTERNAL_TREE, it.toString())
+            } else {
+                android.widget.Toast.makeText(
+                    context,
+                    R.string.settings_storage_path_permission_failed,
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
@@ -971,6 +1060,70 @@ fun SettingsScreen(
                             description = stringResource(R.string.settings_mirror_front_camera_description),
                             checked = mirrorFrontCamera,
                             onCheckedChange = { viewModel.setMirrorFrontCamera(it) }
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        DropdownSettingItem(
+                            title = stringResource(
+                                R.string.settings_storage_path_title,
+                                stringResource(R.string.settings_storage_path_photo_title_arg)
+                            ),
+                            description = stringResource(
+                                R.string.settings_storage_path_description,
+                                stringResource(R.string.settings_storage_path_photo_description_arg)
+                            ),
+                            value = photoSavePathValue,
+                            options = photoSavePathLabels,
+                            isLoading = false,
+                            onExpanded = {},
+                            onOptionSelected = { selected ->
+                                val selectedIndex = photoSavePathLabels.indexOf(selected)
+                                when (photoSavePathOptions.getOrNull(selectedIndex)) {
+                                    PhotoSavePath.DCIM_PHOTON -> {
+                                        viewModel.setPhotoSavePath(PhotoSavePath.DCIM_PHOTON)
+                                    }
+                                    PhotoSavePath.EXTERNAL_TREE -> {
+                                        photoSaveTreeLauncher.launch(null)
+                                    }
+                                    null -> Unit
+                                }
+                            }
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        DropdownSettingItem(
+                            title = stringResource(
+                                R.string.settings_storage_path_title,
+                                stringResource(R.string.settings_storage_path_video_title_arg)
+                            ),
+                            description = stringResource(
+                                R.string.settings_storage_path_description,
+                                stringResource(R.string.settings_storage_path_video_description_arg)
+                            ),
+                            value = videoRecordingPathValue,
+                            options = videoRecordingPathLabels,
+                            isLoading = false,
+                            onExpanded = {},
+                            onOptionSelected = { selected ->
+                                val selectedIndex = videoRecordingPathLabels.indexOf(selected)
+                                when (videoRecordingPathOptions.getOrNull(selectedIndex)) {
+                                    VideoRecordingPath.DCIM_PHOTON -> {
+                                        viewModel.setVideoRecordingPath(VideoRecordingPath.DCIM_PHOTON)
+                                    }
+                                    VideoRecordingPath.EXTERNAL_TREE -> {
+                                        videoRecordingTreeLauncher.launch(null)
+                                    }
+                                    null -> Unit
+                                }
+                            }
                         )
 
                         HorizontalDivider(

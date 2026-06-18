@@ -231,6 +231,16 @@
     <string name="settings_volume_key_action_capture">Shutter</string>
     <string name="settings_volume_key_action_exposure">Exposure Comp.</string>
     <string name="settings_volume_key_action_zoom">Focal Switch</string>
+    <string name="settings_storage_path_photo_title_arg">Photo</string>
+    <string name="settings_storage_path_photo_description_arg">photos</string>
+    <string name="settings_storage_path_video_title_arg">Video</string>
+    <string name="settings_storage_path_video_description_arg">videos</string>
+    <string name="settings_storage_path_title">%1$s Save Path</string>
+    <string name="settings_storage_path_description">Choose where to save %1$s</string>
+    <string name="settings_storage_path_dcim">Default (DCIM/PhotonCamera)</string>
+    <string name="settings_storage_path_external_tree">Folder...</string>
+    <string name="settings_storage_path_external_selected">Folder: %1$s</string>
+    <string name="settings_storage_path_permission_failed">Failed to save folder permission</string>
     <string name="settings_auto_save">Auto Save</string>
     <string name="settings_auto_save_description">Automatically save photos after capture</string>
     <string name="settings_save_location">Save Location</string>

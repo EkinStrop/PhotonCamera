@@ -29,6 +29,7 @@ import com.hinnka.mycamera.frame.FrameInfo
 import com.hinnka.mycamera.frame.FramePreviewFactory
 import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.MediaMetadata
+import com.hinnka.mycamera.gallery.PhotoSavePath
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.BakedLutExporter
 import com.hinnka.mycamera.lut.LutConfig
@@ -63,6 +64,7 @@ import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoBitratePreset
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -784,6 +786,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         userPreferencesRepository.userPreferences.map { it.volumeKeyAction }
             .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = VolumeKeyAction.NONE)
     val autoSaveAfterCapture: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.autoSaveAfterCapture }
+    val photoSavePath: StateFlow<PhotoSavePath> = userPreferencesRepository.userPreferences
+        .map { it.photoSavePath }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PhotoSavePath.DCIM_PHOTON)
+    val photoSaveTreeUri: StateFlow<String?> = userPreferencesRepository.userPreferences
+        .map { it.photoSaveTreeUri }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val topSheetAspectRatios: StateFlow<List<AspectRatio>> = userPreferencesRepository.userPreferences
         .map { it.topSheetAspectRatios }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AspectRatio.defaultTopSheetRatios)
@@ -1000,6 +1008,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val videoCodec: StateFlow<com.hinnka.mycamera.video.VideoCodec> = userPreferencesRepository.userPreferences
         .map { it.videoCodec }
         .stateIn(viewModelScope, SharingStarted.Eagerly, com.hinnka.mycamera.video.VideoCodec.H264)
+    val videoRecordingPath: StateFlow<VideoRecordingPath> = userPreferencesRepository.userPreferences
+        .map { it.videoRecordingPath }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, VideoRecordingPath.DCIM_PHOTON)
+    val videoRecordingTreeUri: StateFlow<String?> = userPreferencesRepository.userPreferences
+        .map { it.videoRecordingTreeUri }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val videoAudioInputOptions: StateFlow<List<VideoAudioInputOption>> = videoAudioInputManager.availableInputs
 
     val phantomButtonHidden: StateFlow<Boolean> = userPreferencesRepository.userPreferences
@@ -1239,6 +1253,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoLogProfile(it.videoLogProfile)
                 cameraController.setVideoBitrate(it.videoBitrate)
                 cameraController.setVideoAudioInputId(it.videoAudioInputId)
+                cameraController.setVideoRecordingPath(it.videoRecordingPath, it.videoRecordingTreeUri)
                 cameraController.setVideoStabilizationMode(it.videoStabilizationMode)
                 cameraController.setVideoTorchEnabled(it.videoTorchEnabled)
                 cameraController.setVideoCodec(it.videoCodec)
@@ -1369,6 +1384,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoLogProfile(prefs.videoLogProfile)
                 cameraController.setVideoBitrate(prefs.videoBitrate)
                 cameraController.setVideoAudioInputId(prefs.videoAudioInputId)
+                cameraController.setVideoRecordingPath(prefs.videoRecordingPath, prefs.videoRecordingTreeUri)
                 cameraController.setVideoStabilizationMode(prefs.videoStabilizationMode)
                 cameraController.setVideoTorchEnabled(prefs.videoTorchEnabled)
                 cameraController.setVideoCodec(prefs.videoCodec)
@@ -2424,6 +2440,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setVideoAudioInputId(audioInputId)
         viewModelScope.launch {
             userPreferencesRepository.saveVideoAudioInputId(audioInputId)
+        }
+    }
+
+    fun setVideoRecordingPath(recordingPath: VideoRecordingPath, treeUri: String? = null) {
+        cameraController.setVideoRecordingPath(recordingPath, treeUri)
+        viewModelScope.launch {
+            userPreferencesRepository.saveVideoRecordingPath(recordingPath, treeUri)
+        }
+    }
+
+    fun setPhotoSavePath(savePath: PhotoSavePath, treeUri: String? = null) {
+        viewModelScope.launch {
+            userPreferencesRepository.savePhotoSavePath(savePath, treeUri)
         }
     }
 

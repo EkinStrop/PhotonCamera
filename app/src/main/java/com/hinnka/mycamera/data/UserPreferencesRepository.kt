@@ -17,6 +17,7 @@ import com.hinnka.mycamera.camera.MultiFrameConfig
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.camera.VendorCaptureSettings
 import com.hinnka.mycamera.camera.VendorCaptureSettingsByLens
+import com.hinnka.mycamera.gallery.PhotoSavePath
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.DEFAULT_RAW_BASELINE_LUT_ID
 import com.hinnka.mycamera.raw.ColorSpace
@@ -35,6 +36,7 @@ import com.hinnka.mycamera.video.VIDEO_AUDIO_INPUT_AUTO
 import com.hinnka.mycamera.video.VideoBitratePreset
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.model.EffectParams
 import com.hinnka.mycamera.model.CameraPreset
@@ -116,6 +118,8 @@ data class UserPreferences(
     val vibrationEnabled: Boolean = true,  // 拍摄震动
     val volumeKeyAction: VolumeKeyAction = VolumeKeyAction.CAPTURE,  // 音量键操作
     val autoSaveAfterCapture: Boolean = true,  // 自动保存
+    val photoSavePath: PhotoSavePath = PhotoSavePath.DCIM_PHOTON,
+    val photoSaveTreeUri: String? = null,
     val nrLevel: Int = 5,  // 降噪等级：0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal, 5=Auto
     val edgeLevel: Int = 1, // 锐化等级：0=Off, 1=Fast, 2=High Quality, 3=Real-time
     val vendorCaptureSettingsByLens: VendorCaptureSettingsByLens = VendorCaptureSettingsByLens.Empty,
@@ -163,6 +167,8 @@ data class UserPreferences(
     val videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     val videoBitrate: VideoBitratePreset = VideoBitratePreset.P1,
     val videoAudioInputId: String = VIDEO_AUDIO_INPUT_AUTO,
+    val videoRecordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
+    val videoRecordingTreeUri: String? = null,
     val videoStabilizationMode: com.hinnka.mycamera.video.VideoStabilizationMode = com.hinnka.mycamera.video.VideoStabilizationMode.OIS,
     val videoTorchEnabled: Boolean = false,
     val videoCodec: com.hinnka.mycamera.video.VideoCodec = com.hinnka.mycamera.video.VideoCodec.H264,
@@ -276,6 +282,8 @@ class UserPreferencesRepository(private val context: Context) {
         private val VIBRATION_ENABLED = booleanPreferencesKey("vibration_enabled")
         private val VOLUME_KEY_ACTION = stringPreferencesKey("volume_key_action")
         private val AUTO_SAVE_AFTER_CAPTURE = booleanPreferencesKey("auto_save_after_capture")
+        private val PHOTO_SAVE_PATH = stringPreferencesKey("photo_save_path")
+        private val PHOTO_SAVE_TREE_URI = stringPreferencesKey("photo_save_tree_uri")
         private val NR_LEVEL = intPreferencesKey("nr_level")
         private val EDGE_LEVEL = intPreferencesKey("edge_level")
         private val VENDOR_CAPTURE_SETTINGS = stringPreferencesKey("vendor_capture_settings")
@@ -330,6 +338,8 @@ class UserPreferencesRepository(private val context: Context) {
         private val VIDEO_LOG_PROFILE = stringPreferencesKey("video_log_profile")
         private val VIDEO_BITRATE = stringPreferencesKey("video_bitrate")
         private val VIDEO_AUDIO_INPUT_ID = stringPreferencesKey("video_audio_input_id")
+        private val VIDEO_RECORDING_PATH = stringPreferencesKey("video_recording_path")
+        private val VIDEO_RECORDING_TREE_URI = stringPreferencesKey("video_recording_tree_uri")
         private val VIDEO_STABILIZATION_MODE = stringPreferencesKey("video_stabilization_mode")
         private val VIDEO_TORCH_ENABLED = booleanPreferencesKey("video_torch_enabled")
         private val VIDEO_CODEC = stringPreferencesKey("video_codec")
@@ -425,6 +435,8 @@ class UserPreferencesRepository(private val context: Context) {
                     preferences[VOLUME_KEY_ACTION] ?: VolumeKeyAction.CAPTURE.name
                 ),
                 autoSaveAfterCapture = preferences[AUTO_SAVE_AFTER_CAPTURE] ?: true,
+                photoSavePath = PhotoSavePath.fromPersistedName(preferences[PHOTO_SAVE_PATH]),
+                photoSaveTreeUri = preferences[PHOTO_SAVE_TREE_URI]?.takeIf { it.isNotBlank() },
                 nrLevel = preferences[NR_LEVEL] ?: 5,
                 edgeLevel = preferences[EDGE_LEVEL] ?: 1,
                 vendorCaptureSettingsByLens = VendorCaptureSettingsByLens.deserialize(
@@ -491,6 +503,8 @@ class UserPreferencesRepository(private val context: Context) {
                     preferences[VIDEO_BITRATE] ?: VideoBitratePreset.P1.name
                 ),
                 videoAudioInputId = preferences[VIDEO_AUDIO_INPUT_ID] ?: VIDEO_AUDIO_INPUT_AUTO,
+                videoRecordingPath = VideoRecordingPath.fromPersistedName(preferences[VIDEO_RECORDING_PATH]),
+                videoRecordingTreeUri = preferences[VIDEO_RECORDING_TREE_URI]?.takeIf { it.isNotBlank() },
                 videoStabilizationMode = com.hinnka.mycamera.video.VideoStabilizationMode.valueOf(
                     preferences[VIDEO_STABILIZATION_MODE] ?: com.hinnka.mycamera.video.VideoStabilizationMode.OIS.name
                 ),
@@ -1007,6 +1021,18 @@ class UserPreferencesRepository(private val context: Context) {
         }
     }
 
+    suspend fun savePhotoSavePath(savePath: PhotoSavePath, treeUri: String? = null) {
+        context.dataStore.edit { preferences ->
+            preferences[PHOTO_SAVE_PATH] = savePath.name
+            val normalizedTreeUri = treeUri?.takeIf { it.isNotBlank() }
+            if (savePath == PhotoSavePath.EXTERNAL_TREE && normalizedTreeUri != null) {
+                preferences[PHOTO_SAVE_TREE_URI] = normalizedTreeUri
+            } else {
+                preferences.remove(PHOTO_SAVE_TREE_URI)
+            }
+        }
+    }
+
     /**
      * 保存降噪等级
      */
@@ -1486,7 +1512,17 @@ class UserPreferencesRepository(private val context: Context) {
         }
     }
 
-
+    suspend fun saveVideoRecordingPath(recordingPath: VideoRecordingPath, treeUri: String? = null) {
+        context.dataStore.edit { preferences ->
+            preferences[VIDEO_RECORDING_PATH] = recordingPath.name
+            val normalizedTreeUri = treeUri?.takeIf { it.isNotBlank() }
+            if (recordingPath == VideoRecordingPath.EXTERNAL_TREE && normalizedTreeUri != null) {
+                preferences[VIDEO_RECORDING_TREE_URI] = normalizedTreeUri
+            } else {
+                preferences.remove(VIDEO_RECORDING_TREE_URI)
+            }
+        }
+    }
 
     suspend fun saveVideoTorchEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->

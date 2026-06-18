@@ -142,6 +142,16 @@
     <string name="settings_volume_key_action_capture">快門/拍攝</string>
     <string name="settings_volume_key_action_exposure">曝光補償</string>
     <string name="settings_volume_key_action_zoom">焦距切換</string>
+    <string name="settings_storage_path_photo_title_arg">照片</string>
+    <string name="settings_storage_path_photo_description_arg">照片</string>
+    <string name="settings_storage_path_video_title_arg">視頻</string>
+    <string name="settings_storage_path_video_description_arg">視頻</string>
+    <string name="settings_storage_path_title">%1$s儲存路徑</string>
+    <string name="settings_storage_path_description">選擇%1$s的儲存位置</string>
+    <string name="settings_storage_path_dcim">預設（DCIM/PhotonCamera）</string>
+    <string name="settings_storage_path_external_tree">資料夾...</string>
+    <string name="settings_storage_path_external_selected">資料夾：%1$s</string>
+    <string name="settings_storage_path_permission_failed">無法儲存資料夾權限</string>
     <string name="settings_auto_save">拍攝後自動儲存</string>
     <string name="settings_auto_save_description">拍攝後自動儲存相片，否則需要手動確認</string>
     <string name="settings_save_location">儲存地理位置</string>

@@ -10,6 +10,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.core.graphics.createBitmap
 import androidx.exifinterface.media.ExifInterface
@@ -47,6 +48,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.IntBuffer
@@ -120,6 +122,11 @@ object GalleryManager {
         val height: Int,
         val compressed: Boolean,
         val usesLargeDirectAllocator: Boolean = false,
+    )
+
+    private data class PhotoExportDestination(
+        val savePath: PhotoSavePath,
+        val treeUri: String?
     )
 
     val processingScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -562,6 +569,132 @@ object GalleryManager {
         detailHdrBuildJobs[photoId] = job
     }
 
+    private suspend fun resolvePhotoExportDestination(context: Context): PhotoExportDestination {
+        val preferences = ContentRepository.getInstance(context)
+            .userPreferencesRepository
+            .userPreferences
+            .firstOrNull()
+        val savePath = preferences?.photoSavePath ?: PhotoSavePath.DCIM_PHOTON
+        val treeUri = preferences?.photoSaveTreeUri?.takeIf { it.isNotBlank() }
+        return if (savePath == PhotoSavePath.EXTERNAL_TREE && treeUri != null) {
+            PhotoExportDestination(savePath, treeUri)
+        } else {
+            if (savePath == PhotoSavePath.EXTERNAL_TREE) {
+                PLog.w(TAG, "Photo external save path selected without tree URI, falling back to MediaStore")
+            }
+            PhotoExportDestination(PhotoSavePath.DCIM_PHOTON, null)
+        }
+    }
+
+    private fun createPhotoExportUri(
+        context: Context,
+        destination: PhotoExportDestination,
+        collectionUri: Uri,
+        displayName: String,
+        mimeType: String
+    ): Uri? {
+        return if (destination.savePath == PhotoSavePath.EXTERNAL_TREE) {
+            createPhotoExportTreeUri(context, destination.treeUri, displayName, mimeType)
+        } else {
+            val relativePath = destination.savePath.relativePath ?: PhotoSavePath.DCIM_PHOTON.relativePath
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            }
+            context.contentResolver.insert(collectionUri, contentValues)
+        }
+    }
+
+    private fun createPhotoExportTreeUri(
+        context: Context,
+        treeUriString: String?,
+        displayName: String,
+        mimeType: String
+    ): Uri? {
+        if (treeUriString.isNullOrBlank()) return null
+        return try {
+            val treeUri = Uri.parse(treeUriString)
+            val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+            val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocumentId)
+            DocumentsContract.createDocument(context.contentResolver, parentUri, mimeType, displayName)
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to create photo export document: $displayName", e)
+            null
+        }
+    }
+
+    private fun discardPhotoExportUri(context: Context, uri: Uri) {
+        runCatching {
+            if (DocumentsContract.isDocumentUri(context, uri)) {
+                DocumentsContract.deleteDocument(context.contentResolver, uri)
+            } else {
+                context.contentResolver.delete(uri, null, null)
+            }
+        }.onFailure {
+            PLog.w(TAG, "Failed to discard photo export URI $uri: ${it.message}")
+        }
+    }
+
+    private fun writeToPhotoExportUri(
+        context: Context,
+        uri: Uri,
+        write: (OutputStream) -> Unit
+    ): Boolean {
+        return try {
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                write(output)
+            } ?: return false
+            true
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to write photo export URI: $uri", e)
+            false
+        }
+    }
+
+    private fun exportFileToConfiguredPhotoStorage(
+        context: Context,
+        destination: PhotoExportDestination,
+        collectionUri: Uri,
+        displayName: String,
+        mimeType: String,
+        sourceFile: File
+    ): Uri? {
+        if (!sourceFile.exists() || sourceFile.length() <= 0L) return null
+        val uri = createPhotoExportUri(context, destination, collectionUri, displayName, mimeType)
+            ?: return null
+        val written = writeToPhotoExportUri(context, uri) { output ->
+            sourceFile.inputStream().use { input ->
+                input.copyTo(output)
+            }
+        }
+        if (!written) {
+            discardPhotoExportUri(context, uri)
+            return null
+        }
+        return uri
+    }
+
+    private fun exportBytesToConfiguredPhotoStorage(
+        context: Context,
+        destination: PhotoExportDestination,
+        collectionUri: Uri,
+        displayName: String,
+        mimeType: String,
+        data: ByteArray
+    ): Uri? {
+        val uri = createPhotoExportUri(context, destination, collectionUri, displayName, mimeType)
+            ?: return null
+        val written = writeToPhotoExportUri(context, uri) { output ->
+            output.write(data)
+        }
+        if (!written) {
+            discardPhotoExportUri(context, uri)
+            return null
+        }
+        return uri
+    }
+
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun exportPhoto(
         context: Context,
@@ -584,6 +717,7 @@ object GalleryManager {
                 val shouldPreferHeic = preferHeicExport
                     ?: (ContentRepository.getInstance(context).userPreferencesRepository.userPreferences.firstOrNull()
                         ?.useHeicExport ?: false)
+                val exportDestination = resolvePhotoExportDestination(context)
 
                 if (!shouldPreferHeic && bitmap == null && canReuseEmbeddedGainmap(metadata)) {
                     val embeddedBitmap = loadOriginalBitmap(context, id)
@@ -595,7 +729,8 @@ object GalleryManager {
                             bitmap = embeddedBitmap,
                             metadata = metadata,
                             photoQuality = photoQuality,
-                            suffix = suffix
+                            suffix = suffix,
+                            destination = exportDestination
                         )
                     }
                 }
@@ -679,7 +814,8 @@ object GalleryManager {
                         baseFilename = baseFilename,
                         extension = HeicExportEncoder.EXTENSION,
                         mimeType = HeicExportEncoder.MIME_TYPE,
-                        gainmapResult = gainmapResult
+                        gainmapResult = gainmapResult,
+                        destination = exportDestination
                     )
                     if (heicExported) {
                         processedBitmap.recycle()
@@ -689,144 +825,135 @@ object GalleryManager {
                 }
 
                 val filename = "$baseFilename.jpg"
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/PhotonCamera")
+                val exportWriteElapsed = measureTimeMillis {
+                    FileOutputStream(tempExportFile).use { outputStream ->
+                        writeFinalJpeg(
+                            bitmap = processedBitmap,
+                            outputStream = outputStream,
+                            quality = photoQuality,
+                            gainmapResult = if (isLivePhoto) null else gainmapResult
+                        )
+                    }
                 }
+                PLog.d(TAG, "exportPhoto writeFinalJpeg wrapper took ${exportWriteElapsed}ms")
 
-                val uri = context.contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    contentValues
+                ExifWriter.writeExif(
+                    tempExportFile, metadata.toCaptureInfo().copy(
+                        imageWidth = processedBitmap.width,
+                        imageHeight = processedBitmap.height
+                    )
                 )
 
-                uri?.let {
-                    val exportWriteElapsed = measureTimeMillis {
-                        FileOutputStream(tempExportFile).use { outputStream ->
-                            writeFinalJpeg(
-                                bitmap = processedBitmap,
-                                outputStream = outputStream,
-                                quality = photoQuality,
-                                gainmapResult = if (isLivePhoto) null else gainmapResult
-                            )
-                        }
-                    }
-                    PLog.d(TAG, "exportPhoto writeFinalJpeg wrapper took ${exportWriteElapsed}ms")
-
-                    ExifWriter.writeExif(
-                        tempExportFile, metadata.toCaptureInfo().copy(
-                            imageWidth = processedBitmap.width,
-                            imageHeight = processedBitmap.height
+                val uri = if (isLivePhoto) {
+                    val tempMotionPhotoFile = File(context.cacheDir, "temp_motion_${System.nanoTime()}.jpg")
+                    var tempProcessedVideoFile: File? = null
+                    try {
+                        PLog.d(
+                            TAG,
+                            "Attempting to create Motion Photo for export: JPEG=${tempExportFile.length()}, Video=${videoFile.length()}"
                         )
-                    )
 
-                    if (isLivePhoto) {
-                        val tempMotionPhotoFile = File(context.cacheDir, "temp_motion_${System.nanoTime()}.jpg")
-                        var tempProcessedVideoFile: File? = null
-                        try {
-                            PLog.d(
-                                TAG,
-                                "Attempting to create Motion Photo for export: JPEG=${tempExportFile.length()}, Video=${videoFile.length()}"
-                            )
+                        // 重新从磁盘加载最新元数据，以获取可能刚写回的 presentationTimestampUs
+                        val latestMetadata = loadMetadata(context, id) ?: metadata
 
-                            // 重新从磁盘加载最新元数据，以获取可能刚写回的 presentationTimestampUs
-                            val latestMetadata = loadMetadata(context, id) ?: metadata
-                            
-                            var finalVideoPath = videoFile.absolutePath
-                            if (latestMetadata.applyEffectsToVideo) {
-                                val lutId = latestMetadata.lutId
-                                val colorRecipeParams = latestMetadata.colorRecipeParams
-                                PLog.d(TAG, "exportPhoto: applyEffectsToVideo is true. lutId: $lutId, colorRecipe: ${colorRecipeParams != null}")
-                                
-                                val lutConfig = if (lutId != null) {
-                                    ContentRepository.getInstance(context).lutManager.loadLut(lutId)
-                                } else {
-                                    null
-                                }
-                                
-                                val processedFile = File(context.cacheDir, "temp_processed_video_${System.nanoTime()}.mp4")
-                                val success = applyEffectsToVideoFile(
-                                    context = context,
-                                    inputUri = Uri.fromFile(videoFile),
-                                    outputFile = processedFile,
-                                    lutConfig = lutConfig,
-                                    recipeParams = colorRecipeParams
-                                )
-                                if (success && processedFile.exists() && processedFile.length() > 0) {
-                                    tempProcessedVideoFile = processedFile
-                                    finalVideoPath = processedFile.absolutePath
-                                    PLog.d(TAG, "exportPhoto: Successfully processed video effects. Size: ${processedFile.length()}")
-                                } else {
-                                    processedFile.delete()
-                                    PLog.e(TAG, "exportPhoto: Failed to apply video effects, falling back to original video")
-                                }
+                        var finalVideoPath = videoFile.absolutePath
+                        if (latestMetadata.applyEffectsToVideo) {
+                            val lutId = latestMetadata.lutId
+                            val colorRecipeParams = latestMetadata.colorRecipeParams
+                            PLog.d(TAG, "exportPhoto: applyEffectsToVideo is true. lutId: $lutId, colorRecipe: ${colorRecipeParams != null}")
+
+                            val lutConfig = if (lutId != null) {
+                                ContentRepository.getInstance(context).lutManager.loadLut(lutId)
+                            } else {
+                                null
                             }
 
-                            val success = MotionPhotoWriter.write(
-                                tempExportFile.absolutePath,
-                                finalVideoPath,
-                                tempMotionPhotoFile.absolutePath,
-                                latestMetadata.presentationTimestampUs ?: 0L,
-                                context
+                            val processedFile = File(context.cacheDir, "temp_processed_video_${System.nanoTime()}.mp4")
+                            val success = applyEffectsToVideoFile(
+                                context = context,
+                                inputUri = Uri.fromFile(videoFile),
+                                outputFile = processedFile,
+                                lutConfig = lutConfig,
+                                recipeParams = colorRecipeParams
                             )
-
-                            PLog.d(TAG, "MotionPhotoWriter result: $success")
-
-                            context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                                if (success) {
-                                    tempMotionPhotoFile.inputStream().use { input -> input.copyTo(outputStream) }
-                                    PLog.d(
-                                        TAG,
-                                        "Exported Live Photo successfully: ${tempMotionPhotoFile.length()} bytes"
-                                    )
-                                } else {
-                                    // Fallback to normal JPEG (with EXIF)
-                                    PLog.w(TAG, "Motion Photo synthesis failed, falling back to JPEG")
-                                    tempExportFile.inputStream().use { input -> input.copyTo(outputStream) }
-                                }
+                            if (success && processedFile.exists() && processedFile.length() > 0) {
+                                tempProcessedVideoFile = processedFile
+                                finalVideoPath = processedFile.absolutePath
+                                PLog.d(TAG, "exportPhoto: Successfully processed video effects. Size: ${processedFile.length()}")
+                            } else {
+                                processedFile.delete()
+                                PLog.e(TAG, "exportPhoto: Failed to apply video effects, falling back to original video")
                             }
+                        }
 
-                            if (Build.MANUFACTURER.lowercase().contains("vivo")) {
-                                val filename = filename.replace(".jpg", ".mp4")
-                                val contentValues = ContentValues().apply {
-                                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                                    put(
-                                        MediaStore.MediaColumns.RELATIVE_PATH,
-                                        Environment.DIRECTORY_DCIM + "/PhotonCamera"
-                                    )
-                                }
+                        val success = MotionPhotoWriter.write(
+                            tempExportFile.absolutePath,
+                            finalVideoPath,
+                            tempMotionPhotoFile.absolutePath,
+                            latestMetadata.presentationTimestampUs ?: 0L,
+                            context
+                        )
 
-                                val uri = context.contentResolver.insert(
-                                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                                    contentValues
-                                )
-                                uri?.let { uri -> context.contentResolver.openOutputStream(uri) }?.use { outputStream ->
-                                    val tempMotionVideoFile =
-                                        File(tempMotionPhotoFile.absolutePath.replace(".jpg", ".mp4"))
-                                    if (tempMotionVideoFile.exists()) {
-                                        tempMotionVideoFile.inputStream().use { input -> input.copyTo(outputStream) }
-                                    }
-                                    tempMotionVideoFile.delete()
+                        PLog.d(TAG, "MotionPhotoWriter result: $success")
+                        val photoExportFile = if (success) {
+                            PLog.d(TAG, "Exported Live Photo successfully: ${tempMotionPhotoFile.length()} bytes")
+                            tempMotionPhotoFile
+                        } else {
+                            PLog.w(TAG, "Motion Photo synthesis failed, falling back to JPEG")
+                            tempExportFile
+                        }
 
-                                    updateMetadata(context, id) { current ->
-                                        current.copy(
-                                            exportedUris = current.exportedUris + uri.toString()
-                                        )
+                        val exportedPhotoUri = exportFileToConfiguredPhotoStorage(
+                            context = context,
+                            destination = exportDestination,
+                            collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            displayName = filename,
+                            mimeType = "image/jpeg",
+                            sourceFile = photoExportFile
+                        )
+
+                        if (exportedPhotoUri != null && Build.MANUFACTURER.lowercase().contains("vivo")) {
+                            val videoFilename = filename.replace(".jpg", ".mp4")
+                            val tempMotionVideoFile = File(tempMotionPhotoFile.absolutePath.replace(".jpg", ".mp4"))
+                            try {
+                                if (tempMotionVideoFile.exists()) {
+                                    exportFileToConfiguredPhotoStorage(
+                                        context = context,
+                                        destination = exportDestination,
+                                        collectionUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                        displayName = videoFilename,
+                                        mimeType = "video/mp4",
+                                        sourceFile = tempMotionVideoFile
+                                    )?.let { videoUri ->
+                                        updateMetadata(context, id) { current ->
+                                            current.copy(
+                                                exportedUris = current.exportedUris + videoUri.toString()
+                                            )
+                                        }
                                     }
                                 }
+                            } finally {
+                                tempMotionVideoFile.delete()
                             }
-                        } finally {
-                            tempMotionPhotoFile.delete()
-                            tempProcessedVideoFile?.delete()
                         }
-                    } else {
-                        // 3b. Normal Export: Copy Temp File (with EXIF) to MediaStore
-                        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                            tempExportFile.inputStream().use { input -> input.copyTo(outputStream) }
-                        }
+
+                        exportedPhotoUri
+                    } finally {
+                        tempMotionPhotoFile.delete()
+                        tempProcessedVideoFile?.delete()
                     }
+                } else {
+                    exportFileToConfiguredPhotoStorage(
+                        context = context,
+                        destination = exportDestination,
+                        collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        displayName = filename,
+                        mimeType = "image/jpeg",
+                        sourceFile = tempExportFile
+                    )
+                }
 
+                uri?.let {
                     // Save exported URI to metadata
                     updateMetadata(context, id) { current ->
                         current.copy(
@@ -856,6 +983,7 @@ object GalleryManager {
         metadata: MediaMetadata,
         photoQuality: Int,
         suffix: String?,
+        destination: PhotoExportDestination,
     ): Boolean {
         val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.jpg")
         try {
@@ -866,15 +994,6 @@ object GalleryManager {
             lutName?.let { withSuffix += ".$it" }
             val filename =
                 "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(date))}$withSuffix.jpg"
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/PhotonCamera")
-            }
-            val uri = context.contentResolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues
-            ) ?: return false
 
             FileOutputStream(tempExportFile).use { outputStream ->
                 writeFinalJpeg(bitmap, outputStream, photoQuality)
@@ -885,9 +1004,14 @@ object GalleryManager {
                     imageHeight = bitmap.height
                 )
             )
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                tempExportFile.inputStream().use { input -> input.copyTo(output) }
-            }
+            val uri = exportFileToConfiguredPhotoStorage(
+                context = context,
+                destination = destination,
+                collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                displayName = filename,
+                mimeType = "image/jpeg",
+                sourceFile = tempExportFile
+            ) ?: return false
 
             updateMetadata(context, id) { current ->
                 current.copy(
@@ -911,6 +1035,7 @@ object GalleryManager {
         extension: String,
         mimeType: String,
         gainmapResult: GainmapResult? = null,
+        destination: PhotoExportDestination,
     ): Boolean {
         val tempExportFile = File(context.cacheDir, "temp_export_${System.nanoTime()}.$extension")
         try {
@@ -936,19 +1061,14 @@ object GalleryManager {
             if (!encoded) return false
 
             val filename = "$baseFilename.$extension"
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/PhotonCamera")
-            }
-            val uri = context.contentResolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues
+            val uri = exportFileToConfiguredPhotoStorage(
+                context = context,
+                destination = destination,
+                collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                displayName = filename,
+                mimeType = mimeType,
+                sourceFile = tempExportFile
             ) ?: return false
-
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                tempExportFile.inputStream().use { input -> input.copyTo(output) }
-            } ?: return false
 
             updateMetadata(context, id) { current ->
                 current.copy(
@@ -971,24 +1091,17 @@ object GalleryManager {
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
                     .format(Date())
                 val dngFilename = "PhotonCamera_${timestamp}.dng"
-                val dngContentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, dngFilename)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        Environment.DIRECTORY_DCIM + "/PhotonCamera"
-                    )
-                }
-
-                val dngUri = context.contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    dngContentValues
+                val destination = resolvePhotoExportDestination(context)
+                val uri = exportBytesToConfiguredPhotoStorage(
+                    context = context,
+                    destination = destination,
+                    collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    displayName = dngFilename,
+                    mimeType = "image/x-adobe-dng",
+                    data = data
                 )
 
-                dngUri?.let { uri ->
-                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                        outputStream.write(data)
-                    }
+                uri?.let {
                     PLog.d(TAG, "DNG exported: $uri")
 
                     updateMetadata(context, photoId) { current ->
@@ -1014,26 +1127,17 @@ object GalleryManager {
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
                     .format(Date())
                 val dngFilename = "PhotonCamera_${timestamp}.dng"
-                val dngContentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, dngFilename)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        Environment.DIRECTORY_DCIM + "/PhotonCamera"
-                    )
-                }
-
-                val dngUri = context.contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    dngContentValues
+                val destination = resolvePhotoExportDestination(context)
+                val uri = exportFileToConfiguredPhotoStorage(
+                    context = context,
+                    destination = destination,
+                    collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    displayName = dngFilename,
+                    mimeType = "image/x-adobe-dng",
+                    sourceFile = sourceFile
                 )
 
-                dngUri?.let { uri ->
-                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                        sourceFile.inputStream().use { inputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
+                uri?.let {
                     PLog.d(TAG, "DNG exported from file: $uri")
 
                     updateMetadata(context, photoId) { current ->

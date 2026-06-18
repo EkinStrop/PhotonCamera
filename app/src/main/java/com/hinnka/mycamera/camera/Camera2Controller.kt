@@ -40,6 +40,7 @@ import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoEncoderColorRequest
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoRecorder
+import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoRecordingState
 import com.hinnka.mycamera.video.VideoStabilizationMode
@@ -3398,6 +3399,15 @@ class Camera2Controller(private val context: Context) {
         videoRecorder.setPreferredAudioInputId(normalizedAudioInputId)
     }
 
+    fun setVideoRecordingPath(recordingPath: VideoRecordingPath, recordingTreeUri: String? = null) {
+        _state.value = _state.value.copy(
+            videoConfig = _state.value.videoConfig.copy(
+                recordingPath = recordingPath,
+                recordingTreeUri = recordingTreeUri?.takeIf { it.isNotBlank() }
+            )
+        )
+    }
+
     fun setVideoTorchEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(
             videoConfig = _state.value.videoConfig.copy(
@@ -3438,6 +3448,8 @@ class Camera2Controller(private val context: Context) {
             ),
             orientationHintDegrees = resolveVideoOrientationHintDegrees(),
             flipEncodedFrame = shouldFlipEncodedFrame,
+            recordingPath = _state.value.videoConfig.recordingPath,
+            recordingTreeUri = _state.value.videoConfig.recordingTreeUri,
             onError = { message ->
                 PLog.e(TAG, "Video recording error: $message")
                 onCameraError?.invoke(-1, message, false)
