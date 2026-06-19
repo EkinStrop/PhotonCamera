@@ -200,7 +200,8 @@ fun GalleryEditScreen(
     val editRawDcpId by viewModel.editRawDcpId.collectAsState()
     val editRawBaselineLutId by viewModel.editRawBaselineLutId.collectAsState()
     val editRawBaselineRecipeParams by viewModel.editRawBaselineRecipeParams.collectAsState()
-    val editRawColorEngine by viewModel.editRawColorEngine.collectAsState()
+    val editRawColorEngine by viewModel.editRawRenderingEngine.collectAsState()
+    val editRawToneMappingParameters by viewModel.editRawToneMappingParameters.collectAsState()
     val editRawSpectralFilmStock by viewModel.editRawSpectralFilmStock.collectAsState()
     val editRawSpectralFilmPrint by viewModel.editRawSpectralFilmPrint.collectAsState()
     val editRawSpectralFilmCDensityGain by viewModel.editRawSpectralFilmCDensityGain.collectAsState()
@@ -1104,7 +1105,8 @@ fun GalleryEditScreen(
                                         rawBlackLevelMode = editRawBlackLevelMode,
                                         rawCustomBlackLevel = editRawCustomBlackLevel,
                                         rawCfaCorrectionMode = editRawCfaCorrectionMode,
-                                        rawColorEngine = editRawColorEngine,
+                                        rawRenderingEngine = editRawColorEngine,
+                                        rawToneMappingParameters = editRawToneMappingParameters,
                                         spectralFilmSelection = editRawSpectralFilmStock?.let { stock ->
                                             SpectralFilmSelection(
                                                 id = stock,
@@ -1184,6 +1186,9 @@ fun GalleryEditScreen(
                                             viewModel.saveRawColorEngine(currentPhoto, it) {
                                                 requestRawPreviewRefresh()
                                             }
+                                        },
+                                        onRawToneMappingParametersChange = {
+                                            viewModel.saveRawToneMappingParameters(currentPhoto, it)
                                         },
                                         onSpectralFilmSelectionChange = {
                                             viewModel.saveRawSpectralFilmSelection(currentPhoto, it) {

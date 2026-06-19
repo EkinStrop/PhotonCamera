@@ -29,7 +29,8 @@ import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.raw.DcpInfo
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
+import com.hinnka.mycamera.raw.RawToneMappingParameters
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.RawEditPanel
 import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
@@ -82,7 +83,8 @@ fun CameraTopSheet(
     rawDROMode: String,
     rawBlackPointCorrection: Float,
     rawWhitePointCorrection: Float,
-    rawColorEngine: RawColorEngine,
+    rawRenderingEngine: RawRenderingEngine,
+    rawToneMappingParameters: RawToneMappingParameters,
     rawSpectralFilmSelection: SpectralFilmSelection?,
     rawSpectralFilmPrint: String?,
     onRawDcpChange: (String?) -> Unit,
@@ -91,7 +93,7 @@ fun CameraTopSheet(
     onRawBaselineLutChange: (String?) -> Unit,
     onEditRawBaselineRecipe: (String) -> Unit,
     onRawDROModeChange: (String) -> Unit,
-    onRawColorEngineChange: (RawColorEngine) -> Unit,
+    onRawColorEngineChange: (RawRenderingEngine) -> Unit,
     onRawSpectralFilmSelectionChange: (SpectralFilmSelection?) -> Unit,
     onRawSpectralFilmPrintChange: (String?) -> Unit,
     meteringMode: MeteringMode,
@@ -574,7 +576,8 @@ fun CameraTopSheet(
                     rawShadowsAdjustment = rawShadowsAdjustment,
                     rawBlackPointCorrection = rawBlackPointCorrection,
                     rawWhitePointCorrection = rawWhitePointCorrection,
-                    rawColorEngine = rawColorEngine,
+                    rawRenderingEngine = rawRenderingEngine,
+                    rawToneMappingParameters = rawToneMappingParameters,
                     spectralFilmSelection = rawSpectralFilmSelection,
                     spectralFilmPrint = rawSpectralFilmPrint,
                     onSelectDcp = onRawDcpChange,

@@ -13,7 +13,8 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.raw.RawMetadata
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
+import com.hinnka.mycamera.raw.RawToneMappingParameters
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
@@ -47,7 +48,8 @@ data class MediaMetadata(
     val rawWhitePointCorrection: Float? = null,
     val rawAutoWhiteBalanceEstimate: Boolean? = null,
     val rawDcpId: String? = null,
-    val rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+    val rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+    val rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
     val cameraId: String? = null,
     // 边框水印配置
     val frameId: String? = null,
@@ -267,10 +269,42 @@ data class MediaMetadata(
                     rawWhitePointCorrection = if (obj.isNull("rawWhitePointCorrection")) null else obj.optDouble("rawWhitePointCorrection").toFloat(),
                     rawAutoWhiteBalanceEstimate = if (obj.isNull("rawAutoWhiteBalanceEstimate")) null else obj.optBoolean("rawAutoWhiteBalanceEstimate"),
                     rawDcpId = if (obj.isNull("rawDcpId")) null else obj.optString("rawDcpId"),
-                    rawColorEngine = RawColorEngine.fromPersistedName(
+                    rawRenderingEngine = RawRenderingEngine.fromPersistedName(
                         if (obj.isNull("rawColorEngine")) null else obj.optString("rawColorEngine"),
-                        fallback = RawColorEngine.AdobeCurve
+                        fallback = RawRenderingEngine.AdobeCurve
                     ),
+                    rawToneMappingParameters = RawToneMappingParameters(
+                        agxBlackRelativeExposure = if (obj.isNull("rawAgxBlackRelativeExposure")) {
+                            RawToneMappingParameters.AGX_BLACK_RELATIVE_EXPOSURE_DEFAULT
+                        } else {
+                            obj.optDouble("rawAgxBlackRelativeExposure").toFloat()
+                        },
+                        agxWhiteRelativeExposure = if (obj.isNull("rawAgxWhiteRelativeExposure")) {
+                            RawToneMappingParameters.AGX_WHITE_RELATIVE_EXPOSURE_DEFAULT
+                        } else {
+                            obj.optDouble("rawAgxWhiteRelativeExposure").toFloat()
+                        },
+                        agxToe = if (obj.isNull("rawAgxToe")) {
+                            RawToneMappingParameters.AGX_TOE_DEFAULT
+                        } else {
+                            obj.optDouble("rawAgxToe").toFloat()
+                        },
+                        agxShoulder = if (obj.isNull("rawAgxShoulder")) {
+                            RawToneMappingParameters.AGX_SHOULDER_DEFAULT
+                        } else {
+                            obj.optDouble("rawAgxShoulder").toFloat()
+                        },
+                        filmicBlackRelativeExposure = if (obj.isNull("rawFilmicBlackRelativeExposure")) {
+                            RawToneMappingParameters.FILMIC_BLACK_RELATIVE_EXPOSURE_DEFAULT
+                        } else {
+                            obj.optDouble("rawFilmicBlackRelativeExposure").toFloat()
+                        },
+                        filmicWhiteRelativeExposure = if (obj.isNull("rawFilmicWhiteRelativeExposure")) {
+                            RawToneMappingParameters.FILMIC_WHITE_RELATIVE_EXPOSURE_DEFAULT
+                        } else {
+                            obj.optDouble("rawFilmicWhiteRelativeExposure").toFloat()
+                        }
+                    ).normalized(),
                     rawBlackLevelMode = if (obj.isNull("rawBlackLevelMode")) null else obj.optString("rawBlackLevelMode"),
                     rawCustomBlackLevel = if (obj.isNull("rawCustomBlackLevel")) null else obj.optDouble("rawCustomBlackLevel").toFloat(),
                     rawCfaCorrectionMode = if (obj.isNull("rawCfaCorrectionMode")) null else obj.optString("rawCfaCorrectionMode"),

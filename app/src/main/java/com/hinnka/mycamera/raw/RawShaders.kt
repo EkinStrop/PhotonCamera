@@ -71,30 +71,30 @@ object RawShaders {
         }
     """.trimIndent()
 
-    fun combinedFragmentShaderFor(colorEngine: RawColorEngine): String {
+    fun combinedFragmentShaderFor(colorEngine: RawRenderingEngine): String {
         return when (colorEngine) {
-            RawColorEngine.AgX -> combinedFragmentShader(
+            RawRenderingEngine.AgX -> combinedFragmentShader(
                 engineUniforms = AGX_COMBINED_UNIFORMS,
                 engineFunctions = AGX_COMBINED_FUNCTIONS
             )
 
-            RawColorEngine.AdobeCurve -> combinedFragmentShader(
+            RawRenderingEngine.AdobeCurve -> combinedFragmentShader(
                 engineUniforms = ADOBE_COMBINED_UNIFORMS,
                 engineFunctions =
                     "$CURVE_COMBINED_FUNCTIONS\n$ADOBE_COMBINED_FUNCTIONS"
             )
 
-            RawColorEngine.Spektrafilm -> combinedFragmentShader(
+            RawRenderingEngine.Spektrafilm -> combinedFragmentShader(
                 engineUniforms = SPECTRAL_FILM_COMBINED_UNIFORMS,
                 engineFunctions = SPECTRAL_FILM_COMBINED_FUNCTIONS
             )
 
-            RawColorEngine.DarktableSigmoid -> combinedFragmentShader(
+            RawRenderingEngine.DarktableSigmoid -> combinedFragmentShader(
                 engineUniforms = OUTPUT_TRANSFORM_COMBINED_UNIFORMS,
                 engineFunctions = DARKTABLE_SIGMOID_COMBINED_FUNCTIONS
             )
 
-            RawColorEngine.DarktableFilmic -> combinedFragmentShader(
+            RawRenderingEngine.DarktableFilmic -> combinedFragmentShader(
                 engineUniforms = OUTPUT_TRANSFORM_COMBINED_UNIFORMS,
                 engineFunctions = DARKTABLE_FILMIC_COMBINED_FUNCTIONS
             )
@@ -175,8 +175,28 @@ object RawShaders {
         }
     """.trimIndent()
 
+    private val RAW_TONE_MAPPING_COMBINED_UNIFORMS = """
+        uniform float uAgxBlackRelativeExposure;
+        uniform float uAgxWhiteRelativeExposure;
+        uniform float uAgxToe;
+        uniform float uAgxShoulder;
+        uniform float uFilmicBlackRelativeExposure;
+        uniform float uFilmicWhiteRelativeExposure;
+        uniform float uFilmicDynamicRange;
+        uniform float uFilmicInputMin;
+        uniform float uFilmicInputMax;
+        uniform float uFilmicLatitudeMin;
+        uniform float uFilmicLatitudeMax;
+        uniform vec3 uFilmicM1;
+        uniform vec3 uFilmicM2;
+        uniform vec3 uFilmicM3;
+        uniform vec3 uFilmicM4;
+        uniform vec3 uFilmicM5;
+    """.trimIndent()
+
     private val OUTPUT_TRANSFORM_COMBINED_UNIFORMS = """
         uniform mat3 uOutputTransform;
+        $RAW_TONE_MAPPING_COMBINED_UNIFORMS
     """.trimIndent()
 
     private val ADOBE_COMBINED_UNIFORMS = """
@@ -210,6 +230,7 @@ object RawShaders {
 
     private val AGX_COMBINED_UNIFORMS = """
         uniform mat3 uOutputTransform;
+        $RAW_TONE_MAPPING_COMBINED_UNIFORMS
     """.trimIndent()
 
     private val SPECTRAL_FILM_COMBINED_UNIFORMS = """
@@ -536,17 +557,11 @@ object RawShaders {
 
     private val AGX_COMBINED_FUNCTIONS = """
         const float DT_AGX_EPSILON = 0.000001;
-        const float DT_AGX_BLACK_EV = -10.0;
-        const float DT_AGX_RANGE_EV = 16.5;
+        const float DT_AGX_DEFAULT_RANGE_EV = 16.5;
+        const float DT_AGX_MIN_RANGE_EV = 0.2;
         const float DT_AGX_CURVE_GAMMA = 2.2;
-        const float DT_AGX_PIVOT_X = 0.6060606061;
         const float DT_AGX_PIVOT_Y = 0.4586564469;
         const float DT_AGX_SLOPE = 3.0;
-        const float DT_AGX_INTERCEPT = -1.3595253713;
-        const float DT_AGX_TOE_POWER = 1.5;
-        const float DT_AGX_TOE_SCALE = -0.5020092666;
-        const float DT_AGX_SHOULDER_POWER = 3.3;
-        const float DT_AGX_SHOULDER_SCALE = 0.5544739364;
         const float DT_AGX_HUE_MIX = 0.6;
 
         vec3 agxSanitize(vec3 color) {
@@ -605,7 +620,10 @@ object RawShaders {
 
         float agxLogEncode(float value) {
             float relativeValue = max(DT_AGX_EPSILON, value / 0.18);
-            return clamp((log2(max(relativeValue, 0.0)) - DT_AGX_BLACK_EV) / DT_AGX_RANGE_EV, 0.0, 1.0);
+            float blackEv = min(uAgxBlackRelativeExposure, uAgxWhiteRelativeExposure - DT_AGX_MIN_RANGE_EV);
+            float whiteEv = max(uAgxWhiteRelativeExposure, blackEv + DT_AGX_MIN_RANGE_EV);
+            float rangeEv = max(DT_AGX_MIN_RANGE_EV, whiteEv - blackEv);
+            return clamp((log2(max(relativeValue, 0.0)) - blackEv) / rangeEv, 0.0, 1.0);
         }
 
         float agxSigmoid(float value, float power) {
@@ -623,30 +641,124 @@ object RawShaders {
             return scale * agxSigmoid(slope * (value - transitionX) / scale, power) + transitionY;
         }
 
+        float agxScale(
+            float limitX,
+            float limitY,
+            float transitionX,
+            float transitionY,
+            float slope,
+            float power
+        ) {
+            float projectedRise = slope * max(DT_AGX_EPSILON, limitX - transitionX);
+            float actualRise = max(DT_AGX_EPSILON, limitY - transitionY);
+            float base = max(
+                DT_AGX_EPSILON,
+                pow(actualRise, -power) - pow(projectedRise, -power)
+            );
+            return min(1000000000.0, pow(base, -1.0 / power));
+        }
+
+        float agxFallbackToe(
+            float value,
+            float targetBlack,
+            float coefficient,
+            float power
+        ) {
+            return value < 0.0
+                ? targetBlack
+                : targetBlack + max(0.0, coefficient * pow(value, power));
+        }
+
+        float agxFallbackShoulder(
+            float value,
+            float targetWhite,
+            float coefficient,
+            float power
+        ) {
+            return value >= 1.0
+                ? targetWhite
+                : targetWhite - max(0.0, coefficient * pow(1.0 - value, power));
+        }
+
         float agxCurve(float value) {
+            float blackEv = min(uAgxBlackRelativeExposure, uAgxWhiteRelativeExposure - DT_AGX_MIN_RANGE_EV);
+            float whiteEv = max(uAgxWhiteRelativeExposure, blackEv + DT_AGX_MIN_RANGE_EV);
+            float rangeEv = max(DT_AGX_MIN_RANGE_EV, whiteEv - blackEv);
+            float pivotX = clamp(-blackEv / rangeEv, DT_AGX_EPSILON, 1.0 - DT_AGX_EPSILON);
+            float pivotY = DT_AGX_PIVOT_Y;
+            float slope = DT_AGX_SLOPE * (rangeEv / DT_AGX_DEFAULT_RANGE_EV);
+            float targetBlack = 0.0;
+            float targetWhite = 1.0;
+
+            float toePower = max(0.01, uAgxToe);
+            float toeTransitionX = pivotX;
+            float toeTransitionY = pivotY;
+            float toeScale = -agxScale(
+                1.0,
+                1.0 - targetBlack,
+                1.0 - toeTransitionX,
+                1.0 - toeTransitionY,
+                slope,
+                toePower
+            );
+            float toeLengthX = max(DT_AGX_EPSILON, toeTransitionX);
+            float toeDyTransitionToLimit = max(DT_AGX_EPSILON, toeTransitionY - targetBlack);
+            bool needConvexToe = toeDyTransitionToLimit / toeLengthX > slope;
+            float toeFallbackPower = slope * toeLengthX / toeDyTransitionToLimit;
+            float toeFallbackCoefficient = toeDyTransitionToLimit / pow(toeLengthX, toeFallbackPower);
+
+            float intercept = toeTransitionY - slope * toeTransitionX;
+
+            float shoulderPower = max(0.01, uAgxShoulder);
+            float shoulderTransitionX = pivotX;
+            float shoulderTransitionY = pivotY;
+            float shoulderScale = agxScale(
+                1.0,
+                targetWhite,
+                shoulderTransitionX,
+                shoulderTransitionY,
+                slope,
+                shoulderPower
+            );
+            float shoulderLengthX = max(DT_AGX_EPSILON, 1.0 - shoulderTransitionX);
+            float shoulderDyTransitionToLimit = max(DT_AGX_EPSILON, targetWhite - shoulderTransitionY);
+            bool needConcaveShoulder = shoulderDyTransitionToLimit / shoulderLengthX > slope;
+            float shoulderFallbackPower = slope * shoulderLengthX / shoulderDyTransitionToLimit;
+            float shoulderFallbackCoefficient =
+                shoulderDyTransitionToLimit / pow(shoulderLengthX, shoulderFallbackPower);
+
             float result;
-            if (value < DT_AGX_PIVOT_X) {
-                result = agxScaledSigmoid(
-                    value,
-                    DT_AGX_TOE_SCALE,
-                    DT_AGX_SLOPE,
-                    DT_AGX_TOE_POWER,
-                    DT_AGX_PIVOT_X,
-                    DT_AGX_PIVOT_Y
-                );
-            } else if (value <= DT_AGX_PIVOT_X) {
-                result = DT_AGX_SLOPE * value + DT_AGX_INTERCEPT;
+            if (value < toeTransitionX) {
+                result = needConvexToe
+                    ? agxFallbackToe(value, targetBlack, toeFallbackCoefficient, toeFallbackPower)
+                    : agxScaledSigmoid(
+                        value,
+                        toeScale,
+                        slope,
+                        toePower,
+                        toeTransitionX,
+                        toeTransitionY
+                    );
+            } else if (value <= shoulderTransitionX) {
+                result = slope * value + intercept;
             } else {
-                result = agxScaledSigmoid(
-                    value,
-                    DT_AGX_SHOULDER_SCALE,
-                    DT_AGX_SLOPE,
-                    DT_AGX_SHOULDER_POWER,
-                    DT_AGX_PIVOT_X,
-                    DT_AGX_PIVOT_Y
-                );
+                result = needConcaveShoulder
+                    ? agxFallbackShoulder(
+                        value,
+                        targetWhite,
+                        shoulderFallbackCoefficient,
+                        shoulderFallbackPower
+                    )
+                    : agxScaledSigmoid(
+                        value,
+                        shoulderScale,
+                        slope,
+                        shoulderPower,
+                        shoulderTransitionX,
+                        shoulderTransitionY
+                    );
             }
-            return clamp(result, 0.0, 1.0);
+            return clamp(result, targetBlack, targetWhite);
         }
 
         vec3 agxRgbToHsv(vec3 color) {
@@ -856,16 +968,10 @@ object RawShaders {
 
     private val DARKTABLE_FILMIC_COMBINED_FUNCTIONS = """
         const float DT_FILMIC_NORM_MIN = 0.0000152587890625;
-        const float DT_FILMIC_INPUT_MIN = 0.0009185798271;
-        const float DT_FILMIC_INPUT_MAX = 4.352042729;
         const float DT_FILMIC_GREY_SOURCE = 0.1845;
-        const float DT_FILMIC_BLACK_SOURCE = -7.65;
-        const float DT_FILMIC_DYNAMIC_RANGE = 12.21;
         const float DT_FILMIC_OUTPUT_POWER = 3.614815775;
         const float DT_FILMIC_DISPLAY_BLACK = 0.0001517634;
         const float DT_FILMIC_DISPLAY_WHITE = 1.0;
-        const float DT_FILMIC_LATITUDE_MIN = 0.6264986897;
-        const float DT_FILMIC_LATITUDE_MAX = 0.6265610375;
         const float DT_FILMIC_Y_1931_TO_2006 = 1.05785528;
         const float DT_FILMIC_YRG_D65_R = 0.21902143;
         const float DT_FILMIC_YRG_D65_G = 0.54371398;
@@ -888,41 +994,36 @@ object RawShaders {
         const vec3 DT_FILMIC_FILMLIGHT_TO_LMS_L = vec3(0.95, 0.38, 0.0);
         const vec3 DT_FILMIC_FILMLIGHT_TO_LMS_M = vec3(0.05, 0.62, 0.03);
         const vec3 DT_FILMIC_FILMLIGHT_TO_LMS_S = vec3(0.0, 0.0, 0.97);
-        const vec3 DT_FILMIC_M1 = vec3(0.08781340895, -0.1315144048, -0.271791843);
-        const vec3 DT_FILMIC_M2 = vec3(0.0, 1.387062713, 1.433801098);
-        const vec3 DT_FILMIC_M3 = vec3(1.36863996, -1.920153105, 0.0);
-        const vec3 DT_FILMIC_M4 = vec3(0.7402100865, 4.205175692, 0.0);
-        const vec3 DT_FILMIC_M5 = vec3(-1.171914069, -2.540570894, 0.0);
-
         float darktableFilmicLogEncode(float value) {
             float safeValue = max(value, DT_FILMIC_NORM_MIN);
             return clamp(
-                (log2(safeValue / DT_FILMIC_GREY_SOURCE) - DT_FILMIC_BLACK_SOURCE) / DT_FILMIC_DYNAMIC_RANGE,
+                (log2(safeValue / DT_FILMIC_GREY_SOURCE) - uFilmicBlackRelativeExposure) /
+                    max(uFilmicDynamicRange, 0.2),
                 0.0,
                 1.0
             );
         }
 
         float darktableFilmicSpline(float value) {
-            if (value < DT_FILMIC_LATITUDE_MIN) {
-                return DT_FILMIC_M1.x + value * (
-                    DT_FILMIC_M2.x + value * (
-                        DT_FILMIC_M3.x + value * (
-                            DT_FILMIC_M4.x + value * DT_FILMIC_M5.x
+            if (value < uFilmicLatitudeMin) {
+                return uFilmicM1.x + value * (
+                    uFilmicM2.x + value * (
+                        uFilmicM3.x + value * (
+                            uFilmicM4.x + value * uFilmicM5.x
                         )
                     )
                 );
             }
-            if (value > DT_FILMIC_LATITUDE_MAX) {
-                return DT_FILMIC_M1.y + value * (
-                    DT_FILMIC_M2.y + value * (
-                        DT_FILMIC_M3.y + value * (
-                            DT_FILMIC_M4.y + value * DT_FILMIC_M5.y
+            if (value > uFilmicLatitudeMax) {
+                return uFilmicM1.y + value * (
+                    uFilmicM2.y + value * (
+                        uFilmicM3.y + value * (
+                            uFilmicM4.y + value * uFilmicM5.y
                         )
                     )
                 );
             }
-            return DT_FILMIC_M1.z + value * DT_FILMIC_M2.z;
+            return uFilmicM1.z + value * uFilmicM2.z;
         }
 
         float darktableFilmicRgbScalar(float value) {
@@ -953,8 +1054,8 @@ object RawShaders {
         vec3 darktableFilmicMaxRgbTone(vec3 color) {
             vec3 positiveColor = max(color, vec3(0.0));
             float maxRgb = max(positiveColor.r, max(positiveColor.g, positiveColor.b));
-            float ratioNorm = max(maxRgb, DT_FILMIC_INPUT_MIN);
-            float toneNorm = clamp(maxRgb, DT_FILMIC_INPUT_MIN, DT_FILMIC_INPUT_MAX);
+            float ratioNorm = max(maxRgb, uFilmicInputMin);
+            float toneNorm = clamp(maxRgb, uFilmicInputMin, uFilmicInputMax);
             vec3 ratios = positiveColor / ratioNorm;
             return ratios * darktableFilmicNormScalar(toneNorm);
         }

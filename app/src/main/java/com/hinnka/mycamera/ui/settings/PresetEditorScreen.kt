@@ -31,7 +31,7 @@ import com.hinnka.mycamera.model.EffectParams
 import com.hinnka.mycamera.ui.components.ColorRecipePanel
 import com.hinnka.mycamera.ui.components.LutSelectorWithRecipeAction
 import com.hinnka.mycamera.ui.components.CurveChannel
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.SpectralFilmUiInfo
 import com.hinnka.mycamera.ui.components.EffectsBottomSheet
 import com.hinnka.mycamera.ui.components.FrameSelector
@@ -96,8 +96,8 @@ fun PresetEditorScreen(
 
     // Quick RAW 参数
     var rawDcpId by remember { mutableStateOf(sourcePreset?.rawDcpId) }
-    var rawColorEngine by remember {
-        mutableStateOf(RawColorEngine.fromPersistedName(sourcePreset?.rawColorEngine))
+    var rawRenderingEngine by remember {
+        mutableStateOf(RawRenderingEngine.fromPersistedName(sourcePreset?.rawRenderingEngine))
     }
     var rawSpectralFilmStock by remember { mutableStateOf(sourcePreset?.rawSpectralFilmStock ?: "kodak_portra_400") }
     var rawSpectralFilmPrint by remember { mutableStateOf(sourcePreset?.rawSpectralFilmPrint ?: "kodak_2383") }
@@ -134,7 +134,7 @@ fun PresetEditorScreen(
             useMFSR = useMFSR,
             frameId = frameId,
             rawDcpId = rawDcpId,
-            rawColorEngine = rawColorEngine.name,
+            rawRenderingEngine = rawRenderingEngine.name,
             rawSpectralFilmStock = rawSpectralFilmStock,
             rawSpectralFilmPrint = rawSpectralFilmPrint,
             rawDROMode = rawDROMode,
@@ -375,25 +375,25 @@ fun PresetEditorScreen(
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.05f), modifier = Modifier.padding(vertical = 8.dp))
 
-                val engineNames = RawColorEngine.entries.associateWith { engine ->
+                val engineNames = RawRenderingEngine.entries.associateWith { engine ->
                     when (engine) {
-                        RawColorEngine.AdobeCurve -> stringResource(R.string.settings_raw_color_engine_adobe_curve)
-                        RawColorEngine.AgX -> stringResource(R.string.settings_raw_color_engine_agx)
-                        RawColorEngine.DarktableSigmoid -> stringResource(R.string.settings_raw_color_engine_darktable_sigmoid)
-                        RawColorEngine.DarktableFilmic -> stringResource(R.string.settings_raw_color_engine_darktable_filmic)
-                        RawColorEngine.Spektrafilm -> stringResource(R.string.settings_raw_color_engine_spectral_film)
+                        RawRenderingEngine.AdobeCurve -> stringResource(R.string.settings_raw_color_engine_adobe_curve)
+                        RawRenderingEngine.AgX -> stringResource(R.string.settings_raw_color_engine_agx)
+                        RawRenderingEngine.DarktableSigmoid -> stringResource(R.string.settings_raw_color_engine_darktable_sigmoid)
+                        RawRenderingEngine.DarktableFilmic -> stringResource(R.string.settings_raw_color_engine_darktable_filmic)
+                        RawRenderingEngine.Spektrafilm -> stringResource(R.string.settings_raw_color_engine_spectral_film)
                     }
                 }
                 DropdownSettingItem(
                     title = stringResource(R.string.settings_raw_color_engine),
-                    value = engineNames[rawColorEngine] ?: rawColorEngine.name,
+                    value = engineNames[rawRenderingEngine] ?: rawRenderingEngine.name,
                     options = engineNames.values.toList(),
                     isLoading = false,
                     onExpanded = {},
                     onOptionSelected = { selectedName ->
                         engineNames.entries.find { it.value == selectedName }?.key?.let { engine ->
-                            rawColorEngine = engine
-                            if (engine == RawColorEngine.Spektrafilm) {
+                            rawRenderingEngine = engine
+                            if (engine == RawRenderingEngine.Spektrafilm) {
                                 if (rawSpectralFilmStock.isBlank()) rawSpectralFilmStock = "kodak_portra_400"
                                 if (rawSpectralFilmPrint.isBlank()) rawSpectralFilmPrint = "kodak_2383"
                             }
@@ -420,7 +420,7 @@ fun PresetEditorScreen(
                         }
                     }
                 )
-                if (rawColorEngine != RawColorEngine.AdobeCurve && rawDcpId != null) {
+                if (rawRenderingEngine != RawRenderingEngine.AdobeCurve && rawDcpId != null) {
                     Text(
                         text = stringResource(R.string.raw_dcp_non_adobe_curve_warning),
                         color = Color(0xFFFFC36A).copy(alpha = 0.9f),
@@ -429,7 +429,7 @@ fun PresetEditorScreen(
                     )
                 }
 
-                AnimatedVisibility(visible = rawColorEngine == RawColorEngine.Spektrafilm) {
+                AnimatedVisibility(visible = rawRenderingEngine == RawRenderingEngine.Spektrafilm) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         val currentStockLabel = SpectralFilmUiInfo.getFilmDisplayName(rawSpectralFilmStock)
                         val stockMap = SpectralFilmUiInfo.availableFilms.associateWith { SpectralFilmUiInfo.getFilmDisplayName(it) }

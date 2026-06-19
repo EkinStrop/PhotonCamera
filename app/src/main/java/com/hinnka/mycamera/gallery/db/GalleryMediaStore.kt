@@ -1,7 +1,6 @@
 package com.hinnka.mycamera.gallery.db
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
 import android.graphics.Rect
 import android.net.Uri
@@ -9,15 +8,14 @@ import android.os.Environment
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import com.hinnka.mycamera.camera.AspectRatio
-import com.hinnka.mycamera.gallery.GalleryManager
 import com.hinnka.mycamera.gallery.MediaData
 import com.hinnka.mycamera.gallery.MediaMetadata
 import com.hinnka.mycamera.gallery.MediaType
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
+import com.hinnka.mycamera.raw.RawToneMappingParameters
 import com.hinnka.mycamera.utils.PLog
-import com.hinnka.mycamera.utils.StartupTrace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -212,7 +210,13 @@ object GalleryMediaStore {
             rawWhitePointCorrection = metadata.rawWhitePointCorrection,
             rawAutoWhiteBalanceEstimate = metadata.rawAutoWhiteBalanceEstimate,
             rawDcpId = metadata.rawDcpId,
-            rawColorEngine = metadata.rawColorEngine.name,
+            rawColorEngine = metadata.rawRenderingEngine.name,
+            rawAgxBlackRelativeExposure = metadata.rawToneMappingParameters.agxBlackRelativeExposure,
+            rawAgxWhiteRelativeExposure = metadata.rawToneMappingParameters.agxWhiteRelativeExposure,
+            rawAgxToe = metadata.rawToneMappingParameters.agxToe,
+            rawAgxShoulder = metadata.rawToneMappingParameters.agxShoulder,
+            rawFilmicBlackRelativeExposure = metadata.rawToneMappingParameters.filmicBlackRelativeExposure,
+            rawFilmicWhiteRelativeExposure = metadata.rawToneMappingParameters.filmicWhiteRelativeExposure,
             frameId = metadata.frameId,
             width = metadata.width,
             height = metadata.height,
@@ -372,10 +376,18 @@ object GalleryMediaStore {
             rawWhitePointCorrection = rawWhitePointCorrection,
             rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
             rawDcpId = rawDcpId,
-            rawColorEngine = RawColorEngine.fromPersistedName(
+            rawRenderingEngine = RawRenderingEngine.fromPersistedName(
                 rawColorEngine,
-                fallback = RawColorEngine.AdobeCurve
+                fallback = RawRenderingEngine.AdobeCurve
             ),
+            rawToneMappingParameters = RawToneMappingParameters(
+                agxBlackRelativeExposure = rawAgxBlackRelativeExposure,
+                agxWhiteRelativeExposure = rawAgxWhiteRelativeExposure,
+                agxToe = rawAgxToe,
+                agxShoulder = rawAgxShoulder,
+                filmicBlackRelativeExposure = rawFilmicBlackRelativeExposure,
+                filmicWhiteRelativeExposure = rawFilmicWhiteRelativeExposure
+            ).normalized(),
             frameId = frameId,
             width = width,
             height = height,

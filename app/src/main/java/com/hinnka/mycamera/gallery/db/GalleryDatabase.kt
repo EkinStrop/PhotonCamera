@@ -4,10 +4,11 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.hinnka.mycamera.raw.RawToneMappingParameters
 
 @Database(
     entities = [GalleryMediaEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GalleryConverters::class)
@@ -79,6 +80,35 @@ abstract class GalleryDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE gallery_media ADD COLUMN rawAgxBlackRelativeExposure REAL NOT NULL DEFAULT " +
+                        RawToneMappingParameters.AGX_BLACK_RELATIVE_EXPOSURE_DEFAULT
+                )
+                db.execSQL(
+                    "ALTER TABLE gallery_media ADD COLUMN rawAgxWhiteRelativeExposure REAL NOT NULL DEFAULT " +
+                        RawToneMappingParameters.AGX_WHITE_RELATIVE_EXPOSURE_DEFAULT
+                )
+                db.execSQL(
+                    "ALTER TABLE gallery_media ADD COLUMN rawAgxToe REAL NOT NULL DEFAULT " +
+                        RawToneMappingParameters.AGX_TOE_DEFAULT
+                )
+                db.execSQL(
+                    "ALTER TABLE gallery_media ADD COLUMN rawAgxShoulder REAL NOT NULL DEFAULT " +
+                        RawToneMappingParameters.AGX_SHOULDER_DEFAULT
+                )
+                db.execSQL(
+                    "ALTER TABLE gallery_media ADD COLUMN rawFilmicBlackRelativeExposure REAL NOT NULL DEFAULT " +
+                        RawToneMappingParameters.FILMIC_BLACK_RELATIVE_EXPOSURE_DEFAULT
+                )
+                db.execSQL(
+                    "ALTER TABLE gallery_media ADD COLUMN rawFilmicWhiteRelativeExposure REAL NOT NULL DEFAULT " +
+                        RawToneMappingParameters.FILMIC_WHITE_RELATIVE_EXPOSURE_DEFAULT
+                )
+            }
+        }
+
         fun getInstance(context: Context): GalleryDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -95,7 +125,8 @@ abstract class GalleryDatabase : RoomDatabase() {
                         MIGRATION_6_7,
                         MIGRATION_7_8,
                         MIGRATION_8_9,
-                        MIGRATION_9_10
+                        MIGRATION_9_10,
+                        MIGRATION_10_11
                     )
                     .build()
                     .also { INSTANCE = it }

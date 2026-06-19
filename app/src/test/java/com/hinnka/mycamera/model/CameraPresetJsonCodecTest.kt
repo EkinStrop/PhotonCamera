@@ -1,7 +1,7 @@
 package com.hinnka.mycamera.model
 
 import com.hinnka.mycamera.camera.AspectRatio
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,7 +36,7 @@ class CameraPresetJsonCodecTest {
         val preset = presets.first()
         assertEquals("preset_1", preset.id)
         assertEquals("Legacy Preset", preset.name)
-        assertEquals(RawColorEngine.AdobeCurve.name, preset.rawColorEngine)
+        assertEquals(RawRenderingEngine.AdobeCurve.name, preset.rawRenderingEngine)
         assertEquals(AspectRatio.RATIO_4_3.name, preset.aspectRatio)
         assertFalse(preset.useHdrComposition)
         assertFalse(preset.useMFSR)
@@ -68,7 +68,7 @@ class CameraPresetJsonCodecTest {
 
         assertEquals(1, presets.size)
         assertEquals("preset_2", presets.first().id)
-        assertEquals(RawColorEngine.Spektrafilm.name, presets.first().rawColorEngine)
+        assertEquals(RawRenderingEngine.Spektrafilm.name, presets.first().rawRenderingEngine)
         assertEquals("DR400", presets.first().rawDROMode)
         assertTrue(presets.first().useRaw)
     }
@@ -91,7 +91,7 @@ class CameraPresetJsonCodecTest {
 
         requireNotNull(preset)
         assertEquals(AspectRatio.RATIO_4_3.name, preset.aspectRatio)
-        assertEquals(RawColorEngine.AdobeCurve.name, preset.rawColorEngine)
+        assertEquals(RawRenderingEngine.AdobeCurve.name, preset.rawRenderingEngine)
         assertEquals("OFF", preset.rawDROMode)
         assertNull(preset.lutId)
         assertNull(preset.frameId)

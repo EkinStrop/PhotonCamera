@@ -21,8 +21,9 @@ import com.hinnka.mycamera.gallery.PhotoSavePath
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.DEFAULT_RAW_BASELINE_LUT_ID
 import com.hinnka.mycamera.raw.ColorSpace
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawProcessingPreferences
+import com.hinnka.mycamera.raw.RawToneMappingParameters
 import com.hinnka.mycamera.raw.SpectralFilmTuning
 import com.hinnka.mycamera.color.TransferCurve
 import com.hinnka.mycamera.raw.RawProfile
@@ -93,7 +94,8 @@ data class UserPreferences(
     val rawBaselineLutConfigured: Boolean = false,
     val phantomBaselineLutId: String? = null,
     val rawDcpId: String? = null,
-    val rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+    val rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+    val rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
     val rawNlmNoiseFactor: Float = 0f,
     val rawExposureCompensation: Float = 0f,
     val rawAutoExposure: Boolean = true,
@@ -228,7 +230,7 @@ data class CameraFeaturePreferencesUpdate(
     val useMultipleExposure: PreferenceUpdateValue<Boolean>? = null,
     val frameId: PreferenceUpdateValue<String?>? = null,
     val rawDcpId: PreferenceUpdateValue<String?>? = null,
-    val rawColorEngine: PreferenceUpdateValue<RawColorEngine>? = null,
+    val rawRenderingEngine: PreferenceUpdateValue<RawRenderingEngine>? = null,
     val rawSpectralFilmStock: PreferenceUpdateValue<String?>? = null,
     val rawSpectralFilmPrint: PreferenceUpdateValue<String?>? = null,
     val droMode: PreferenceUpdateValue<String>? = null,
@@ -257,6 +259,12 @@ class UserPreferencesRepository(private val context: Context) {
         private val RAW_BASELINE_LUT_CONFIGURED_KEY = booleanPreferencesKey("raw_baseline_lut_configured")
         private val RAW_DCP_ID_KEY = stringPreferencesKey("raw_dcp_id")
         private val RAW_COLOR_ENGINE_KEY = stringPreferencesKey("raw_color_engine")
+        private val RAW_AGX_BLACK_RELATIVE_EXPOSURE_KEY = floatPreferencesKey("raw_agx_black_relative_exposure")
+        private val RAW_AGX_WHITE_RELATIVE_EXPOSURE_KEY = floatPreferencesKey("raw_agx_white_relative_exposure")
+        private val RAW_AGX_TOE_KEY = floatPreferencesKey("raw_agx_toe")
+        private val RAW_AGX_SHOULDER_KEY = floatPreferencesKey("raw_agx_shoulder")
+        private val RAW_FILMIC_BLACK_RELATIVE_EXPOSURE_KEY = floatPreferencesKey("raw_filmic_black_relative_exposure")
+        private val RAW_FILMIC_WHITE_RELATIVE_EXPOSURE_KEY = floatPreferencesKey("raw_filmic_white_relative_exposure")
         private val RAW_NLM_NOISE_FACTOR_KEY = floatPreferencesKey("raw_nlm_noise_factor")
         private val RAW_EXPOSURE_COMPENSATION_KEY = floatPreferencesKey("raw_exposure_compensation")
         private val RAW_AUTO_EXPOSURE_KEY = booleanPreferencesKey("raw_auto_exposure")
@@ -407,7 +415,19 @@ class UserPreferencesRepository(private val context: Context) {
                     ?: if (!rawBaselineLutConfigured) DEFAULT_RAW_BASELINE_LUT_ID else null,
                 rawBaselineLutConfigured = rawBaselineLutConfigured,
                 rawDcpId = preferences[RAW_DCP_ID_KEY],
-                rawColorEngine = RawColorEngine.fromPersistedName(preferences[RAW_COLOR_ENGINE_KEY]),
+                rawRenderingEngine = RawRenderingEngine.fromPersistedName(preferences[RAW_COLOR_ENGINE_KEY]),
+                rawToneMappingParameters = RawToneMappingParameters(
+                    agxBlackRelativeExposure = preferences[RAW_AGX_BLACK_RELATIVE_EXPOSURE_KEY]
+                        ?: RawToneMappingParameters.AGX_BLACK_RELATIVE_EXPOSURE_DEFAULT,
+                    agxWhiteRelativeExposure = preferences[RAW_AGX_WHITE_RELATIVE_EXPOSURE_KEY]
+                        ?: RawToneMappingParameters.AGX_WHITE_RELATIVE_EXPOSURE_DEFAULT,
+                    agxToe = preferences[RAW_AGX_TOE_KEY] ?: RawToneMappingParameters.AGX_TOE_DEFAULT,
+                    agxShoulder = preferences[RAW_AGX_SHOULDER_KEY] ?: RawToneMappingParameters.AGX_SHOULDER_DEFAULT,
+                    filmicBlackRelativeExposure = preferences[RAW_FILMIC_BLACK_RELATIVE_EXPOSURE_KEY]
+                        ?: RawToneMappingParameters.FILMIC_BLACK_RELATIVE_EXPOSURE_DEFAULT,
+                    filmicWhiteRelativeExposure = preferences[RAW_FILMIC_WHITE_RELATIVE_EXPOSURE_KEY]
+                        ?: RawToneMappingParameters.FILMIC_WHITE_RELATIVE_EXPOSURE_DEFAULT
+                ).normalized(),
                 rawNlmNoiseFactor = preferences[RAW_NLM_NOISE_FACTOR_KEY] ?: 0f,
                 rawExposureCompensation = preferences[RAW_EXPOSURE_COMPENSATION_KEY] ?: 0f,
                 rawAutoExposure = preferences[RAW_AUTO_EXPOSURE_KEY] ?: true,
@@ -835,6 +855,18 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveRawNlmNoiseFactor(value: Float) {
         context.dataStore.edit { preferences ->
             preferences[RAW_NLM_NOISE_FACTOR_KEY] = value
+        }
+    }
+
+    suspend fun saveRawToneMappingParameters(value: RawToneMappingParameters) {
+        val normalized = value.normalized()
+        context.dataStore.edit { preferences ->
+            preferences[RAW_AGX_BLACK_RELATIVE_EXPOSURE_KEY] = normalized.agxBlackRelativeExposure
+            preferences[RAW_AGX_WHITE_RELATIVE_EXPOSURE_KEY] = normalized.agxWhiteRelativeExposure
+            preferences[RAW_AGX_TOE_KEY] = normalized.agxToe
+            preferences[RAW_AGX_SHOULDER_KEY] = normalized.agxShoulder
+            preferences[RAW_FILMIC_BLACK_RELATIVE_EXPOSURE_KEY] = normalized.filmicBlackRelativeExposure
+            preferences[RAW_FILMIC_WHITE_RELATIVE_EXPOSURE_KEY] = normalized.filmicWhiteRelativeExposure
         }
     }
 
@@ -1686,7 +1718,7 @@ class UserPreferencesRepository(private val context: Context) {
         }
     }
 
-    suspend fun saveRawColorEngine(engine: RawColorEngine) {
+    suspend fun saveRawColorEngine(engine: RawRenderingEngine) {
         context.dataStore.edit { preferences ->
             preferences[RAW_COLOR_ENGINE_KEY] = engine.name
         }
@@ -1771,7 +1803,7 @@ class UserPreferencesRepository(private val context: Context) {
                     preferences.remove(RAW_DCP_ID_KEY)
                 }
             }
-            update.rawColorEngine?.let {
+            update.rawRenderingEngine?.let {
                 preferences[RAW_COLOR_ENGINE_KEY] = it.value.name
             }
             update.rawSpectralFilmStock?.let {

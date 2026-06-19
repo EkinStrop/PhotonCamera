@@ -3,7 +3,7 @@ package com.hinnka.mycamera.model
 import androidx.annotation.Keep
 import com.google.gson.Gson
 import com.hinnka.mycamera.camera.AspectRatio
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
 
 /**
  * 拍摄预设组合（用户自定义档位配置）
@@ -23,7 +23,7 @@ data class CameraPreset(
     val frameId: String? = null,
     // Quick RAW 功能
     val rawDcpId: String? = null,
-    val rawColorEngine: String = RawColorEngine.AdobeCurve.name,
+    val rawRenderingEngine: String = RawRenderingEngine.AdobeCurve.name,
     val rawSpectralFilmStock: String? = null,
     val rawSpectralFilmPrint: String? = null,
     val rawDROMode: String = "OFF",
@@ -132,7 +132,7 @@ data class CameraPreset(
                 frameId = "time",
                 useRaw = true,
                 rawDcpId = null,
-                rawColorEngine = RawColorEngine.Spektrafilm.name,
+                rawRenderingEngine = RawRenderingEngine.Spektrafilm.name,
                 rawSpectralFilmStock = "kodak_gold_200",
                 rawSpectralFilmPrint = "kodak_2383",
                 rawDROMode = "OFF",

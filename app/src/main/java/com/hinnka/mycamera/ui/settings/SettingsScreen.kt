@@ -320,7 +320,8 @@ fun SettingsScreen(
     val rawBlackLevelMode by viewModel.rawBlackLevelMode.collectAsState()
     val rawCustomBlackLevel by viewModel.rawCustomBlackLevel.collectAsState()
     val rawCfaCorrectionMode by viewModel.rawCfaCorrectionMode.collectAsState()
-    val rawColorEngine by viewModel.rawColorEngine.collectAsState()
+    val rawColorEngine by viewModel.rawRenderingEngine.collectAsState()
+    val rawToneMappingParameters by viewModel.rawToneMappingParameters.collectAsState()
     val rawSpectralFilmStock by viewModel.rawSpectralFilmStock.collectAsState()
     val rawSpectralFilmSelection by viewModel.rawSpectralFilmSelection.collectAsState()
     val rawSpectralFilmPrint by viewModel.rawSpectralFilmPrint.collectAsState()
@@ -337,6 +338,7 @@ fun SettingsScreen(
     var rawShadowsAdjustmentUi by remember { mutableStateOf(rawShadowsAdjustment) }
     var rawBlackPointCorrectionUi by remember { mutableStateOf(rawBlackPointCorrection) }
     var rawWhitePointCorrectionUi by remember { mutableStateOf(rawWhitePointCorrection) }
+    var rawToneMappingParametersUi by remember { mutableStateOf(rawToneMappingParameters) }
     var aiFocusScoreThresholdUi by remember(aiFocusScoreThreshold) { mutableStateOf(aiFocusScoreThreshold) }
     var showAspectRatioDialog by remember { mutableStateOf(false) }
     var showAddIszLensDialog by remember { mutableStateOf(false) }
@@ -348,7 +350,8 @@ fun SettingsScreen(
         rawHighlightsAdjustment,
         rawShadowsAdjustment,
         rawBlackPointCorrection,
-        rawWhitePointCorrection
+        rawWhitePointCorrection,
+        rawToneMappingParameters
     ) {
         if (!isRawSliderAdjusting) {
             rawNlmNoiseFactorUi = rawNlmNoiseFactor
@@ -357,6 +360,7 @@ fun SettingsScreen(
             rawShadowsAdjustmentUi = rawShadowsAdjustment
             rawBlackPointCorrectionUi = rawBlackPointCorrection
             rawWhitePointCorrectionUi = rawWhitePointCorrection
+            rawToneMappingParametersUi = rawToneMappingParameters
         }
     }
 
@@ -387,6 +391,7 @@ fun SettingsScreen(
         viewModel.setRawShadowsAdjustment(rawShadowsAdjustmentUi)
         viewModel.setRawBlackPointCorrection(rawBlackPointCorrectionUi)
         viewModel.setRawWhitePointCorrection(rawWhitePointCorrectionUi)
+        viewModel.setRawToneMappingParameters(rawToneMappingParametersUi)
     }
 
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1587,7 +1592,8 @@ fun SettingsScreen(
                         rawShadowsAdjustment = rawShadowsAdjustmentUi,
                         rawBlackPointCorrection = rawBlackPointCorrectionUi,
                         rawWhitePointCorrection = rawWhitePointCorrectionUi,
-                        rawColorEngine = rawColorEngine,
+                        rawRenderingEngine = rawColorEngine,
+                        rawToneMappingParameters = rawToneMappingParametersUi,
                         spectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
                         spectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
                         onSelectDcp = { viewModel.setRawDcpId(it) },
@@ -1619,6 +1625,7 @@ fun SettingsScreen(
                         onRawBlackPointCorrectionChange = { rawBlackPointCorrectionUi = it },
                         onRawWhitePointCorrectionChange = { rawWhitePointCorrectionUi = it },
                         onRawColorEngineChange = { viewModel.setRawColorEngine(it) },
+                        onRawToneMappingParametersChange = { rawToneMappingParametersUi = it },
                         onSpectralFilmSelectionChange = { viewModel.setRawSpectralFilmSelection(it) },
                         onSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
                         onAdjustmentStart = { isRawSliderAdjusting = true },

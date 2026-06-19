@@ -204,7 +204,8 @@ fun CameraScreen(
     val rawBlackPointCorrection by viewModel.rawBlackPointCorrection.collectAsState()
     val rawWhitePointCorrection by viewModel.rawWhitePointCorrection.collectAsState()
     val droMode by viewModel.droMode.collectAsState()
-    val rawColorEngine by viewModel.rawColorEngine.collectAsState()
+    val rawColorEngine by viewModel.rawRenderingEngine.collectAsState()
+    val rawToneMappingParameters by viewModel.rawToneMappingParameters.collectAsState()
     val rawSpectralFilmStock by viewModel.rawSpectralFilmStock.collectAsState()
     val rawSpectralFilmSelection by viewModel.rawSpectralFilmSelection.collectAsState()
     val rawSpectralFilmPrint by viewModel.rawSpectralFilmPrint.collectAsState()
@@ -1336,7 +1337,8 @@ fun CameraScreen(
             rawDROMode = droMode,
             rawBlackPointCorrection = rawBlackPointCorrection,
             rawWhitePointCorrection = rawWhitePointCorrection,
-            rawColorEngine = rawColorEngine,
+            rawRenderingEngine = rawColorEngine,
+            rawToneMappingParameters = rawToneMappingParameters,
             rawSpectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
             rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
             onRawDcpChange = { viewModel.setRawDcpId(it) },

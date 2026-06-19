@@ -150,7 +150,7 @@ object MeteringSystem {
     fun prepareGpuLinearRawAutoExposure(
         stats: GpuRawAutoExposureBaseStats,
         baselineExposure: Float,
-        meteringCompensationEv: Float = RAW_COLOR_ENGINE_METERING_COMPENSATION_EV,
+        meteringCompensationEv: Float = RAW_RENDERING_ENGINE_METERING_COMPENSATION_EV,
         tag: String = "Linear RAW AE GPU"
     ): GpuRawAutoExposurePlan? {
         if (stats.histogram.isEmpty() || stats.sampleCount <= 0) {
@@ -501,7 +501,7 @@ object MeteringSystem {
         return if (meteringCompensationEv.isFinite()) {
             meteringCompensationEv.coerceIn(-MAX_METERING_COMPENSATION_EV, MAX_METERING_COMPENSATION_EV)
         } else {
-            RAW_COLOR_ENGINE_METERING_COMPENSATION_EV
+            RAW_RENDERING_ENGINE_METERING_COMPENSATION_EV
         }
     }
 

@@ -176,6 +176,13 @@ class RawDemosaicProcessor {
         private const val RAW_AE_HISTOGRAM_BINDING = 0
         private const val RAW_AE_BASE_STATS_BINDING = 1
         private const val RAW_AE_TONE_STATS_BINDING = 0
+        private const val FILMIC_GREY_SOURCE = 0.1845f
+        private const val FILMIC_OUTPUT_POWER = 3.614815775f
+        private const val FILMIC_DISPLAY_BLACK = 0.0001517634f
+        private const val FILMIC_DEFAULT_DYNAMIC_RANGE = 12.21f
+        private const val FILMIC_DEFAULT_CONTRAST = 1.433801098f
+        private const val FILMIC_LATITUDE = 0.0001f
+        private const val FILMIC_SAFETY_MARGIN = 0.01f
         private val BRADFORD_D65_TO_D50 = floatArrayOf(
             1.0478112f, 0.0228866f, -0.0501270f,
             0.0295424f, 0.9904844f, -0.0170491f,
@@ -208,7 +215,7 @@ class RawDemosaicProcessor {
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
 
     // GL 资源
-    private val combinedPrograms = IntArray(RawColorEngine.entries.size)
+    private val combinedPrograms = IntArray(RawRenderingEngine.entries.size)
     private var sharpenProgram = 0
     private var passthroughProgram = 0
     private var hdrReferenceProgram = 0
@@ -361,6 +368,21 @@ class RawDemosaicProcessor {
         }
     }
 
+    private data class FilmicToneCurveUniforms(
+        val blackRelativeExposure: Float,
+        val whiteRelativeExposure: Float,
+        val dynamicRange: Float,
+        val inputMin: Float,
+        val inputMax: Float,
+        val latitudeMin: Float,
+        val latitudeMax: Float,
+        val m1: FloatArray,
+        val m2: FloatArray,
+        val m3: FloatArray,
+        val m4: FloatArray,
+        val m5: FloatArray
+    )
+
     private fun SceneStats.toRenderPlan(): RawRenderPlan {
         return RawRenderPlan(
             sceneNormalizationGain = exposureGain,
@@ -375,8 +397,8 @@ class RawDemosaicProcessor {
     private var isInitialized = false
     private var maxTextureSize = 8192 // default, queried at init
 
-    fun getRawColorSpace(rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve): ColorSpace {
-        return rawColorEngine.workingColorSpace
+    fun getRawColorSpace(rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve): ColorSpace {
+        return rawRenderingEngine.workingColorSpace
     }
 
     private fun applyCfaCorrectionOverride(metadata: RawMetadata, mode: String?): RawMetadata {
@@ -449,7 +471,8 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+        rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
         rawCfaCorrectionMode: String? = null,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
@@ -483,7 +506,8 @@ class RawDemosaicProcessor {
                 spectralFilmStock = spectralFilmStock,
                 spectralFilmPrint = spectralFilmPrint,
                 spectralFilmTuning = spectralFilmTuning,
-                rawColorEngine = rawColorEngine,
+                rawRenderingEngine = rawRenderingEngine,
+                rawToneMappingParameters = rawToneMappingParameters,
                 rawCfaCorrectionMode = rawCfaCorrectionMode,
                 dngFile = dngFile,
                 onRawAutoAdjustments = onRawAutoAdjustments,
@@ -523,7 +547,8 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+        rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
     ): Bitmap? = withContext(glDispatcher) {
         try {
             if (!isInitialized) {
@@ -558,7 +583,8 @@ class RawDemosaicProcessor {
                 spectralFilmStock = spectralFilmStock,
                 spectralFilmPrint = spectralFilmPrint,
                 spectralFilmTuning = spectralFilmTuning,
-                rawColorEngine = rawColorEngine
+                rawRenderingEngine = rawRenderingEngine,
+                rawToneMappingParameters = rawToneMappingParameters
             )?.sdrBitmap
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to process RAW buffer", e)
@@ -589,7 +615,8 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+        rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
         rawCfaCorrectionMode: String? = null,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
@@ -623,7 +650,8 @@ class RawDemosaicProcessor {
                 spectralFilmStock = spectralFilmStock,
                 spectralFilmPrint = spectralFilmPrint,
                 spectralFilmTuning = spectralFilmTuning,
-                rawColorEngine = rawColorEngine,
+                rawRenderingEngine = rawRenderingEngine,
+                rawToneMappingParameters = rawToneMappingParameters,
                 rawCfaCorrectionMode = rawCfaCorrectionMode,
                 dngFile = dngFile,
                 onRawAutoAdjustments = onRawAutoAdjustments,
@@ -667,7 +695,8 @@ class RawDemosaicProcessor {
         spectralFilmStock: String? = null,
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
-        rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+        rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
         rawCfaCorrectionMode: String? = null,
         dngFile: File? = null,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
@@ -681,7 +710,7 @@ class RawDemosaicProcessor {
         var actualMetadata = metadata
         var actualRotation = rotation
         var dngRawDataCleanup: DngRawData? = null
-        val requestedColorEngine = rawColorEngine
+        val requestedColorEngine = rawRenderingEngine
         val hasDcpSelection = dcpRenderPlan != null || rawDcpId != null
         val profileWorkingColorSpace = ColorSpace.ProPhoto
 
@@ -734,7 +763,7 @@ class RawDemosaicProcessor {
             metadata = actualMetadata
         )
         val spektrafilmLut =
-            if (requestedColorEngine == RawColorEngine.Spektrafilm &&
+            if (requestedColorEngine == RawRenderingEngine.Spektrafilm &&
                 spectralFilmStock != null && spectralFilmPrint != null
             ) {
                 SpectralFilmProfile.loadCombinedLut(
@@ -747,14 +776,14 @@ class RawDemosaicProcessor {
                 null
             }
         val colorEngine = when {
-            requestedColorEngine == RawColorEngine.Spektrafilm && spektrafilmLut == null -> {
+            requestedColorEngine == RawRenderingEngine.Spektrafilm && spektrafilmLut == null -> {
                 PLog.w(TAG, "SpectralFilm LUT unavailable, falling back to AdobeCurve")
-                RawColorEngine.AdobeCurve
+                RawRenderingEngine.AdobeCurve
             }
 
             else -> requestedColorEngine
         }
-        val useDcpToneCurve = requestedColorEngine == RawColorEngine.AdobeCurve
+        val useDcpToneCurve = requestedColorEngine == RawRenderingEngine.AdobeCurve
         val applyDcpBaselineExposureOffset = resolvedDcpRenderPlan != null && useDcpToneCurve
         val engineWorkingColorSpace = colorEngine.workingColorSpace
         val profileToEngineTransform = computeWorkingToOutputTransform(
@@ -1281,7 +1310,8 @@ class RawDemosaicProcessor {
                 colorEngine = colorEngine,
                 outputWorkingColorSpace = engineWorkingColorSpace,
                 profileToEngineTransform = profileToEngineTransform,
-                shadowsHighlightsParams = shadowsHighlightsParams
+                shadowsHighlightsParams = shadowsHighlightsParams,
+                rawToneMappingParameters = rawToneMappingParameters
             )
             if (!combinedRendered) {
                 PLog.e(TAG, "Combined Pass failed for colorEngine=$colorEngine")
@@ -1592,7 +1622,7 @@ class RawDemosaicProcessor {
         )
     }
 
-    private fun getOrCreateCombinedProgram(colorEngine: RawColorEngine): Int {
+    private fun getOrCreateCombinedProgram(colorEngine: RawRenderingEngine): Int {
         val cachedProgram = combinedPrograms[colorEngine.ordinal]
         if (cachedProgram != 0) return cachedProgram
 
@@ -4103,11 +4133,12 @@ class RawDemosaicProcessor {
         dcpRenderPlan: DcpRenderPlan? = null,
         useDcpToneCurve: Boolean = true,
         spectralFilmLut: SpectralFilmLut? = null,
-        colorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        colorEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
         outputWorkingColorSpace: ColorSpace = ColorSpace.ProPhoto,
         profileToEngineTransform: FloatArray = identityMatrix3x3(),
         profileExposureUniforms: ProfileExposureUniforms = ProfileExposureUniforms.NEUTRAL,
         shadowsHighlightsParams: ShadowsHighlightsParams = ShadowsHighlightsParams.NEUTRAL,
+        rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
         viewportWidth: Int = metadata.width,
         viewportHeight: Int = metadata.height
     ): Boolean {
@@ -4137,12 +4168,13 @@ class RawDemosaicProcessor {
             1.0f / maxOf(1, viewportHeight).toFloat()
         )
         bindShadowsHighlightsUniforms(program, shadowsHighlightsParams)
+        bindRawToneMappingUniforms(program, rawToneMappingParameters)
         checkGlError("renderCombinedPass base uniforms")
         bindDcpCombinedResources(program, dcpRenderPlan)
         bindProfileExposureUniforms(program, profileExposureUniforms)
 
         when (colorEngine) {
-            RawColorEngine.AdobeCurve -> {
+            RawRenderingEngine.AdobeCurve -> {
                 val baseCurve = if (useDcpToneCurve) {
                     dcpRenderPlan?.toneCurveLut ?: ACR3Curve.samples()
                 } else {
@@ -4151,10 +4183,10 @@ class RawDemosaicProcessor {
                 bindCurveCombinedResource(program, baseCurve)
             }
 
-            RawColorEngine.AgX -> Unit
-            RawColorEngine.Spektrafilm -> bindSpectralFilmCombinedResource(program, spectralFilmLut)
-            RawColorEngine.DarktableSigmoid,
-            RawColorEngine.DarktableFilmic -> Unit
+            RawRenderingEngine.AgX -> Unit
+            RawRenderingEngine.Spektrafilm -> bindSpectralFilmCombinedResource(program, spectralFilmLut)
+            RawRenderingEngine.DarktableSigmoid,
+            RawRenderingEngine.DarktableFilmic -> Unit
         }
 
         GLES30.glUniformMatrix3fv(
@@ -4191,6 +4223,216 @@ class RawDemosaicProcessor {
             GLES30.glGetUniformLocation(program, "uCurveEnabled"),
             1
         )
+    }
+
+    private fun bindRawToneMappingUniforms(program: Int, params: RawToneMappingParameters) {
+        val normalized = params.normalized()
+        uniform1f(program, "uAgxBlackRelativeExposure", normalized.agxBlackRelativeExposure)
+        uniform1f(program, "uAgxWhiteRelativeExposure", normalized.agxWhiteRelativeExposure)
+        uniform1f(program, "uAgxToe", normalized.agxToe)
+        uniform1f(program, "uAgxShoulder", normalized.agxShoulder)
+
+        val filmic = computeFilmicToneCurveUniforms(normalized)
+        uniform1f(program, "uFilmicBlackRelativeExposure", filmic.blackRelativeExposure)
+        uniform1f(program, "uFilmicWhiteRelativeExposure", filmic.whiteRelativeExposure)
+        uniform1f(program, "uFilmicDynamicRange", filmic.dynamicRange)
+        uniform1f(program, "uFilmicInputMin", filmic.inputMin)
+        uniform1f(program, "uFilmicInputMax", filmic.inputMax)
+        uniform1f(program, "uFilmicLatitudeMin", filmic.latitudeMin)
+        uniform1f(program, "uFilmicLatitudeMax", filmic.latitudeMax)
+        uniform3f(program, "uFilmicM1", filmic.m1)
+        uniform3f(program, "uFilmicM2", filmic.m2)
+        uniform3f(program, "uFilmicM3", filmic.m3)
+        uniform3f(program, "uFilmicM4", filmic.m4)
+        uniform3f(program, "uFilmicM5", filmic.m5)
+    }
+
+    private fun uniform1f(program: Int, name: String, value: Float) {
+        val location = GLES30.glGetUniformLocation(program, name)
+        if (location >= 0) {
+            GLES30.glUniform1f(location, value)
+        }
+    }
+
+    private fun uniform3f(program: Int, name: String, value: FloatArray) {
+        val location = GLES30.glGetUniformLocation(program, name)
+        if (location >= 0) {
+            GLES30.glUniform3f(location, value[0], value[1], value[2])
+        }
+    }
+
+    private fun computeFilmicToneCurveUniforms(params: RawToneMappingParameters): FilmicToneCurveUniforms {
+        val blackSource = min(
+            params.filmicBlackRelativeExposure,
+            params.filmicWhiteRelativeExposure - RawToneMappingParameters.MIN_DYNAMIC_RANGE_EV
+        )
+        val whiteSource = max(
+            params.filmicWhiteRelativeExposure,
+            blackSource + RawToneMappingParameters.MIN_DYNAMIC_RANGE_EV
+        )
+        val dynamicRange = max(RawToneMappingParameters.MIN_DYNAMIC_RANGE_EV, whiteSource - blackSource)
+        val inputMin = 2.0f.pow(blackSource) * FILMIC_GREY_SOURCE
+        val inputMax = 2.0f.pow(whiteSource) * FILMIC_GREY_SOURCE
+
+        val blackDisplay = FILMIC_DISPLAY_BLACK.pow(1f / FILMIC_OUTPUT_POWER)
+        val whiteDisplay = 1f
+        val greyDisplay = FILMIC_GREY_SOURCE.pow(1f / FILMIC_OUTPUT_POWER)
+        val greyLog = (abs(blackSource) / dynamicRange).coerceIn(0.001f, 0.999f)
+
+        var contrast = FILMIC_DEFAULT_CONTRAST * (dynamicRange / FILMIC_DEFAULT_DYNAMIC_RANGE)
+        var minContrast = 1f
+        minContrast = max(minContrast, (whiteDisplay - greyDisplay) / max(1f - greyLog, 1e-5f))
+        minContrast = max(minContrast, (greyDisplay - blackDisplay) / max(greyLog, 1e-5f))
+        contrast = contrast.coerceIn(minContrast + FILMIC_SAFETY_MARGIN, 100f)
+
+        val linearIntercept = greyDisplay - contrast * greyLog
+        val displayRange = whiteDisplay - blackDisplay
+        val xmin = (
+            blackDisplay + FILMIC_SAFETY_MARGIN * displayRange - linearIntercept
+            ) / contrast
+        val xmax = (
+            whiteDisplay - FILMIC_SAFETY_MARGIN * displayRange - linearIntercept
+            ) / contrast
+
+        val toeLog = ((1f - FILMIC_LATITUDE) * greyLog + FILMIC_LATITUDE * xmin)
+            .coerceIn(0f, greyLog)
+        val shoulderLog = ((1f - FILMIC_LATITUDE) * greyLog + FILMIC_LATITUDE * xmax)
+            .coerceIn(greyLog, 1f)
+        val toeDisplay = toeLog * contrast + linearIntercept
+        val shoulderDisplay = shoulderLog * contrast + linearIntercept
+
+        val m1 = FloatArray(3)
+        val m2 = FloatArray(3)
+        val m3 = FloatArray(3)
+        val m4 = FloatArray(3)
+        val m5 = FloatArray(3)
+
+        val toe = solveFilmicToe(toeLog.toDouble(), toeDisplay.toDouble(), blackDisplay.toDouble(), contrast.toDouble())
+        val shoulder = solveFilmicShoulder(
+            shoulderLog.toDouble(),
+            shoulderDisplay.toDouble(),
+            whiteDisplay.toDouble(),
+            contrast.toDouble()
+        )
+        m5[0] = toe[0].toFloat()
+        m4[0] = toe[1].toFloat()
+        m3[0] = toe[2].toFloat()
+        m2[0] = toe[3].toFloat()
+        m1[0] = toe[4].toFloat()
+
+        m5[1] = shoulder[0].toFloat()
+        m4[1] = shoulder[1].toFloat()
+        m3[1] = shoulder[2].toFloat()
+        m2[1] = shoulder[3].toFloat()
+        m1[1] = shoulder[4].toFloat()
+
+        m1[2] = (toeDisplay - contrast * toeLog)
+        m2[2] = contrast
+        m3[2] = 0f
+        m4[2] = 0f
+        m5[2] = 0f
+
+        return FilmicToneCurveUniforms(
+            blackRelativeExposure = blackSource,
+            whiteRelativeExposure = whiteSource,
+            dynamicRange = dynamicRange,
+            inputMin = max(inputMin, 1e-8f),
+            inputMax = max(inputMax, inputMin + 1e-8f),
+            latitudeMin = toeLog,
+            latitudeMax = shoulderLog,
+            m1 = m1,
+            m2 = m2,
+            m3 = m3,
+            m4 = m4,
+            m5 = m5
+        )
+    }
+
+    private fun solveFilmicToe(
+        toeLog: Double,
+        toeDisplay: Double,
+        blackDisplay: Double,
+        contrast: Double
+    ): DoubleArray {
+        val x2 = toeLog * toeLog
+        val x3 = x2 * toeLog
+        val x4 = x3 * toeLog
+        return solveLinearSystem(
+            arrayOf(
+                doubleArrayOf(0.0, 0.0, 0.0, 0.0, 1.0),
+                doubleArrayOf(0.0, 0.0, 0.0, 1.0, 0.0),
+                doubleArrayOf(x4, x3, x2, toeLog, 1.0),
+                doubleArrayOf(4.0 * x3, 3.0 * x2, 2.0 * toeLog, 1.0, 0.0),
+                doubleArrayOf(12.0 * x2, 6.0 * toeLog, 2.0, 0.0, 0.0)
+            ),
+            doubleArrayOf(blackDisplay, 0.0, toeDisplay, contrast, 0.0)
+        )
+    }
+
+    private fun solveFilmicShoulder(
+        shoulderLog: Double,
+        shoulderDisplay: Double,
+        whiteDisplay: Double,
+        contrast: Double
+    ): DoubleArray {
+        val x2 = shoulderLog * shoulderLog
+        val x3 = x2 * shoulderLog
+        val x4 = x3 * shoulderLog
+        return solveLinearSystem(
+            arrayOf(
+                doubleArrayOf(1.0, 1.0, 1.0, 1.0, 1.0),
+                doubleArrayOf(4.0, 3.0, 2.0, 1.0, 0.0),
+                doubleArrayOf(x4, x3, x2, shoulderLog, 1.0),
+                doubleArrayOf(4.0 * x3, 3.0 * x2, 2.0 * shoulderLog, 1.0, 0.0),
+                doubleArrayOf(12.0 * x2, 6.0 * shoulderLog, 2.0, 0.0, 0.0)
+            ),
+            doubleArrayOf(whiteDisplay, 0.0, shoulderDisplay, contrast, 0.0)
+        )
+    }
+
+    private fun solveLinearSystem(matrix: Array<DoubleArray>, values: DoubleArray): DoubleArray {
+        val size = values.size
+        for (column in 0 until size) {
+            var pivot = column
+            for (row in column + 1 until size) {
+                if (abs(matrix[row][column]) > abs(matrix[pivot][column])) {
+                    pivot = row
+                }
+            }
+            if (pivot != column) {
+                val tmpRow = matrix[column]
+                matrix[column] = matrix[pivot]
+                matrix[pivot] = tmpRow
+                val tmpValue = values[column]
+                values[column] = values[pivot]
+                values[pivot] = tmpValue
+            }
+
+            val pivotValue = matrix[column][column]
+            if (abs(pivotValue) < 1e-12) {
+                PLog.w(TAG, "Filmic spline solve hit a near-singular matrix; using neutral row")
+                continue
+            }
+
+            for (row in column + 1 until size) {
+                val factor = matrix[row][column] / pivotValue
+                for (col in column until size) {
+                    matrix[row][col] -= factor * matrix[column][col]
+                }
+                values[row] -= factor * values[column]
+            }
+        }
+
+        val result = DoubleArray(size)
+        for (row in size - 1 downTo 0) {
+            var sum = values[row]
+            for (col in row + 1 until size) {
+                sum -= matrix[row][col] * result[col]
+            }
+            val denominator = matrix[row][row]
+            result[row] = if (abs(denominator) < 1e-12) 0.0 else sum / denominator
+        }
+        return result
     }
 
     private fun bindShadowsHighlightsUniforms(program: Int, params: ShadowsHighlightsParams) {
@@ -4455,8 +4697,8 @@ class RawDemosaicProcessor {
     private fun logRawDcpPipeline(
         hasDcpSelection: Boolean,
         rawDcpId: String?,
-        requestedColorEngine: RawColorEngine,
-        colorEngine: RawColorEngine,
+        requestedColorEngine: RawRenderingEngine,
+        colorEngine: RawRenderingEngine,
         dcpRenderPlan: DcpRenderPlan?,
         profileWorkingColorSpace: ColorSpace,
         engineWorkingColorSpace: ColorSpace,

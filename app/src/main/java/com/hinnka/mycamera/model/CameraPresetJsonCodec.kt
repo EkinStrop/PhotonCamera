@@ -4,7 +4,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.hinnka.mycamera.camera.AspectRatio
-import com.hinnka.mycamera.raw.RawColorEngine
+import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawProcessingPreferences
 
 /**
@@ -50,7 +50,7 @@ internal object CameraPresetJsonCodec {
             useMFSR = obj.boolean("useMFSR", false),
             frameId = obj.stringOrNull("frameId"),
             rawDcpId = obj.stringOrNull("rawDcpId"),
-            rawColorEngine = parseRawColorEngine(obj.stringOrNull("rawColorEngine")),
+            rawRenderingEngine = parseRawColorEngine(obj.stringOrNull("rawColorEngine")),
             rawSpectralFilmStock = obj.stringOrNull("rawSpectralFilmStock"),
             rawSpectralFilmPrint = obj.stringOrNull("rawSpectralFilmPrint"),
             rawDROMode = parseDroMode(obj.stringOrNull("rawDROMode")),
@@ -66,7 +66,7 @@ internal object CameraPresetJsonCodec {
     }
 
     private fun parseRawColorEngine(value: String?): String {
-        return RawColorEngine.fromPersistedName(value).name
+        return RawRenderingEngine.fromPersistedName(value).name
     }
 
     private fun parseDroMode(value: String?): String {
