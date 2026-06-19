@@ -206,7 +206,7 @@ object SuperResolutionDngWriter {
             add(long(TAG_ROWS_PER_STRIP, height.toLong()))
             add(long(TAG_STRIP_BYTE_COUNTS, imageByteCount))
             add(short(TAG_PLANAR_CONFIGURATION, 1))
-            add(ascii(TAG_SOFTWARE, "PhotonMGC"))
+            add(ascii(TAG_SOFTWARE, "PhotonCamera"))
             add(ascii(TAG_DATETIME, SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(Date())))
             add(shortArray(TAG_CFA_REPEAT_PATTERN_DIM, RawCfaCorrection.repeatPatternDim(cfaPattern)))
             add(byteArray(TAG_CFA_PATTERN, RawCfaCorrection.cfaPatternBytes(cfaPattern)))
@@ -317,7 +317,7 @@ object SuperResolutionDngWriter {
             Build.MANUFACTURER.takeIf { it.isNotBlank() },
             Build.MODEL.takeIf { it.isNotBlank() },
             hardwareLevel?.let { "Camera2-$it" }
-        ).joinToString(" ").ifBlank { "PhotonMGC Camera" }
+        ).joinToString(" ").ifBlank { "Photon Camera" }
     }
 
     private fun blackLevelByCfaPosition(cfaPattern: Int, blackLevel: FloatArray): List<Float> {

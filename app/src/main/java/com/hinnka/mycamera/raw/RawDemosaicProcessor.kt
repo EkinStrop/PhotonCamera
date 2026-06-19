@@ -379,6 +379,44 @@ class RawDemosaicProcessor {
         return rawColorEngine.workingColorSpace
     }
 
+    private fun applyCfaCorrectionOverride(metadata: RawMetadata, mode: String?): RawMetadata {
+        val resolvedCfaPattern = RawCfaCorrection.patternFromMode(mode) ?: return metadata
+        if (resolvedCfaPattern == metadata.cfaPattern) {
+            return metadata
+        }
+        PLog.d(TAG, "RAW DNG CFA override mode=$mode cfa=${metadata.cfaPattern}->$resolvedCfaPattern")
+        return metadata.copy(cfaPattern = resolvedCfaPattern)
+    }
+
+    private fun applyBlackLevelOverride(
+        metadata: RawMetadata,
+        mode: String?,
+        customBlackLevel: Float?
+    ): RawMetadata {
+        val resolvedBlackLevel = RawProcessor.resolveBlackLevelForMode(
+            defaultBlackLevel = metadata.blackLevel,
+            blackLevelMode = mode,
+            customBlackLevel = customBlackLevel
+        )
+        if (metadata.blackLevel.contentEquals(resolvedBlackLevel)) {
+            return metadata
+        }
+        PLog.d(TAG, "RAW DNG black level override mode=$mode value=${resolvedBlackLevel.joinToString()}")
+        return metadata.copy(blackLevel = resolvedBlackLevel)
+    }
+
+    private fun applyDngMetadataOverrides(
+        metadata: RawMetadata,
+        rawBlackLevelMode: String?,
+        rawCustomBlackLevel: Float?,
+        rawCfaCorrectionMode: String?
+    ): RawMetadata {
+        return applyCfaCorrectionOverride(
+            metadata = applyBlackLevelOverride(metadata, rawBlackLevelMode, rawCustomBlackLevel),
+            mode = rawCfaCorrectionMode
+        )
+    }
+
     /**
      * 处理 DNG 文件
      *
@@ -402,6 +440,8 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawBlackLevelMode: String? = null,
+        rawCustomBlackLevel: Float? = null,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         rawDcpId: String? = null,
@@ -410,6 +450,7 @@ class RawDemosaicProcessor {
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
         rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawCfaCorrectionMode: String? = null,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): Bitmap? = withContext(glDispatcher) {
@@ -433,6 +474,8 @@ class RawDemosaicProcessor {
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
+                rawBlackLevelMode = rawBlackLevelMode,
+                rawCustomBlackLevel = rawCustomBlackLevel,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 rawDcpId = rawDcpId,
@@ -441,6 +484,7 @@ class RawDemosaicProcessor {
                 spectralFilmPrint = spectralFilmPrint,
                 spectralFilmTuning = spectralFilmTuning,
                 rawColorEngine = rawColorEngine,
+                rawCfaCorrectionMode = rawCfaCorrectionMode,
                 dngFile = dngFile,
                 onRawAutoAdjustments = onRawAutoAdjustments,
                 onMetadata = onMetadata
@@ -536,6 +580,8 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawBlackLevelMode: String? = null,
+        rawCustomBlackLevel: Float? = null,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         rawDcpId: String? = null,
@@ -544,6 +590,7 @@ class RawDemosaicProcessor {
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
         rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawCfaCorrectionMode: String? = null,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null
     ): RawHdrRenderResult? = withContext(glDispatcher) {
@@ -567,6 +614,8 @@ class RawDemosaicProcessor {
                 rawBlackPointCorrection = rawBlackPointCorrection,
                 rawWhitePointCorrection = rawWhitePointCorrection,
                 rawAutoWhiteBalanceEstimate = rawAutoWhiteBalanceEstimate,
+                rawBlackLevelMode = rawBlackLevelMode,
+                rawCustomBlackLevel = rawCustomBlackLevel,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
                 rawDcpId = rawDcpId,
@@ -575,6 +624,7 @@ class RawDemosaicProcessor {
                 spectralFilmPrint = spectralFilmPrint,
                 spectralFilmTuning = spectralFilmTuning,
                 rawColorEngine = rawColorEngine,
+                rawCfaCorrectionMode = rawCfaCorrectionMode,
                 dngFile = dngFile,
                 onRawAutoAdjustments = onRawAutoAdjustments,
                 onMetadata = onMetadata,
@@ -607,6 +657,8 @@ class RawDemosaicProcessor {
         rawBlackPointCorrection: Float = 0f,
         rawWhitePointCorrection: Float = 0f,
         rawAutoWhiteBalanceEstimate: Boolean = false,
+        rawBlackLevelMode: String? = null,
+        rawCustomBlackLevel: Float? = null,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
         chromaDenoiseValue: Float? = null,
@@ -616,6 +668,7 @@ class RawDemosaicProcessor {
         spectralFilmPrint: String? = null,
         spectralFilmTuning: SpectralFilmTuning = SpectralFilmTuning.DEFAULT,
         rawColorEngine: RawColorEngine = RawColorEngine.AdobeCurve,
+        rawCfaCorrectionMode: String? = null,
         dngFile: File? = null,
         onRawAutoAdjustments: ((RawAutoAdjustments) -> Unit)? = null,
         onMetadata: ((RawMetadata) -> Unit)? = null,
@@ -659,7 +712,12 @@ class RawDemosaicProcessor {
             actualWidth = dngRawData.width
             actualHeight = dngRawData.height
             actualRowStride = dngRawData.rowStride
-            actualMetadata = convertDngRawDataToMetadata(dngRawData, exposureBias, actualMetadata)
+            actualMetadata = applyDngMetadataOverrides(
+                metadata = convertDngRawDataToMetadata(dngRawData, exposureBias, actualMetadata),
+                rawBlackLevelMode = rawBlackLevelMode,
+                rawCustomBlackLevel = rawCustomBlackLevel,
+                rawCfaCorrectionMode = rawCfaCorrectionMode
+            )
             actualRotation = if (dngRawData.rotation != 0) dngRawData.rotation else rotation
             onMetadata?.invoke(actualMetadata)
         }
@@ -3078,6 +3136,8 @@ class RawDemosaicProcessor {
         } else {
             "none"
         }
+        val expandedBlockSize = RawCfaCorrection.expandedBayerBlockSize(metadata.cfaPattern)
+        val outputBorder = (expandedBlockSize * 2).coerceAtLeast(4)
 
         GLES31.glUseProgram(quadPopulateProgram)
         GLES31.glActiveTexture(GLES31.GL_TEXTURE0 + RCD_RAW_TEXTURE_UNIT)
@@ -3122,7 +3182,8 @@ class RawDemosaicProcessor {
         )
         PLog.d(
             TAG,
-            "Quad Bayer populate: cfa=${metadata.cfaPattern} black=${blackLevel4.contentToString()} " +
+            "Expanded Bayer populate: cfa=${metadata.cfaPattern} block=${expandedBlockSize}x$expandedBlockSize " +
+                    "black=${blackLevel4.contentToString()} " +
                     "white=${metadata.whiteLevel} wb=${wbGains.contentToString()} lsc=$lscSize " +
                     "highlightThreshold=$RCD_HIGHLIGHT_RECONSTRUCTION_THRESHOLD " +
                     "highlightCeiling=$RCD_HIGHLIGHT_RECONSTRUCTION_CEILING"
@@ -3167,7 +3228,7 @@ class RawDemosaicProcessor {
             width,
             height
         )
-        GLES31.glUniform1i(GLES31.glGetUniformLocation(quadWriteOutputProgram, "uBorder"), 4)
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(quadWriteOutputProgram, "uBorder"), outputBorder)
         GLES31.glBindImageTexture(
             RCD_OUTPUT_IMAGE_UNIT,
             demosaicTextureId,

@@ -1,10 +1,10 @@
 package com.hinnka.mycamera.raw
 
 /**
- * Quad Bayer 4x4 CFA demosaic shaders.
+ * Expanded Bayer 4x4/8x8 CFA demosaic shaders.
  *
  * The pipeline mirrors the RCD staging shape, but every CFA decision is based on
- * a 2x2-expanded Bayer superpixel instead of the normal x/y parity pattern.
+ * an expanded Bayer block instead of the normal x/y parity pattern.
  */
 object QuadBayerShaders {
     private const val COMMON = """
@@ -13,7 +13,13 @@ object QuadBayerShaders {
         const int BLUE = 2;
 
         int baseBayerPattern(int cfaPattern) {
-            return (cfaPattern >= 4) ? (cfaPattern - 4) : cfaPattern;
+            if (cfaPattern >= 8) return cfaPattern - 8;
+            if (cfaPattern >= 4) return cfaPattern - 4;
+            return cfaPattern;
+        }
+
+        int expandedBayerBlockSize(int cfaPattern) {
+            return (cfaPattern >= 8) ? 4 : 2;
         }
 
         int colorFromChannelIndex(int channelIndex) {
@@ -24,8 +30,9 @@ object QuadBayerShaders {
 
         int getQuadChannelIndex(int cfaPattern, int col, int row) {
             int pattern = baseBayerPattern(cfaPattern);
-            int blockCol = (col / 2) & 1;
-            int blockRow = (row / 2) & 1;
+            int blockSize = expandedBayerBlockSize(cfaPattern);
+            int blockCol = (col / blockSize) & 1;
+            int blockRow = (row / blockSize) & 1;
 
             if (pattern == 0) { // Quad RGGB
                 if (blockRow == 0) return (blockCol == 0) ? 0 : 1;
@@ -80,12 +87,7 @@ object QuadBayerShaders {
         $COMMON
 
         int getLensShadingIndex(ivec2 coord) {
-            int xParity = coord.x & 1;
-            int yParity = coord.y & 1;
-            if (yParity == 0) {
-                return (xParity == 0) ? 0 : 1;
-            }
-            return (xParity == 0) ? 2 : 3;
+            return getQuadChannelIndex(uCfaPattern, coord.x, coord.y);
         }
 
         float getLensShadingGain(ivec2 coord) {
@@ -128,8 +130,11 @@ object QuadBayerShaders {
             float countGreen = 0.0;
             float countBlue = 0.0;
 
-            for (int dy = -2; dy <= 2; dy++) {
-                for (int dx = -2; dx <= 2; dx++) {
+            int radius = expandedBayerBlockSize(uCfaPattern);
+            for (int dy = -4; dy <= 4; dy++) {
+                if (abs(dy) > radius) continue;
+                for (int dx = -4; dx <= 4; dx++) {
+                    if (abs(dx) > radius) continue;
                     ivec2 sampleCoord = clampCoord(coord + ivec2(dx, dy), uImageSize);
                     int sampleChannel = getQuadChannelIndex(uCfaPattern, sampleCoord.x, sampleCoord.y);
                     int sampleColor = colorFromChannelIndex(sampleChannel);
@@ -302,9 +307,12 @@ object QuadBayerShaders {
         float interpolateDiff(ivec2 coord, int targetColor, float centerGreen) {
             float sum = 0.0;
             float weight = 0.0;
+            int radius = max(3, expandedBayerBlockSize(uCfaPattern));
 
-            for (int dy = -3; dy <= 3; dy++) {
-                for (int dx = -3; dx <= 3; dx++) {
+            for (int dy = -4; dy <= 4; dy++) {
+                if (abs(dy) > radius) continue;
+                for (int dx = -4; dx <= 4; dx++) {
+                    if (abs(dx) > radius) continue;
                     ivec2 p = clampCoord(coord + ivec2(dx, dy), uImageSize);
                     if (getQuadColor(uCfaPattern, p.x, p.y) != targetColor) continue;
 

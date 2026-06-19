@@ -430,9 +430,11 @@ static float sampleDngGainMapBilinear(const DngGainMap &gainMap, float x, float 
 }
 
 static int quadChannelIndexForPattern(int cfaPattern, int col, int row) {
-  const int pattern = cfaPattern >= 4 ? cfaPattern - 4 : cfaPattern;
-  const int blockCol = (col / 2) & 1;
-  const int blockRow = (row / 2) & 1;
+  const int pattern = cfaPattern >= 8 ? cfaPattern - 8
+                                      : (cfaPattern >= 4 ? cfaPattern - 4 : cfaPattern);
+  const int blockSize = cfaPattern >= 8 ? 4 : 2;
+  const int blockCol = (col / blockSize) & 1;
+  const int blockRow = (row / blockSize) & 1;
   if (pattern == 0) { // Quad RGGB
     return blockRow == 0 ? (blockCol == 0 ? 0 : 1) : (blockCol == 0 ? 2 : 3);
   }
@@ -458,7 +460,7 @@ static int gcdInt(int a, int b) {
 
 static bool computeQuadDngBlackLevels(LibRaw &rawProcessor, int cfaPattern,
                                       int left, int top, float out[4]) {
-  if (cfaPattern < 4 || cfaPattern > 7)
+  if (cfaPattern < 4 || cfaPattern > 11)
     return false;
 
   const auto &levels = rawProcessor.imgdata.color.dng_levels;
@@ -475,8 +477,9 @@ static bool computeQuadDngBlackLevels(LibRaw &rawProcessor, int cfaPattern,
     return true;
   }
 
-  const int periodX = (4 / gcdInt(4, cols)) * cols;
-  const int periodY = (4 / gcdInt(4, rows)) * rows;
+  const int cfaPeriod = cfaPattern >= 8 ? 8 : 4;
+  const int periodX = (cfaPeriod / gcdInt(cfaPeriod, cols)) * cols;
+  const int periodY = (cfaPeriod / gcdInt(cfaPeriod, rows)) * rows;
   double sums[4] = {0.0, 0.0, 0.0, 0.0};
   int counts[4] = {0, 0, 0, 0};
   bool hasRepeatValue = false;
@@ -686,14 +689,14 @@ static jfloatArray buildDngLensShadingArray(JNIEnv *env, LibRaw &rawProcessor,
     return nullptr;
   }
 
-  const bool isQuadBayer = cfaPattern >= 4 && cfaPattern <= 7;
+  const bool isQuadBayer = cfaPattern >= 4 && cfaPattern <= 11;
   std::vector<float> packed(static_cast<size_t>(mapWidth) * mapHeight * 4, 1.0f);
   for (const auto &gainMap : gainMaps) {
     int outChannel;
     if (isQuadBayer) {
-      const int relX = (static_cast<int>(gainMap.left) - activeLeft) & 1;
-      const int relY = (static_cast<int>(gainMap.top) - activeTop) & 1;
-      outChannel = relY == 0 ? (relX == 0 ? 0 : 1) : (relX == 0 ? 2 : 3);
+      const int relX = static_cast<int>(gainMap.left) - activeLeft;
+      const int relY = static_cast<int>(gainMap.top) - activeTop;
+      outChannel = quadChannelIndexForPattern(cfaPattern, relX, relY);
     } else {
       int cfa = rawProcessor.FC(gainMap.top, gainMap.left);
       if (cfa == 0) {
@@ -1111,15 +1114,19 @@ static unsigned char mapCfaPatternToLibRaw(int cfaPattern) {
   switch (cfaPattern) {
   case 0:
   case 4:
+  case 8:
     return LIBRAW_OPENBAYER_RGGB;
   case 1:
   case 5:
+  case 9:
     return LIBRAW_OPENBAYER_GRBG;
   case 2:
   case 6:
+  case 10:
     return LIBRAW_OPENBAYER_GBRG;
   case 3:
   case 7:
+  case 11:
     return LIBRAW_OPENBAYER_BGGR;
   default:
     return 0;
@@ -2208,11 +2215,47 @@ static bool matchesCfa4x4(const int actual[4][4], const int expected[4][4]) {
   return true;
 }
 
+static int expandedCfaColorForBasePattern(int basePattern, int col, int row,
+                                          int blockSize) {
+  const int blockCol = (col / blockSize) & 1;
+  const int blockRow = (row / blockSize) & 1;
+  int channel;
+  if (basePattern == 0) { // RGGB
+    channel = blockRow == 0 ? (blockCol == 0 ? 0 : 1) : (blockCol == 0 ? 2 : 3);
+  } else if (basePattern == 1) { // GRBG
+    channel = blockRow == 0 ? (blockCol == 0 ? 1 : 0) : (blockCol == 0 ? 3 : 2);
+  } else if (basePattern == 2) { // GBRG
+    channel = blockRow == 0 ? (blockCol == 0 ? 2 : 3) : (blockCol == 0 ? 0 : 1);
+  } else { // BGGR
+    channel = blockRow == 0 ? (blockCol == 0 ? 3 : 2) : (blockCol == 0 ? 1 : 0);
+  }
+  return channel == 0 ? 0 : (channel == 3 ? 2 : 1);
+}
+
+static bool matchesExpandedCfa(const DngCfaInfo &info, int left, int top,
+                               int blockSize, int basePattern) {
+  const int period = blockSize * 2;
+  for (int row = 0; row < period; ++row) {
+    for (int col = 0; col < period; ++col) {
+      const int actual = dngCfaColorAt(info, top + row, left + col);
+      const int expected = expandedCfaColorForBasePattern(basePattern, col, row, blockSize);
+      if (actual != expected)
+        return false;
+    }
+  }
+  return true;
+}
+
 static int identifyQuadCfaFromDng(const DngCfaInfo &info, int left, int top,
                                   int out4x4[4][4]) {
   for (int row = 0; row < 4; ++row) {
     for (int col = 0; col < 4; ++col)
       out4x4[row][col] = dngCfaColorAt(info, top + row, left + col);
+  }
+
+  for (int basePattern = 0; basePattern < 4; ++basePattern) {
+    if (matchesExpandedCfa(info, left, top, 4, basePattern))
+      return 8 + basePattern;
   }
 
   const int quadRggb[4][4] = {{0, 0, 1, 1},
@@ -2415,7 +2458,7 @@ Java_com_hinnka_mycamera_raw_RawDemosaicProcessor_processDngNative(
   if (hasDngCfaInfo) {
     cfaPattern = identifyQuadCfaFromDng(dngCfaInfo, left, top, dngCfa4x4);
     LOGI("processDngNative: DNG CFA tags repeat=%dx%d patternLen=%d "
-         "planeColorLen=%d active4x4=[%d,%d,%d,%d/%d,%d,%d,%d/%d,%d,%d,%d/%d,%d,%d,%d] quadPattern=%d",
+         "planeColorLen=%d active4x4=[%d,%d,%d,%d/%d,%d,%d,%d/%d,%d,%d,%d/%d,%d,%d,%d] expandedPattern=%d",
          dngCfaInfo.repeatRows, dngCfaInfo.repeatCols, dngCfaInfo.patternLen,
          dngCfaInfo.planeColorLen,
          dngCfa4x4[0][0], dngCfa4x4[0][1], dngCfa4x4[0][2], dngCfa4x4[0][3],

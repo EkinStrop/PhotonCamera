@@ -634,22 +634,36 @@ object RawHdrFusionProcessor {
         uniform vec2 uNoiseModel;
         uniform int uUseDeghostMask;
 
+        int baseBayerPattern() {
+            if (uCfaPattern >= 8) return uCfaPattern - 8;
+            if (uCfaPattern >= 4) return uCfaPattern - 4;
+            return uCfaPattern;
+        }
+
+        int expandedBayerBlockSize() {
+            if (uCfaPattern >= 8) return 4;
+            if (uCfaPattern >= 4) return 2;
+            return 1;
+        }
+
         int channelIndex(ivec2 p) {
-            int x = p.x - (p.x / 2) * 2;
-            int y = p.y - (p.y / 2) * 2;
-            if (uCfaPattern == 0) {
+            int blockSize = expandedBayerBlockSize();
+            int pattern = baseBayerPattern();
+            int x = (p.x / blockSize) & 1;
+            int y = (p.y / blockSize) & 1;
+            if (pattern == 0) {
                 if (y == 0 && x == 0) return 0;
                 if (y == 0 && x == 1) return 1;
                 if (y == 1 && x == 0) return 2;
                 return 3;
             }
-            if (uCfaPattern == 1) {
+            if (pattern == 1) {
                 if (y == 0 && x == 0) return 1;
                 if (y == 0 && x == 1) return 0;
                 if (y == 1 && x == 0) return 3;
                 return 2;
             }
-            if (uCfaPattern == 2) {
+            if (pattern == 2) {
                 if (y == 0 && x == 0) return 2;
                 if (y == 0 && x == 1) return 3;
                 if (y == 1 && x == 0) return 0;

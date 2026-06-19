@@ -10,6 +10,10 @@ object RawCfaCorrection {
     const val MODE_4X4_GRBG = "4x4_GRBG"
     const val MODE_4X4_GBRG = "4x4_GBRG"
     const val MODE_4X4_BGGR = "4x4_BGGR"
+    const val MODE_8X8_RGGB = "8x8_RGGB"
+    const val MODE_8X8_GRBG = "8x8_GRBG"
+    const val MODE_8X8_GBRG = "8x8_GBRG"
+    const val MODE_8X8_BGGR = "8x8_BGGR"
 
     val allModes: List<String> = listOf(
         MODE_DEFAULT,
@@ -20,7 +24,11 @@ object RawCfaCorrection {
         MODE_4X4_RGGB,
         MODE_4X4_GRBG,
         MODE_4X4_GBRG,
-        MODE_4X4_BGGR
+        MODE_4X4_BGGR,
+        MODE_8X8_RGGB,
+        MODE_8X8_GRBG,
+        MODE_8X8_GBRG,
+        MODE_8X8_BGGR
     )
 
     fun resolveCfaPattern(defaultCfaPattern: Int, mode: String?): Int {
@@ -33,6 +41,10 @@ object RawCfaCorrection {
             MODE_4X4_GRBG -> RawMetadata.CFA_QUAD_GRBG
             MODE_4X4_GBRG -> RawMetadata.CFA_QUAD_GBRG
             MODE_4X4_BGGR -> RawMetadata.CFA_QUAD_BGGR
+            MODE_8X8_RGGB -> RawMetadata.CFA_QUAD_8X8_RGGB
+            MODE_8X8_GRBG -> RawMetadata.CFA_QUAD_8X8_GRBG
+            MODE_8X8_GBRG -> RawMetadata.CFA_QUAD_8X8_GBRG
+            MODE_8X8_BGGR -> RawMetadata.CFA_QUAD_8X8_BGGR
             else -> defaultCfaPattern
         }
     }
@@ -47,6 +59,10 @@ object RawCfaCorrection {
             MODE_4X4_GRBG -> RawMetadata.CFA_QUAD_GRBG
             MODE_4X4_GBRG -> RawMetadata.CFA_QUAD_GBRG
             MODE_4X4_BGGR -> RawMetadata.CFA_QUAD_BGGR
+            MODE_8X8_RGGB -> RawMetadata.CFA_QUAD_8X8_RGGB
+            MODE_8X8_GRBG -> RawMetadata.CFA_QUAD_8X8_GRBG
+            MODE_8X8_GBRG -> RawMetadata.CFA_QUAD_8X8_GBRG
+            MODE_8X8_BGGR -> RawMetadata.CFA_QUAD_8X8_BGGR
             else -> null
         }
     }
@@ -56,16 +72,16 @@ object RawCfaCorrection {
     }
 
     fun repeatPatternDim(cfaPattern: Int): IntArray {
-        return if (RawMetadata.isQuadBayer(cfaPattern)) {
-            intArrayOf(4, 4)
-        } else {
-            intArrayOf(2, 2)
+        return when {
+            RawMetadata.isQuadBayer8x8(cfaPattern) -> intArrayOf(8, 8)
+            RawMetadata.isQuadBayer(cfaPattern) -> intArrayOf(4, 4)
+            else -> intArrayOf(2, 2)
         }
     }
 
     fun cfaPatternBytes(cfaPattern: Int): ByteArray {
         return if (RawMetadata.isQuadBayer(cfaPattern)) {
-            quadCfaPatternBytes(cfaPattern)
+            expandedCfaPatternBytes(cfaPattern)
         } else {
             bayerCfaPatternBytes(baseBayerPattern(cfaPattern))
         }
@@ -73,7 +89,7 @@ object RawCfaCorrection {
 
     fun channelIndexForPixel(cfaPattern: Int, x: Int, y: Int): Int {
         return if (RawMetadata.isQuadBayer(cfaPattern)) {
-            quadChannelIndex(cfaPattern, x and 3, y and 3)
+            expandedChannelIndex(cfaPattern, x, y)
         } else {
             bayerChannelIndex(baseBayerPattern(cfaPattern), x and 1, y and 1)
         }
@@ -88,10 +104,18 @@ object RawCfaCorrection {
     }
 
     fun baseBayerPattern(cfaPattern: Int): Int {
-        return if (RawMetadata.isQuadBayer(cfaPattern)) {
-            cfaPattern - RawMetadata.CFA_QUAD_RGGB
-        } else {
-            cfaPattern
+        return when {
+            RawMetadata.isQuadBayer8x8(cfaPattern) -> cfaPattern - RawMetadata.CFA_QUAD_8X8_RGGB
+            RawMetadata.isQuadBayer(cfaPattern) -> cfaPattern - RawMetadata.CFA_QUAD_RGGB
+            else -> cfaPattern
+        }
+    }
+
+    fun expandedBayerBlockSize(cfaPattern: Int): Int {
+        return when {
+            RawMetadata.isQuadBayer8x8(cfaPattern) -> 4
+            RawMetadata.isQuadBayer(cfaPattern) -> 2
+            else -> 1
         }
     }
 
@@ -104,11 +128,12 @@ object RawCfaCorrection {
         }
     }
 
-    private fun quadCfaPatternBytes(cfaPattern: Int): ByteArray {
-        val bytes = ByteArray(16)
+    private fun expandedCfaPatternBytes(cfaPattern: Int): ByteArray {
+        val dim = repeatPatternDim(cfaPattern)
+        val bytes = ByteArray(dim[0] * dim[1])
         var index = 0
-        for (y in 0 until 4) {
-            for (x in 0 until 4) {
+        for (y in 0 until dim[0]) {
+            for (x in 0 until dim[1]) {
                 bytes[index++] = colorCodeForPixel(cfaPattern, x, y).toByte()
             }
         }
@@ -147,11 +172,12 @@ object RawCfaCorrection {
         }
     }
 
-    private fun quadChannelIndex(cfaPattern: Int, xMod4: Int, yMod4: Int): Int {
+    private fun expandedChannelIndex(cfaPattern: Int, x: Int, y: Int): Int {
+        val blockSize = expandedBayerBlockSize(cfaPattern)
         return bayerChannelIndex(
             cfaPattern = baseBayerPattern(cfaPattern),
-            xParity = xMod4 / 2,
-            yParity = yMod4 / 2
+            xParity = (x / blockSize) and 1,
+            yParity = (y / blockSize) and 1
         )
     }
 }

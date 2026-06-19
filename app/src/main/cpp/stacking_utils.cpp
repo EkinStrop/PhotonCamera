@@ -1298,12 +1298,22 @@ RawStacker::RawStacker(int width, int height, bool enableSuperRes)
 }
 
 int RawStacker::getPlaneIndex(int x, int y, int cfaPattern) const {
-  // cfaPattern: 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
+  // cfaPattern: 0..3=Bayer, 4..7=4x4 expanded Bayer, 8..11=8x8 expanded Bayer
   // Row 0, Col 0 maps to: R, G, G, B respectively
   // We want output indices 0..3 for R, Gr, Gb, B
 
-  // x%2, y%2 -> 00, 10, 01, 11
-  int offset = (y % 2) * 2 + (x % 2);
+  int pattern = cfaPattern;
+  int blockSize = 1;
+  if (cfaPattern >= 8) {
+    pattern = cfaPattern - 8;
+    blockSize = 4;
+  } else if (cfaPattern >= 4) {
+    pattern = cfaPattern - 4;
+    blockSize = 2;
+  }
+
+  // x/y block parity -> 00, 10, 01, 11
+  int offset = ((y / blockSize) & 1) * 2 + ((x / blockSize) & 1);
 
   // Mapping table based on pattern
   static const int map[4][4] = {
@@ -1313,7 +1323,7 @@ int RawStacker::getPlaneIndex(int x, int y, int cfaPattern) const {
       {3, 2, 1, 0}  // BGGR
   };
 
-  return map[cfaPattern][offset];
+  return map[std::max(0, std::min(3, pattern))][offset];
 }
 
 // 辅助函数：安全地计算 RAW 的自动曝光缩放因子
@@ -1409,23 +1419,27 @@ void RawStacker::stageFrame(const uint16_t *rawData, int rowStride,
       uint16_t p01 = pRow1[ox];
       uint16_t p11 = pRow1[ox + 1];
 
-      uint16_t g1, g2;
-      if (cfaPattern == 1 || cfaPattern == 2) {
-        g1 = p00;
-        g2 = p11;
+      float avgG;
+      if (cfaPattern >= 4) {
+        avgG = static_cast<float>(p00 + p10 + p01 + p11) * 0.25f;
       } else {
-        g1 = p10;
-        g2 = p01;
+        uint16_t g1, g2;
+        if (cfaPattern == 1 || cfaPattern == 2) {
+          g1 = p00;
+          g2 = p11;
+        } else {
+          g1 = p10;
+          g2 = p01;
+        }
+        avgG = static_cast<float>(g1 + g2) * 0.5f;
       }
-
-      float avgG = (float)(g1 + g2) * 0.5f;
       frame.proxy.data[y * proxyW + x] =
           (uint8_t)std::max(0.0f, std::min(255.0f, avgG * byteScale));
 
-      frame.planes[getPlaneIndex(ox, 0, cfaPattern)][y * proxyW + x] = p00;
-      frame.planes[getPlaneIndex(ox + 1, 0, cfaPattern)][y * proxyW + x] = p10;
-      frame.planes[getPlaneIndex(ox, 1, cfaPattern)][y * proxyW + x] = p01;
-      frame.planes[getPlaneIndex(ox + 1, 1, cfaPattern)][y * proxyW + x] = p11;
+      frame.planes[getPlaneIndex(ox, y * 2, cfaPattern)][y * proxyW + x] = p00;
+      frame.planes[getPlaneIndex(ox + 1, y * 2, cfaPattern)][y * proxyW + x] = p10;
+      frame.planes[getPlaneIndex(ox, y * 2 + 1, cfaPattern)][y * proxyW + x] = p01;
+      frame.planes[getPlaneIndex(ox + 1, y * 2 + 1, cfaPattern)][y * proxyW + x] = p11;
     }
   }
 

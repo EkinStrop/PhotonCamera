@@ -25,6 +25,7 @@ data class RawMetadata(
      * CFA（彩色滤波阵列）排列模式
      * 0 = RGGB, 1 = GRBG, 2 = GBRG, 3 = BGGR
      * 4 = Quad RGGB, 5 = Quad GRBG, 6 = Quad GBRG, 7 = Quad BGGR
+     * 8 = 8x8 RGGB, 9 = 8x8 GRBG, 10 = 8x8 GBRG, 11 = 8x8 BGGR
      */
     val cfaPattern: Int,
 
@@ -95,9 +96,17 @@ data class RawMetadata(
         const val CFA_QUAD_GRBG = 5
         const val CFA_QUAD_GBRG = 6
         const val CFA_QUAD_BGGR = 7
+        const val CFA_QUAD_8X8_RGGB = 8
+        const val CFA_QUAD_8X8_GRBG = 9
+        const val CFA_QUAD_8X8_GBRG = 10
+        const val CFA_QUAD_8X8_BGGR = 11
 
         fun isQuadBayer(cfaPattern: Int): Boolean {
-            return cfaPattern in CFA_QUAD_RGGB..CFA_QUAD_BGGR
+            return cfaPattern in CFA_QUAD_RGGB..CFA_QUAD_8X8_BGGR
+        }
+
+        fun isQuadBayer8x8(cfaPattern: Int): Boolean {
+            return cfaPattern in CFA_QUAD_8X8_RGGB..CFA_QUAD_8X8_BGGR
         }
 
         /**

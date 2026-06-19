@@ -170,7 +170,7 @@ public:
 
   // Add a raw frame to the stack
   // rawData: 16-bit single channel Bayer data
-  // cfaPattern: 0=RGGB, 1=GRBG, 2=GBRG, 3=BGGR
+  // cfaPattern: 0..3=Bayer, 4..7=4x4 expanded Bayer, 8..11=8x8 expanded Bayer
   void addFrame(const uint16_t *rawData, int rowStride, int cfaPattern);
 
   // New methods for faster image closing
