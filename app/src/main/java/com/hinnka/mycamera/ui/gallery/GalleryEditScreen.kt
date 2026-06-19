@@ -105,7 +105,6 @@ private data class PreviewRenderSignature(
     val editSharpening: Float,
     val editNoiseReduction: Float,
     val editChromaNoiseReduction: Float,
-    val editRawDenoise: Float,
     val editRawExposureCompensation: Float,
     val editRawAutoExposure: Boolean,
     val editRawHighlightsAdjustment: Float,
@@ -186,7 +185,6 @@ fun GalleryEditScreen(
     val editSharpening by viewModel.editSharpening.collectAsState()
     val editNoiseReduction by viewModel.editNoiseReduction.collectAsState()
     val editChromaNoiseReduction by viewModel.editChromaNoiseReduction.collectAsState()
-    val editRawNlmNoiseFactor by viewModel.editRawDenoise.collectAsState()
     val editRawExposureCompensation by viewModel.editRawExposureCompensation.collectAsState()
     val editRawAutoExposure by viewModel.editRawAutoExposure.collectAsState()
     val editRawHighlightsAdjustment by viewModel.editRawHighlightsAdjustment.collectAsState()
@@ -255,7 +253,6 @@ fun GalleryEditScreen(
             editSharpening = editSharpening,
             editNoiseReduction = editNoiseReduction,
             editChromaNoiseReduction = editChromaNoiseReduction,
-            editRawDenoise = editRawNlmNoiseFactor,
             editRawExposureCompensation = editRawExposureCompensation,
             editRawAutoExposure = editRawAutoExposure,
             editRawHighlightsAdjustment = editRawHighlightsAdjustment,
@@ -1070,7 +1067,13 @@ fun GalleryEditScreen(
                                         valueRange = 0f..1f,
                                         resetValue = 0f,
                                         onValueChange = { viewModel.setNoiseReduction(it) },
-                                        onValueChangeFinished = { }
+                                        onValueChangeFinished = {
+                                            if (isRaw) {
+                                                viewModel.persistCurrentRawEditMetadata(currentPhoto) { success ->
+                                                    if (success) requestRawPreviewRefresh()
+                                                }
+                                            }
+                                        }
                                     )
                                     SliderSettingItem(
                                         title = stringResource(R.string.settings_chroma_noise_reduction),
@@ -1078,7 +1081,13 @@ fun GalleryEditScreen(
                                         valueRange = 0f..1f,
                                         resetValue = 0f,
                                         onValueChange = { viewModel.setChromaNoiseReduction(it) },
-                                        onValueChangeFinished = { }
+                                        onValueChangeFinished = {
+                                            if (isRaw) {
+                                                viewModel.persistCurrentRawEditMetadata(currentPhoto) { success ->
+                                                    if (success) requestRawPreviewRefresh()
+                                                }
+                                            }
+                                        }
                                     )
                                 }
                                 2 -> {
@@ -1095,7 +1104,6 @@ fun GalleryEditScreen(
                                         },
                                         availableLuts = availableLuts,
                                         thumbnail = previewBitmap,
-                                        rawNlmNoiseFactor = editRawNlmNoiseFactor,
                                         rawExposureCompensation = editRawExposureCompensation,
                                         rawAutoExposure = editRawAutoExposure,
                                         rawHighlightsAdjustment = editRawHighlightsAdjustment,
@@ -1138,9 +1146,6 @@ fun GalleryEditScreen(
                                                     requestRawPreviewRefresh()
                                                 }
                                             }
-                                        },
-                                        onRawNlmNoiseFactorChange = {
-                                            viewModel.saveRawDenoiseValue(currentPhoto, it)
                                         },
                                         onRawExposureCompensationChange = {
                                             viewModel.saveRawExposureCompensationValue(currentPhoto, it)

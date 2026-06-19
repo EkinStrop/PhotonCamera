@@ -871,9 +871,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val rawDcpId: StateFlow<String?> = userPreferencesRepository.userPreferences
         .map { it.rawDcpId }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val rawNlmNoiseFactor: StateFlow<Float> = userPreferencesRepository.userPreferences
-        .map { it.rawNlmNoiseFactor }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
     val rawExposureCompensation: StateFlow<Float> = userPreferencesRepository.userPreferences
         .map { it.rawExposureCompensation }
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
@@ -1572,9 +1569,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             clearActivePresetIfCurrentSettingsMismatch()
         }
     }
-    fun setRawNlmNoiseFactor(value: Float) {
-        viewModelScope.launch { userPreferencesRepository.saveRawNlmNoiseFactor(value) }
-    }
     fun setRawToneMappingParameters(value: RawToneMappingParameters) {
         viewModelScope.launch { userPreferencesRepository.saveRawToneMappingParameters(value) }
     }
@@ -1825,7 +1819,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             noiseReduction = noiseReductionValue,
             chromaNoiseReduction = chromaNoiseReductionValue,
             rawDcpId = userPrefs?.rawDcpId,
-            rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
             rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
             rawAutoExposure = effectiveRawAutoExposure,
             rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
@@ -4097,7 +4090,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
                 rawDcpId = userPrefs?.rawDcpId,
-                rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
                 rawAutoExposure = effectiveRawAutoExposure,
                 rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
@@ -4264,7 +4256,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
                 rawDcpId = userPrefs?.rawDcpId,
-                rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
                 rawAutoExposure = effectiveRawAutoExposure,
                 rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
@@ -4403,7 +4394,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     noiseReduction = noiseReductionValue,
                     chromaNoiseReduction = chromaNoiseReductionValue,
                     rawDcpId = userPrefs?.rawDcpId,
-                    rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                     rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
                     rawAutoExposure = effectiveRawAutoExposure,
                     rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
@@ -4564,7 +4554,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
                 rawDcpId = userPrefs?.rawDcpId,
-                rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
                 rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
                 rawAutoExposure = effectiveRawAutoExposure,
                 rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
@@ -5009,7 +4998,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             noiseReduction = noiseReductionValue,
             chromaNoiseReduction = chromaNoiseReductionValue,
             rawDcpId = userPrefs?.rawDcpId,
-            rawDenoiseValue = userPrefs?.rawNlmNoiseFactor ?: 0f,
             rawExposureCompensation = userPrefs?.rawExposureCompensation ?: 0f,
             rawAutoExposure = effectiveRawAutoExposure,
             rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,

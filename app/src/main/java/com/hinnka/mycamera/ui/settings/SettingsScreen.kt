@@ -307,7 +307,6 @@ fun SettingsScreen(
     val rawBaselineLutId by viewModel.rawBaselineLutId.collectAsState()
     val phantomBaselineLutId by viewModel.phantomBaselineLutId.collectAsState()
     val rawDcpId by viewModel.rawDcpId.collectAsState()
-    val rawNlmNoiseFactor by viewModel.rawNlmNoiseFactor.collectAsState()
     val rawExposureCompensation by viewModel.rawExposureCompensation.collectAsState()
     val rawAutoExposure by viewModel.rawAutoExposure.collectAsState()
     val rawHighlightsAdjustment by viewModel.rawHighlightsAdjustment.collectAsState()
@@ -332,7 +331,6 @@ fun SettingsScreen(
     var selectedTab by remember { mutableStateOf(SettingsTab.CAMERA) }
     var isRawSliderAdjusting by remember { mutableStateOf(false) }
     var mainCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
-    var rawNlmNoiseFactorUi by remember { mutableStateOf(rawNlmNoiseFactor) }
     var rawExposureCompensationUi by remember { mutableStateOf(rawExposureCompensation) }
     var rawHighlightsAdjustmentUi by remember { mutableStateOf(rawHighlightsAdjustment) }
     var rawShadowsAdjustmentUi by remember { mutableStateOf(rawShadowsAdjustment) }
@@ -345,7 +343,6 @@ fun SettingsScreen(
     var backupOperation by remember { mutableStateOf<BackupOperation?>(null) }
 
     LaunchedEffect(
-        rawNlmNoiseFactor,
         rawExposureCompensation,
         rawHighlightsAdjustment,
         rawShadowsAdjustment,
@@ -354,7 +351,6 @@ fun SettingsScreen(
         rawToneMappingParameters
     ) {
         if (!isRawSliderAdjusting) {
-            rawNlmNoiseFactorUi = rawNlmNoiseFactor
             rawExposureCompensationUi = rawExposureCompensation
             rawHighlightsAdjustmentUi = rawHighlightsAdjustment
             rawShadowsAdjustmentUi = rawShadowsAdjustment
@@ -385,7 +381,6 @@ fun SettingsScreen(
 
     fun commitRawSliderValues() {
         isRawSliderAdjusting = false
-        viewModel.setRawNlmNoiseFactor(rawNlmNoiseFactorUi)
         viewModel.setRawExposureCompensation(rawExposureCompensationUi)
         viewModel.setRawHighlightsAdjustment(rawHighlightsAdjustmentUi)
         viewModel.setRawShadowsAdjustment(rawShadowsAdjustmentUi)
@@ -1585,7 +1580,6 @@ fun SettingsScreen(
                         onEditBaselineRecipe = { baselineRecipeEditorTarget = BaselineColorCorrectionTarget.RAW },
                         availableLuts = availableLuts,
                         thumbnail = previewThumbnail,
-                        rawNlmNoiseFactor = rawNlmNoiseFactorUi,
                         rawExposureCompensation = rawExposureCompensationUi,
                         rawAutoExposure = rawAutoExposure,
                         rawHighlightsAdjustment = rawHighlightsAdjustmentUi,
@@ -1607,7 +1601,6 @@ fun SettingsScreen(
                                 ).show()
                             }
                         },
-                        onRawNlmNoiseFactorChange = { rawNlmNoiseFactorUi = it },
                         onRawExposureCompensationChange = { rawExposureCompensationUi = it },
                         onRawAutoExposureChange = {
                             if (it) {

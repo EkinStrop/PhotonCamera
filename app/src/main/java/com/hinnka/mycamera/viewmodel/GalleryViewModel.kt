@@ -311,8 +311,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         private set
     var editChromaNoiseReduction = MutableStateFlow(0f)
         private set
-    var editRawDenoise = MutableStateFlow(0f)
-        private set
     var editRawExposureCompensation = MutableStateFlow(0f)
         private set
     var editRawAutoExposure = MutableStateFlow(true)
@@ -1109,7 +1107,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             editSharpening.value = m.sharpening ?: 0f
             editNoiseReduction.value = m.noiseReduction ?: 0f
             editChromaNoiseReduction.value = m.chromaNoiseReduction ?: 0f
-            editRawDenoise.value = m.rawDenoiseValue ?: 0f
             editRawExposureCompensation.value = m.rawExposureCompensation ?: 0f
             editRawAutoExposure.value = m.rawAutoExposure ?: true
             editRawHighlightsAdjustment.value = m.rawHighlightsAdjustment ?: 0f
@@ -1734,7 +1731,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editChromaNoiseReduction.value =
                     metadata.chromaNoiseReduction
                         ?: (if (metadata.isImported) 0f else chromaNoiseReduction.value)
-                editRawDenoise.value = metadata.rawDenoiseValue ?: 0f
                 editRawExposureCompensation.value = metadata.rawExposureCompensation ?: 0f
                 editRawAutoExposure.value = metadata.rawAutoExposure ?: true
                 editRawHighlightsAdjustment.value = metadata.rawHighlightsAdjustment ?: 0f
@@ -1759,7 +1755,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 editSharpening.value = sharpening.value
                 editNoiseReduction.value = noiseReduction.value
                 editChromaNoiseReduction.value = chromaNoiseReduction.value
-                editRawDenoise.value = 0.2f
                 editRawExposureCompensation.value = 0f
                 editRawAutoExposure.value = true
                 editRawHighlightsAdjustment.value = 0f
@@ -1808,7 +1803,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         editApplyEffectsToVideo.value = false
         editCropRect.value = null
         editCropAspectOption.value = CropAspectOption.Free
-        editRawDenoise.value = 0.2f
         editRawExposureCompensation.value = 0f
         editRawAutoExposure.value = true
         editRawHighlightsAdjustment.value = 0f
@@ -1941,7 +1935,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         mediaData: MediaData,
         onComplete: ((Boolean) -> Unit)? = null
     ) {
-        val denoise = editRawDenoise.value
+        val sharpening = editSharpening.value
+        val noiseReduction = editNoiseReduction.value
+        val chromaNoiseReduction = editChromaNoiseReduction.value
         val exposure = editRawExposureCompensation.value
         val autoExposure = editRawAutoExposure.value
         val highlights = editRawHighlightsAdjustment.value
@@ -1967,11 +1963,13 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             val baselineRecipeParams = loadRawBaselineRecipeParams(baselineLutId)
             PLog.d(
                 TAG,
-                "persist RAW edit metadata: ${mediaData.id}, dro=$droMode, denoise=$denoise"
+                "persist RAW edit metadata: ${mediaData.id}, dro=$droMode, noise=$noiseReduction, chromaNoise=$chromaNoiseReduction"
             )
             val updated = GalleryManager.updateMetadata(context, mediaData.id) { current ->
                 current.copy(
-                    rawDenoiseValue = denoise,
+                    sharpening = sharpening,
+                    noiseReduction = noiseReduction,
+                    chromaNoiseReduction = chromaNoiseReduction,
                     rawExposureCompensation = exposure,
                     rawAutoExposure = autoExposure,
                     rawHighlightsAdjustment = highlights,
@@ -2021,11 +2019,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun persistCurrentRawEditMetadata(mediaData: MediaData, onComplete: ((Boolean) -> Unit)? = null) {
-        persistRawEditMetadata(mediaData, onComplete)
-    }
-
-    fun saveRawDenoiseValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
-        editRawDenoise.value = value
         persistRawEditMetadata(mediaData, onComplete)
     }
 
@@ -2353,7 +2346,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         sharpening = editSharpening.value,
                         noiseReduction = editNoiseReduction.value,
                         chromaNoiseReduction = editChromaNoiseReduction.value,
-                        rawDenoiseValue = editRawDenoise.value,
                         rawExposureCompensation = editRawExposureCompensation.value,
                         rawAutoExposure = editRawAutoExposure.value,
                         rawHighlightsAdjustment = editRawHighlightsAdjustment.value,
@@ -2424,6 +2416,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 val isSystem = selectedTab == GalleryTab.SYSTEM
+                val isRawPhoto = GalleryManager.getDngFile(context, photo.id).exists()
                 val sourceBackedUri = photo.sourceUri ?: finalMetadata.sourceUri?.toUri()
                 val canLoadExternalUri = isSystem || sourceBackedUri != null
                 val externalUri = sourceBackedUri ?: photo.uri
@@ -2454,7 +2447,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     currentBitmap
                 } else {
                     val skipPreviewDenoise = maxEdge < FULL_QUALITY_PREVIEW_MAX_EDGE
-                    val previewMetadata = if (skipPreviewDenoise) {
+                    val applyBitmapDenoise = !isRawPhoto && !skipPreviewDenoise
+                    val previewMetadata = if (!applyBitmapDenoise) {
                         finalMetadata.copy(
                             noiseReduction = 0f,
                             chromaNoiseReduction = 0f
@@ -2462,8 +2456,8 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     } else {
                         finalMetadata
                     }
-                    val previewNoiseReduction = if (skipPreviewDenoise) 0f else finalNR
-                    val previewChromaNoiseReduction = if (skipPreviewDenoise) 0f else finalCNR
+                    val previewNoiseReduction = if (applyBitmapDenoise) finalNR else 0f
+                    val previewChromaNoiseReduction = if (applyBitmapDenoise) finalCNR else 0f
 
                     // 预览生成
                     val result = contentRepository.photoProcessor.processBitmap(
@@ -2673,7 +2667,6 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                         sharpening = editSharpening.value,
                         noiseReduction = editNoiseReduction.value,
                         chromaNoiseReduction = editChromaNoiseReduction.value,
-                        rawDenoiseValue = editRawDenoise.value,
                         rawExposureCompensation = editRawExposureCompensation.value,
                         rawAutoExposure = editRawAutoExposure.value,
                         rawHighlightsAdjustment = editRawHighlightsAdjustment.value,

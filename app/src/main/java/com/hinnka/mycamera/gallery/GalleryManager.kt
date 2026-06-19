@@ -156,6 +156,14 @@ object GalleryManager {
                 ?.rawAutoExposure ?: true)
     }
 
+    private fun resolveNoiseReduction(metadata: MediaMetadata, fallback: Float): Float {
+        return metadata.noiseReduction ?: (if (metadata.isImported) 0f else fallback)
+    }
+
+    private fun resolveChromaNoiseReduction(metadata: MediaMetadata, fallback: Float): Float {
+        return metadata.chromaNoiseReduction ?: (if (metadata.isImported) 0f else fallback)
+    }
+
     private fun MediaMetadata.withRawAutoAdjustments(
         adjustments: RawDemosaicProcessor.RawAutoAdjustments
     ): MediaMetadata {
@@ -1534,6 +1542,8 @@ object GalleryManager {
             }
 
             var updatedMetadata: MediaMetadata = metadata
+            val rawNoiseReduction = resolveNoiseReduction(updatedMetadata, noiseReductionValue)
+            val rawChromaNoiseReduction = resolveChromaNoiseReduction(updatedMetadata, chromaNoiseReductionValue)
             val rawResult = RawDemosaicProcessor.getInstance().processForHdrSources(
                 context,
                 dngFile.absolutePath,
@@ -1551,7 +1561,8 @@ object GalleryManager {
                 rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                 rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                 sharpeningValue = 0.4f,
-                denoiseValue = updatedMetadata.rawDenoiseValue,
+                denoiseValue = rawNoiseReduction,
+                chromaDenoiseValue = rawChromaNoiseReduction,
                 rawDcpId = updatedMetadata.rawDcpId,
                 rawRenderingEngine = updatedMetadata.rawRenderingEngine,
                 rawToneMappingParameters = updatedMetadata.rawToneMappingParameters,
@@ -2366,6 +2377,8 @@ object GalleryManager {
             System.gc()
 
             var updatedMetadata: MediaMetadata = metadata
+            val rawNoiseReduction = resolveNoiseReduction(updatedMetadata, noiseReductionValue)
+            val rawChromaNoiseReduction = resolveChromaNoiseReduction(updatedMetadata, chromaNoiseReductionValue)
             val rawResult = RawDemosaicProcessor.getInstance().processForHdrSources(
                 context,
                 dngFile.absolutePath,
@@ -2383,7 +2396,8 @@ object GalleryManager {
                 rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                 rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                 sharpeningValue = 0.4f,
-                denoiseValue = updatedMetadata.rawDenoiseValue,
+                denoiseValue = rawNoiseReduction,
+                chromaDenoiseValue = rawChromaNoiseReduction,
                 rawDcpId = updatedMetadata.rawDcpId,
                 rawRenderingEngine = updatedMetadata.rawRenderingEngine,
                 rawToneMappingParameters = updatedMetadata.rawToneMappingParameters,
@@ -2802,6 +2816,8 @@ object GalleryManager {
         val photoFile = File(photoDir, PHOTO_FILE)
         val tempFile = File(photoDir, "temp.jpg")
         var updatedMetadata: MediaMetadata = metadata
+        val rawNoiseReduction = resolveNoiseReduction(updatedMetadata, noiseReductionValue)
+        val rawChromaNoiseReduction = resolveChromaNoiseReduction(updatedMetadata, chromaNoiseReductionValue)
         val rawResult = RawDemosaicProcessor.getInstance().processForHdrSources(
             context,
             dngFile.absolutePath,
@@ -2819,7 +2835,8 @@ object GalleryManager {
             rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
             rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
             sharpeningValue = 0.4f,
-            denoiseValue = updatedMetadata.rawDenoiseValue,
+            denoiseValue = rawNoiseReduction,
+            chromaDenoiseValue = rawChromaNoiseReduction,
             rawDcpId = updatedMetadata.rawDcpId,
             rawRenderingEngine = updatedMetadata.rawRenderingEngine,
             rawToneMappingParameters = updatedMetadata.rawToneMappingParameters,
@@ -3945,8 +3962,6 @@ object GalleryManager {
                     return@withContext photoId
                 }
 
-                val userPrefs =
-                    ContentRepository.getInstance(context).userPreferencesRepository.userPreferences.firstOrNull()
                 val isRaw = mimeType?.contains("raw", ignoreCase = true) == true ||
                         mimeType?.contains("dng", ignoreCase = true) == true ||
                         fileName.endsWith(".dng", ignoreCase = true) ||
@@ -3965,6 +3980,8 @@ object GalleryManager {
 
                     // 3. 处理 RAW 以生成 JPEG 预览
                     var updatedMetadata: MediaMetadata = metadata
+                    val rawNoiseReduction = resolveNoiseReduction(updatedMetadata, 0f)
+                    val rawChromaNoiseReduction = resolveChromaNoiseReduction(updatedMetadata, 0f)
                     val processedBitmap = RawDemosaicProcessor.getInstance().process(
                         context,
                         dngFile.absolutePath, null, null, 0,
@@ -3978,7 +3995,8 @@ object GalleryManager {
                         rawBlackLevelMode = updatedMetadata.rawBlackLevelMode,
                         rawCustomBlackLevel = updatedMetadata.rawCustomBlackLevel,
                         sharpeningValue = 0.4f,
-                        denoiseValue = updatedMetadata.rawDenoiseValue,
+                        denoiseValue = rawNoiseReduction,
+                        chromaDenoiseValue = rawChromaNoiseReduction,
                         rawDcpId = updatedMetadata.rawDcpId,
                         rawRenderingEngine = updatedMetadata.rawRenderingEngine,
                         rawToneMappingParameters = updatedMetadata.rawToneMappingParameters,
@@ -4117,6 +4135,9 @@ object GalleryManager {
 
                 // 3. 处理 RAW 以生成 JPEG 预览
                 var updatedMetadata = metadata
+                val rawMetadata = updatedMetadata ?: MediaMetadata()
+                val rawNoiseReduction = resolveNoiseReduction(rawMetadata, 0f)
+                val rawChromaNoiseReduction = resolveChromaNoiseReduction(rawMetadata, 0f)
                 val processedBitmap = RawDemosaicProcessor.getInstance().process(
                     context,
                     dngFile.absolutePath, metadata?.ratio, metadata?.cropRegion, 0,
@@ -4130,7 +4151,8 @@ object GalleryManager {
                     rawBlackLevelMode = updatedMetadata?.rawBlackLevelMode,
                     rawCustomBlackLevel = updatedMetadata?.rawCustomBlackLevel,
                     sharpeningValue = updatedMetadata?.sharpening ?: 0.4f,
-                    denoiseValue = (updatedMetadata ?: MediaMetadata()).rawDenoiseValue,
+                    denoiseValue = rawNoiseReduction,
+                    chromaDenoiseValue = rawChromaNoiseReduction,
                     rawDcpId = updatedMetadata?.rawDcpId,
                     rawRenderingEngine = updatedMetadata?.rawRenderingEngine ?: MediaMetadata().rawRenderingEngine,
                     rawToneMappingParameters = updatedMetadata?.rawToneMappingParameters ?: MediaMetadata().rawToneMappingParameters,

@@ -65,6 +65,14 @@ class PhotoProcessor(
             ?: (userPreferencesRepository.userPreferences.firstOrNull()?.rawAutoExposure ?: true)
     }
 
+    private fun resolveNoiseReduction(metadata: MediaMetadata, fallback: Float): Float {
+        return metadata.noiseReduction ?: (if (metadata.isImported) 0f else fallback)
+    }
+
+    private fun resolveChromaNoiseReduction(metadata: MediaMetadata, fallback: Float): Float {
+        return metadata.chromaNoiseReduction ?: (if (metadata.isImported) 0f else fallback)
+    }
+
     suspend fun prepareUltraHdrSource(
         context: Context,
         photoId: String,
@@ -302,9 +310,6 @@ class PhotoProcessor(
     ): GainmapSourceSet? = withContext(Dispatchers.IO) {
         val displayHdrSdrRatio = readDisplayHdrSdrRatio()
         val finalSharpening = metadata.sharpening ?: (if (metadata.isImported) 0f else sharpening)
-        val finalNoiseReduction = metadata.noiseReduction ?: (if (metadata.isImported) 0f else noiseReduction)
-        val finalChromaNoiseReduction =
-            metadata.chromaNoiseReduction ?: (if (metadata.isImported) 0f else chromaNoiseReduction)
 
         val colorCorrection = resolveColorCorrection(
             metadata = metadata,
@@ -347,8 +352,8 @@ class PhotoProcessor(
             colorCorrection.baselineLayer,
             colorCorrection.creativeLayer,
             finalSharpening,
-            finalNoiseReduction,
-            finalChromaNoiseReduction
+            noiseReductionValue = 0f,
+            chromaNoiseReductionValue = 0f
         )
 
         sdrBitmap = applyCrop(sdrBitmap, metadata, "raw_sdr")
@@ -443,6 +448,8 @@ class PhotoProcessor(
         noiseReduction: Float = 0f,
         chromaNoiseReduction: Float = 0f
     ): GainmapSourceSet? = withContext(Dispatchers.IO) {
+        val rawNoiseReduction = resolveNoiseReduction(metadata, noiseReduction)
+        val rawChromaNoiseReduction = resolveChromaNoiseReduction(metadata, chromaNoiseReduction)
         val rawResult = RawDemosaicProcessor.getInstance().processForHdrSources(
             context = context,
             dngFilePath = dngPath,
@@ -460,7 +467,8 @@ class PhotoProcessor(
             rawBlackLevelMode = metadata.rawBlackLevelMode,
             rawCustomBlackLevel = metadata.rawCustomBlackLevel,
             sharpeningValue = 0.4f,
-            denoiseValue = metadata.rawDenoiseValue,
+            denoiseValue = rawNoiseReduction,
+            chromaDenoiseValue = rawChromaNoiseReduction,
             rawDcpId = metadata.rawDcpId,
             rawRenderingEngine = metadata.rawRenderingEngine,
             rawToneMappingParameters = metadata.rawToneMappingParameters,
@@ -507,9 +515,8 @@ class PhotoProcessor(
         // 优先从元数据中获取软件处理参数
         // 智能回退：如果是导入的照片且元数据中没存过，则默认值为 0，不应用额外处理
         val finalSharpening = metadata.sharpening ?: (if (metadata.isImported) 0f else sharpening)
-        val finalNoiseReduction = metadata.noiseReduction ?: (if (metadata.isImported) 0f else noiseReduction)
-        val finalChromaNoiseReduction =
-            metadata.chromaNoiseReduction ?: (if (metadata.isImported) 0f else chromaNoiseReduction)
+        val finalNoiseReduction = resolveNoiseReduction(metadata, noiseReduction)
+        val finalChromaNoiseReduction = resolveChromaNoiseReduction(metadata, chromaNoiseReduction)
 
         // 1. 应用 LUT
         val colorCorrection = resolveColorCorrection(
@@ -534,7 +541,8 @@ class PhotoProcessor(
             rawAutoWhiteBalanceEstimate = resolveRawAutoWhiteBalanceEstimate(metadata),
             rawBlackLevelMode = metadata.rawBlackLevelMode,
             rawCustomBlackLevel = metadata.rawCustomBlackLevel,
-            denoiseValue = metadata.rawDenoiseValue,
+            denoiseValue = finalNoiseReduction,
+            chromaDenoiseValue = finalChromaNoiseReduction,
             rawDcpId = metadata.rawDcpId,
             rawRenderingEngine = metadata.rawRenderingEngine,
             rawToneMappingParameters = metadata.rawToneMappingParameters,
@@ -565,8 +573,8 @@ class PhotoProcessor(
                 colorCorrection.baselineLayer,
                 colorCorrection.creativeLayer,
                 finalSharpening,
-                finalNoiseReduction,
-                finalChromaNoiseReduction
+                noiseReductionValue = 0f,
+                chromaNoiseReductionValue = 0f
             )
         }
 

@@ -49,7 +49,6 @@ fun RawEditPanel(
     onEditBaselineRecipe: (String) -> Unit,
     availableLuts: List<LutInfo>,
     thumbnail: Bitmap?,
-    rawNlmNoiseFactor: Float,
     rawExposureCompensation: Float,
     rawAutoExposure: Boolean,
     rawHighlightsAdjustment: Float,
@@ -66,7 +65,6 @@ fun RawEditPanel(
     onSelectDcp: (String?) -> Unit,
     onImportDcp: () -> Unit,
     onDeleteDcp: (DcpInfo) -> Unit,
-    onRawNlmNoiseFactorChange: (Float) -> Unit,
     onRawExposureCompensationChange: (Float) -> Unit,
     onRawAutoExposureChange: (Boolean) -> Unit,
     onRawHighlightsAdjustmentChange: (Float) -> Unit,
@@ -174,17 +172,6 @@ fun RawEditPanel(
                 onValueChange = {
                     onAdjustmentStart()
                     onRawShadowsAdjustmentChange(it)
-                },
-                onValueChangeFinished = onAdjustmentEnd
-            )
-            SliderSettingItem(
-                title = stringResource(R.string.settings_raw_nlm_noise_factor),
-                value = rawNlmNoiseFactor,
-                valueRange = 0f..1f,
-                resetValue = 0f,
-                onValueChange = {
-                    onAdjustmentStart()
-                    onRawNlmNoiseFactorChange(it)
                 },
                 onValueChangeFinished = onAdjustmentEnd
             )

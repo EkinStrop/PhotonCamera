@@ -159,7 +159,7 @@ class RawDemosaicProcessor {
         private const val TAG = "RawDemosaicProcessor"
         private const val RAW_HDR_HIGHLIGHT_START = 0.72f
         private const val RAW_HDR_WHITE_POINT_SCENE_LUMA = 2.4f
-        private const val DEFAULT_RAW_CHROMA_DENOISE_VALUE = 0.5f
+        private const val RAW_HIDDEN_CHROMA_DENOISE_BASE = 0.5f
         private const val RCD_RAW_TEXTURE_UNIT = 0
         private const val RCD_LENS_SHADING_TEXTURE_UNIT = 1
         private const val RCD_OUTPUT_IMAGE_UNIT = 0
@@ -459,6 +459,7 @@ class RawDemosaicProcessor {
         rawCustomBlackLevel: Float? = null,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
+        chromaDenoiseValue: Float? = null,
         rawDcpId: String? = null,
         dcpRenderPlan: DcpRenderPlan? = null,
         spectralFilmStock: String? = null,
@@ -494,6 +495,7 @@ class RawDemosaicProcessor {
                 rawCustomBlackLevel = rawCustomBlackLevel,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
+                chromaDenoiseValue = chromaDenoiseValue,
                 rawDcpId = rawDcpId,
                 dcpRenderPlan = dcpRenderPlan,
                 spectralFilmStock = spectralFilmStock,
@@ -603,6 +605,7 @@ class RawDemosaicProcessor {
         rawCustomBlackLevel: Float? = null,
         sharpeningValue: Float = 0f,
         denoiseValue: Float? = null,
+        chromaDenoiseValue: Float? = null,
         rawDcpId: String? = null,
         dcpRenderPlan: DcpRenderPlan? = null,
         spectralFilmStock: String? = null,
@@ -638,6 +641,7 @@ class RawDemosaicProcessor {
                 rawCustomBlackLevel = rawCustomBlackLevel,
                 sharpeningValue = sharpeningValue,
                 denoiseValue = denoiseValue,
+                chromaDenoiseValue = chromaDenoiseValue,
                 rawDcpId = rawDcpId,
                 dcpRenderPlan = dcpRenderPlan,
                 spectralFilmStock = spectralFilmStock,
@@ -1228,6 +1232,7 @@ class RawDemosaicProcessor {
                 height = actualHeight,
                 metadata = actualMetadata,
                 linearExposureGain = linearExposureGain,
+                chromaDenoiseValue = chromaDenoiseValue,
             )
 
             // darktable denoiseprofile 降噪
@@ -2247,8 +2252,11 @@ class RawDemosaicProcessor {
         height: Int,
         metadata: RawMetadata,
         linearExposureGain: Float,
+        chromaDenoiseValue: Float?,
     ): Int {
-        val strength = DEFAULT_RAW_CHROMA_DENOISE_VALUE
+        val userStrength = (chromaDenoiseValue ?: 0f).coerceIn(0f, 1f)
+        val strength = RAW_HIDDEN_CHROMA_DENOISE_BASE +
+                userStrength * (1f - RAW_HIDDEN_CHROMA_DENOISE_BASE)
         if (strength <= 0f || width * height < 2) {
             return sourceTextureId
         }

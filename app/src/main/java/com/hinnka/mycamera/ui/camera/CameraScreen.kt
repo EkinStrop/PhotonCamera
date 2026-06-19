@@ -196,7 +196,6 @@ fun CameraScreen(
     val jpgBaselineLutId by viewModel.jpgBaselineLutId.collectAsState()
     val rawBaselineLutId by viewModel.rawBaselineLutId.collectAsState()
     val phantomBaselineLutId by viewModel.phantomBaselineLutId.collectAsState()
-    val rawNlmNoiseFactor by viewModel.rawNlmNoiseFactor.collectAsState()
     val rawExposureCompensation by viewModel.rawExposureCompensation.collectAsState()
     val rawAutoExposure by viewModel.rawAutoExposure.collectAsState()
     val rawHighlightsAdjustment by viewModel.rawHighlightsAdjustment.collectAsState()
@@ -1329,7 +1328,6 @@ fun CameraScreen(
             rawBaselineLutId = rawBaselineLutId,
             availableLuts = viewModel.availableLutList,
             previewThumbnail = viewModel.previewThumbnail,
-            rawNlmNoiseFactor = rawNlmNoiseFactor,
             rawExposureCompensation = rawExposureCompensation,
             rawAutoExposure = rawAutoExposure,
             rawHighlightsAdjustment = rawHighlightsAdjustment,
