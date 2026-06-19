@@ -3956,7 +3956,11 @@ class Camera2Controller(private val context: Context) {
             1,
             MultiFrameConfig.MAX_FRAME_COUNT
         )
-        val hdrFrameCount = normalizedZeroEvFrameCount + HDR_BRACKET_SIDE_FRAME_COUNT
+        val evOffsets = buildHdrBracketEvOffsets(
+            zeroEvFrameCount = normalizedZeroEvFrameCount,
+            isRawCapture = isRawCapture,
+        )
+        val hdrFrameCount = evOffsets.size
         _state.value = _state.value.copy(
             isCapturing = true,
             hdrBracketCapturing = true,
@@ -3969,7 +3973,6 @@ class Camera2Controller(private val context: Context) {
             }
             val currentState = _state.value
             val manualBaseExposure = resolveHdrBracketManualBaseExposure(currentState)
-            val evOffsets = buildHdrBracketEvOffsets(normalizedZeroEvFrameCount)
             val requests = evOffsets.mapIndexed { index, evOffset ->
                 device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                     addTarget(reader.surface)
@@ -4047,7 +4050,16 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun buildHdrBracketEvOffsets(zeroEvFrameCount: Int): List<Float> {
+    private fun buildHdrBracketEvOffsets(zeroEvFrameCount: Int, isRawCapture: Boolean): List<Float> {
+        if (isRawCapture) {
+            val normalFrameCount = zeroEvFrameCount.coerceAtLeast(2)
+            return buildList {
+                add(-HdrBracketConfig.SIDE_EV)
+                repeat(normalFrameCount) {
+                    add(0f)
+                }
+            }
+        }
         return buildList {
             add(0f)
             add(HdrBracketConfig.SIDE_EV)
@@ -4192,7 +4204,7 @@ class Camera2Controller(private val context: Context) {
                     onHdrBracketCaptureFailed?.invoke()
                     return
                 }
-                PLog.d(TAG, "Default YUV HDR bracket capture")
+                PLog.d(TAG, "Default HDR bracket capture, raw=$isRawCapture")
                 performHdrBracketCapture(
                     device = device,
                     reader = reader,

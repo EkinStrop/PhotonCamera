@@ -4674,7 +4674,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val frameCount = state.value.hdrBracketFrameCount
                 .coerceAtLeast(HDR_BRACKET_FRAME_COUNT)
             hdrBracketExpectedFrameCount = frameCount
-            hdrBracketZeroEvFrameCount = (frameCount - 2).coerceAtLeast(1)
+            hdrBracketZeroEvFrameCount = if (isRawCaptureFormat(image.format)) {
+                (frameCount - 1).coerceAtLeast(1)
+            } else {
+                (frameCount - 2).coerceAtLeast(1)
+            }
         }
         hdrBracketImages.add(image)
         hdrBracketCaptureResults.add(captureResult)
@@ -4864,6 +4868,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         hdrBracketZeroEvFrameCount = 1
     }
 
+    private fun captureExposureProduct(result: CaptureResult): Double? {
+        val exposureTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+            ?.takeIf { it > 0L }
+            ?: return null
+        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+            ?.takeIf { it > 0 }
+            ?: return null
+        val postRawBoost = (result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST) ?: 100)
+            .coerceAtLeast(1) / 100.0
+        return exposureTime.toDouble() * iso.toDouble() * postRawBoost
+    }
+
     private suspend fun processRawHdrBracket(
         images: List<SafeImage>,
         captureResults: List<CaptureResult?>,
@@ -4877,7 +4893,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (images.size != expectedFrameCount) return
             val context = getApplication<Application>()
             val chars = characteristics ?: return
-            val lowExposureResult = captureResults.getOrNull(HDR_BRACKET_LOW_INDEX) ?: captureResult ?: return
+            val lowExposureResult = captureResults
+                .filterNotNull()
+                .minByOrNull { captureExposureProduct(it) ?: Double.MAX_VALUE }
+                ?: captureResult
+                ?: return
             val shouldAutoSave = autoSaveAfterCapture.firstOrNull() ?: false
             val sharpeningValue = sharpening.firstOrNull() ?: 0f
             val noiseReductionValue = noiseReduction.firstOrNull() ?: 0f

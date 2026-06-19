@@ -1152,31 +1152,35 @@ class RawDemosaicProcessor {
                 ShadowsHighlightsParams(
                     highlights = meteringResult.highlights,
                     shadows = meteringResult.shadows,
-                    curveWhitePoint = meteringResult.curveWhitePoint
                 )
             } else {
                 ShadowsHighlightsParams(
-                    highlights = rawHighlightsAdjustment,
-                    shadows = rawShadowsAdjustment,
-                    curveWhitePoint = meteringResult.curveWhitePoint
+                    highlights = if (actualMetadata.baselineExposure > 0f) {
+                        minOf(rawHighlightsAdjustment, meteringResult.highlights)
+                    } else {
+                        rawExposureCompensation
+                    },
+                    shadows = if (actualMetadata.baselineExposure > 0f) {
+                        maxOf(rawShadowsAdjustment, meteringResult.shadows)
+                    } else {
+                        rawShadowsAdjustment
+                    },
                 )
             }
-            if (useAutoDevelopAdjustments) {
-                RawAutoAdjustments(
-                    exposureCompensation = effectiveExposureCompensation.coerceIn(-2f, 2f),
-                    highlights = shadowsHighlightsParams.highlights,
-                    shadows = shadowsHighlightsParams.shadows
-                ).also { adjustments ->
-                    PLog.d(
-                        TAG,
-                        "RAW auto develop sliders: exposure=${adjustments.exposureCompensation} " +
+            RawAutoAdjustments(
+                exposureCompensation = effectiveExposureCompensation.coerceIn(-2f, 2f),
+                highlights = shadowsHighlightsParams.highlights,
+                shadows = shadowsHighlightsParams.shadows
+            ).also { adjustments ->
+                PLog.d(
+                    TAG,
+                    "RAW auto develop sliders: exposure=${adjustments.exposureCompensation} " +
                             "highlights=${adjustments.highlights} shadows=${adjustments.shadows} " +
                             "engineDefaultEv=${colorEngine.defaultExposureCompensationEv} " +
                             "engineMeteringEv=${colorEngine.meteringCompensationEv} " +
                             "engineCompensationDomain=${colorEngine.exposureCompensationDomain}"
-                    )
-                    onRawAutoAdjustments?.invoke(adjustments)
-                }
+                )
+                onRawAutoAdjustments?.invoke(adjustments)
             }
             PLog.d(
                 TAG,

@@ -28,6 +28,11 @@ class GlesRawStacker(
 ) {
     private data class TextureLevel(val texture: Int, val width: Int, val height: Int)
 
+    data class HdrInputFrame(
+        val image: SafeImage,
+        val exposureProduct: Double,
+    )
+
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
@@ -65,6 +70,7 @@ class GlesRawStacker(
 
     private var refRaw = 0
     private var curRaw = 0
+    private var hdrShortRaw = 0
     private var refProxy = 0
     private var curProxy = 0
     private var flowTexture = 0
@@ -164,6 +170,134 @@ class GlesRawStacker(
         }
     }
 
+    fun processHdr(shortFrame: HdrInputFrame, normalFrames: List<HdrInputFrame>): RawStackResult? {
+        val allImages = buildList {
+            add(shortFrame.image)
+            normalFrames.forEach { add(it.image) }
+        }
+        if (normalFrames.isEmpty() || width <= 0 || height <= 0) {
+            allImages.forEach { it.close() }
+            return null
+        }
+        if (allImages.any { it.width != width || it.height != height }) {
+            PLog.w(TAG, "GLES RAW HDR stack got mixed frame sizes")
+            allImages.forEach { it.close() }
+            return null
+        }
+        if (allImages.any { it.format != ImageFormat.RAW_SENSOR }) {
+            PLog.w(TAG, "GLES RAW HDR stack only supports RAW_SENSOR input")
+            allImages.forEach { it.close() }
+            return null
+        }
+
+        val outputByteCount = width.toLong() * height.toLong() * 2L
+        var outputBuffer: ByteBuffer? = null
+        var returned = false
+        val startTime = System.currentTimeMillis()
+        val originalThreadPriority = GlesGpuScheduler.lowerCurrentThreadPriority(TAG)
+        return try {
+            outputBuffer = LargeDirectBuffer.allocate(outputByteCount, "GLES RAW HDR fused Bayer")
+                ?.order(ByteOrder.nativeOrder()) ?: return null
+
+            initEgl()
+            ensureGles31()
+            initPrograms()
+            initResources()
+            applyRawRenderState()
+
+            val shortExposureProduct = validExposureProduct(shortFrame.exposureProduct)
+            val referenceExposureProduct = validExposureProduct(normalFrames.first().exposureProduct)
+            val referenceOutputScale = hdrExposureScale(shortExposureProduct, referenceExposureProduct)
+            val alignmentScales = normalFrames.map {
+                hdrExposureScale(referenceExposureProduct, validExposureProduct(it.exposureProduct))
+            }
+            val outputScales = normalFrames.map {
+                hdrExposureScale(shortExposureProduct, validExposureProduct(it.exposureProduct))
+            }
+            PLog.d(
+                TAG,
+                "GLES RAW HDR stack short+normal frames=${1 + normalFrames.size} size=${width}x$height " +
+                    "plane=${planeWidth}x$planeHeight grid=${gridWidth}x$gridHeight " +
+                    "shortExposure=$shortExposureProduct referenceExposure=$referenceExposureProduct " +
+                    "referenceOutputScale=$referenceOutputScale " +
+                    "normalAlignScales=${alignmentScales.joinToString()} " +
+                    "normalOutputScales=${outputScales.joinToString()}"
+            )
+
+            shortFrame.image.use {
+                uploadRawTexture(it, hdrShortRaw, "short highlight recovery")
+            }
+            normalFrames.first().image.use {
+                uploadRawTexture(it, refRaw, "normal reference")
+            }
+            buildProxy(refRaw, refProxy, "normal reference", exposureScale = 1.0f)
+            val refPyramid = createPyramid(refProxy)
+            val curPyramid = createPyramid(curProxy)
+            buildPyramid(refPyramid)
+            computeStructureTensor()
+            clearAccumulator()
+            accumulateFrame(
+                rawTexture = refRaw,
+                isReference = true,
+                exposureScale = referenceOutputScale,
+                hdrMode = true,
+            )
+            GlesGpuScheduler.yieldToUiRenderer()
+
+            normalFrames.drop(1).forEachIndexed { index, frame ->
+                val frameIndex = index + 1
+                val alignmentScale = alignmentScales[frameIndex]
+                val outputScale = outputScales[frameIndex]
+                frame.image.use {
+                    uploadRawTexture(it, curRaw, "normal frame $frameIndex")
+                }
+                buildProxy(curRaw, curProxy, "normal frame $frameIndex", exposureScale = alignmentScale)
+                buildPyramid(curPyramid)
+                alignCurrentToReference(refPyramid, curPyramid)
+                refineFlow()
+                smoothFlow()
+                computeRobustness()
+                computeTileMask()
+                accumulateFrame(
+                    rawTexture = curRaw,
+                    isReference = false,
+                    exposureScale = outputScale,
+                    hdrMode = true,
+                )
+                GlesGpuScheduler.yieldToUiRenderer()
+            }
+
+            normalizeOutput(
+                hdrMode = true,
+                referenceExposureScale = referenceOutputScale,
+                shortExposureScale = 1.0f,
+            )
+            GlesGpuScheduler.yieldToUiRenderer()
+            readOutput(outputBuffer)
+            outputBuffer.rewind()
+            returned = true
+            PLog.i(TAG, "GLES RAW HDR stacking completed in ${System.currentTimeMillis() - startTime}ms")
+            RawStackResult(
+                fusedBayerBuffer = outputBuffer,
+                width = width,
+                height = height,
+                isNormalizedSensorData = true,
+                blackLevel = normalizedBlackLevel.copyOf(),
+                fusedBayerUsesNativeAllocator = true,
+            )
+        } catch (e: Exception) {
+            PLog.e(TAG, "GLES RAW HDR stacking failed", e)
+            null
+        } finally {
+            allImages.forEach { it.close() }
+            release()
+            GlesGpuScheduler.restoreCurrentThreadPriority(originalThreadPriority, TAG)
+            if (!returned) {
+                LargeDirectBuffer.free(outputBuffer)
+            }
+        }
+    }
+
     private fun initEgl() {
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) {
@@ -241,6 +375,7 @@ class GlesRawStacker(
 
         refRaw = createTexture2D(width, height, GLES30.GL_R16UI, GLES30.GL_NEAREST)
         curRaw = createTexture2D(width, height, GLES30.GL_R16UI, GLES30.GL_NEAREST)
+        hdrShortRaw = createTexture2D(width, height, GLES30.GL_R16UI, GLES30.GL_NEAREST)
         refProxy = createTexture2D(planeWidth, planeHeight, GLES30.GL_RGBA16F, GLES30.GL_LINEAR)
         curProxy = createTexture2D(planeWidth, planeHeight, GLES30.GL_RGBA16F, GLES30.GL_LINEAR)
         flowTexture = createTexture2D(gridWidth, gridHeight, GLES30.GL_RGBA16F, GLES30.GL_LINEAR)
@@ -302,12 +437,28 @@ class GlesRawStacker(
         checkGlError("uploadRawTexture $label")
     }
 
-    private fun buildProxy(rawTexture: Int, proxyTexture: Int, label: String) {
+    private fun validExposureProduct(exposureProduct: Double): Double {
+        return exposureProduct.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+    }
+
+    private fun hdrExposureScale(referenceExposureProduct: Double, frameExposureProduct: Double): Float {
+        return (referenceExposureProduct / frameExposureProduct)
+            .toFloat()
+            .coerceIn(0.0001f, 64.0f)
+    }
+
+    private fun buildProxy(
+        rawTexture: Int,
+        proxyTexture: Int,
+        label: String,
+        exposureScale: Float = 1.0f,
+    ) {
         GLES31.glUseProgram(proxyProgram)
         bindTexture(proxyProgram, "uRaw", 0, rawTexture)
         bindImage(1, proxyTexture, GLES31.GL_WRITE_ONLY, GLES30.GL_RGBA16F)
         setCommonUniforms(proxyProgram)
         GLES31.glUniform2i(GLES31.glGetUniformLocation(proxyProgram, "uProxySize"), planeWidth, planeHeight)
+        GLES31.glUniform1f(GLES31.glGetUniformLocation(proxyProgram, "uExposureScale"), exposureScale)
         GLES31.glDispatchCompute(groupCount(planeWidth), groupCount(planeHeight), 1)
         GLES31.glMemoryBarrier(GLES31.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT or GLES31.GL_TEXTURE_FETCH_BARRIER_BIT)
         checkGlError("buildProxy $label")
@@ -455,7 +606,12 @@ class GlesRawStacker(
         currentAccumulatorTexture = accumulatorTexture
     }
 
-    private fun accumulateFrame(rawTexture: Int, isReference: Boolean) {
+    private fun accumulateFrame(
+        rawTexture: Int,
+        isReference: Boolean,
+        exposureScale: Float = 1.0f,
+        hdrMode: Boolean = false,
+    ) {
         val outputAccumulator = if (currentAccumulatorTexture == accumulatorTexture) {
             accumulatorScratchTexture
         } else {
@@ -476,6 +632,8 @@ class GlesRawStacker(
         GLES31.glUniform2i(GLES31.glGetUniformLocation(accumulateProgram, "uGridSize"), gridWidth, gridHeight)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(accumulateProgram, "uTileSize"), FLOW_GRID_SPACING)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(accumulateProgram, "uIsReference"), if (isReference) 1 else 0)
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(accumulateProgram, "uHdrMode"), if (hdrMode) 1 else 0)
+        GLES31.glUniform1f(GLES31.glGetUniformLocation(accumulateProgram, "uExposureScale"), exposureScale)
         GLES31.glUniform1f(
             GLES31.glGetUniformLocation(accumulateProgram, "uFrameWeight"),
             if (isReference) 1.0f else NON_REFERENCE_FRAME_WEIGHT,
@@ -486,15 +644,26 @@ class GlesRawStacker(
         currentAccumulatorTexture = outputAccumulator
     }
 
-    private fun normalizeOutput() {
+    private fun normalizeOutput(
+        hdrMode: Boolean = false,
+        referenceExposureScale: Float = 1.0f,
+        shortExposureScale: Float = 1.0f,
+    ) {
         bindFramebufferOutput(outputTexture, "normalizeOutput")
         GLES30.glViewport(0, 0, width, height)
         GLES30.glUseProgram(normalizeProgram)
         bindTexture(normalizeProgram, "uAccumulator", 0, currentAccumulatorTexture)
         bindTexture(normalizeProgram, "uReferenceRaw", 1, refRaw)
-        bindTexture(normalizeProgram, "uLensShadingMap", 2, lensShadingTexture)
+        bindTexture(normalizeProgram, "uShortRaw", 2, hdrShortRaw)
+        bindTexture(normalizeProgram, "uLensShadingMap", 3, lensShadingTexture)
         setCommonUniforms(normalizeProgram)
         GLES31.glUniform2i(GLES31.glGetUniformLocation(normalizeProgram, "uImageSize"), width, height)
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(normalizeProgram, "uHdrMode"), if (hdrMode) 1 else 0)
+        GLES31.glUniform1f(
+            GLES31.glGetUniformLocation(normalizeProgram, "uReferenceExposureScale"),
+            referenceExposureScale,
+        )
+        GLES31.glUniform1f(GLES31.glGetUniformLocation(normalizeProgram, "uShortExposureScale"), shortExposureScale)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         finishFramebufferPass("normalizeOutput")
     }
@@ -841,6 +1010,7 @@ class GlesRawStacker(
             uniform int uCfaPattern;
             uniform float uBlackLevel[4];
             uniform float uWhiteLevel;
+            uniform float uExposureScale;
 
             float rawNormAt(ivec2 p) {
                 p = clamp(p, ivec2(0), uProxySize * 2 - ivec2(1));
@@ -864,19 +1034,34 @@ class GlesRawStacker(
                 return 0.5 * (g1 + g2);
             }
 
+            float tileMaxRaw(ivec2 planeCoord) {
+                ivec2 s = clamp(planeCoord * 2, ivec2(0), uProxySize * 2 - ivec2(2));
+                float m = 0.0;
+                for (int y = 0; y <= 1; ++y) {
+                    for (int x = 0; x <= 1; ++x) {
+                        m = max(m, rawNormAt(s + ivec2(x, y)));
+                    }
+                }
+                return m;
+            }
+
             void main() {
                 ivec2 p = ivec2(gl_GlobalInvocationID.xy);
                 if (p.x >= uProxySize.x || p.y >= uProxySize.y) return;
-                float center = greenBlock(p);
+                float centerRaw = greenBlock(p);
+                float center = clamp(centerRaw * uExposureScale, 0.0, 1.0);
                 float sum = 0.0;
                 for (int y = -1; y <= 1; ++y) {
                     for (int x = -1; x <= 1; ++x) {
                         ivec2 q = clamp(p + ivec2(x, y), ivec2(0), uProxySize - ivec2(1));
-                        sum += greenBlock(q);
+                        sum += clamp(greenBlock(q) * uExposureScale, 0.0, 1.0);
                     }
                 }
                 float mean = sum / 9.0;
-                imageStore(uProxy, p, vec4(clamp(center + 0.35 * (center - mean), 0.0, 1.0), 0.0, 0.0, 1.0));
+                float shadowValid = smoothstep(0.004, 0.035, centerRaw);
+                float clipValid = 1.0 - smoothstep(0.90, 0.995, tileMaxRaw(p));
+                float validity = clamp(shadowValid * clipValid, 0.0, 1.0);
+                imageStore(uProxy, p, vec4(clamp(center + 0.35 * (center - mean), 0.0, 1.0), validity, 0.0, 1.0));
             }
         """.trimIndent()
 
@@ -890,14 +1075,14 @@ class GlesRawStacker(
             void main() {
                 ivec2 p = ivec2(gl_FragCoord.xy);
                 ivec2 src = p * 2;
-                float sum = 0.0;
+                vec2 sum = vec2(0.0);
                 for (int y = 0; y < 2; ++y) {
                     for (int x = 0; x < 2; ++x) {
                         ivec2 q = clamp(src + ivec2(x, y), ivec2(0), uInputSize - ivec2(1));
-                        sum += texelFetch(uInput, q, 0).r;
+                        sum += texelFetch(uInput, q, 0).rg;
                     }
                 }
-                fragColor = vec4(sum * 0.25, 0.0, 0.0, 1.0);
+                fragColor = vec4(sum * 0.25, 0.0, 1.0);
             }
         """.trimIndent()
 
@@ -915,9 +1100,9 @@ class GlesRawStacker(
             uniform int uSampleStep;
             out vec4 fragColor;
 
-            float readTex(sampler2D tex, ivec2 p) {
+            vec2 readProxy(sampler2D tex, ivec2 p) {
                 p = clamp(p, ivec2(0), uLevelSize - ivec2(1));
-                return texelFetch(tex, p, 0).r;
+                return texelFetch(tex, p, 0).rg;
             }
 
             void main() {
@@ -933,16 +1118,22 @@ class GlesRawStacker(
                     for (int dx = -uSearchRadius; dx <= uSearchRadius; ++dx) {
                         float sad = 0.0;
                         float count = 0.0;
+                        float sampleCount = 0.0;
                         for (int sy = 1; sy < levelTile - 1; sy += uSampleStep) {
                             for (int sx = 1; sx < levelTile - 1; sx += uSampleStep) {
                                 ivec2 rp = levelStart + ivec2(sx, sy);
-                                float rv = readTex(uReference, rp);
-                                float cv = readTex(uCurrent, rp + ivec2(dx, dy));
-                                sad += abs(rv - cv);
-                                count += 1.0;
+                                vec2 rv = readProxy(uReference, rp);
+                                vec2 cv = readProxy(uCurrent, rp + ivec2(dx, dy));
+                                float w = min(rv.g, cv.g);
+                                sad += abs(rv.r - cv.r) * w;
+                                count += w;
+                                sampleCount += 1.0;
                             }
                         }
-                        sad = sad / max(count, 1.0) + 0.0006 * float(dx * dx + dy * dy);
+                        float coverage = count / max(sampleCount, 1.0);
+                        sad = sad / max(count, 1e-4) +
+                            0.08 * (1.0 - clamp(coverage, 0.0, 1.0)) +
+                            0.0006 * float(dx * dx + dy * dy);
                         if (sad < bestSad) {
                             bestSad = sad;
                             bestShift = ivec2(dx, dy);
@@ -1339,6 +1530,8 @@ class GlesRawStacker(
             uniform float uNoiseAlpha;
             uniform float uNoiseBeta;
             uniform float uFrameWeight;
+            uniform int uHdrMode;
+            uniform float uExposureScale;
 
             vec2 flowAt(vec2 planePos) {
                 vec2 grid = planePos / float(uTileSize);
@@ -1371,6 +1564,25 @@ class GlesRawStacker(
                 float raw = float(texelFetch(uInputRaw, samplePos, 0).r);
                 float range = max(uWhiteLevel - uBlackLevel[bayerIndex], 1.0);
                 return clamp(max(raw - uBlackLevel[bayerIndex], 0.0) * lscGain(bayerIndex, samplePos) / range, 0.0, 1.0);
+            }
+
+            float rawSensorNormAt(ivec2 samplePos) {
+                samplePos = clamp(samplePos, ivec2(0), uImageSize - ivec2(1));
+                int bayerIndex = bayerIndexAt(uCfaPattern, samplePos);
+                float raw = float(texelFetch(uInputRaw, samplePos, 0).r);
+                float range = max(uWhiteLevel - uBlackLevel[bayerIndex], 1.0);
+                return clamp(max(raw - uBlackLevel[bayerIndex], 0.0) / range, 0.0, 1.0);
+            }
+
+            float tileSensorMax(ivec2 samplePos) {
+                ivec2 base = samplePos - ivec2(samplePos.x & 1, samplePos.y & 1);
+                float m = 0.0;
+                for (int y = 0; y <= 1; ++y) {
+                    for (int x = 0; x <= 1; ++x) {
+                        m = max(m, rawSensorNormAt(base + ivec2(x, y)));
+                    }
+                }
+                return m;
             }
 
             float fetchSameColor(ivec2 lattice, ivec2 offset, int bayerIndex) {
@@ -1430,8 +1642,12 @@ class GlesRawStacker(
                 float value = 0.0;
                 float robust = 1.0;
                 float local = 1.0;
+                float clipAlpha = 0.0;
                 if (uIsReference != 0) {
                     value = rawNormAt(p, bayerIndex);
+                    if (uHdrMode != 0) {
+                        clipAlpha = smoothstep(0.90, 0.985, tileSensorMax(p));
+                    }
                 } else {
                     vec2 flow = flowAt(planePos);
                     vec2 sourcePlane = planePos + flow;
@@ -1461,22 +1677,39 @@ class GlesRawStacker(
                         }
                     }
                     value = sumValue / max(sumWeight, 1e-5);
+                    ivec2 sourceSample = offset + ivec2(round(sourcePlane)) * 2;
+                    clipAlpha = uHdrMode != 0 ? smoothstep(0.90, 0.985, tileSensorMax(sourceSample)) : 0.0;
                     float highlightSuppression = 1.0 - 0.62 * smoothstep(0.78, 0.98, value);
+                    if (uHdrMode != 0) {
+                        highlightSuppression *= 1.0 - clipAlpha;
+                    }
                     robust = base * highlightSuppression;
                 }
 
-                float variance = max(uNoiseAlpha * value + uNoiseBeta, 1e-10);
-                float wiener = (value * value) / (value * value + variance + 1e-6);
-                float weight = sensorPrecisionWeight(value) * (0.25 + wiener);
+                float sourceValue = value;
+                float outputValue = uHdrMode != 0 ? clamp(sourceValue * uExposureScale, 0.0, 1.0) : sourceValue;
+                float variance = max(uNoiseAlpha * sourceValue + uNoiseBeta, 1e-10);
+                float outputVariance = uHdrMode != 0 ? variance * uExposureScale * uExposureScale : variance;
+                float wiener = (outputValue * outputValue) / (outputValue * outputValue + outputVariance + 1e-6);
+                float weight = sensorPrecisionWeight(sourceValue) * (0.25 + wiener);
                 if (uIsReference == 0) {
                     weight *= uFrameWeight * robust;
                 }
-                if (weight <= 0.0) {
+                if (uHdrMode != 0) {
+                    weight *= 1.0 - 0.90 * clipAlpha;
+                }
+                if (weight <= 0.0 && (uHdrMode == 0 || clipAlpha <= 0.0)) {
                     imageStore(uAccumulatorOutput, p, prev);
                     return;
                 }
 
-                vec4 next = prev + vec4(value * weight, weight, value * value * weight, weight * clamp(robust, 0.0, 1.0));
+                float clipMass = uHdrMode != 0 ? sensorPrecisionWeight(sourceValue) * uFrameWeight * clipAlpha : weight * clamp(robust, 0.0, 1.0);
+                vec4 next = prev + vec4(
+                    outputValue * weight,
+                    weight,
+                    outputValue * outputValue * weight,
+                    clipMass
+                );
                 imageStore(uAccumulatorOutput, p, next);
             }
         """.trimIndent()
@@ -1488,6 +1721,7 @@ class GlesRawStacker(
             out vec4 fragColor;
             uniform sampler2D uAccumulator;
             uniform highp usampler2D uReferenceRaw;
+            uniform highp usampler2D uShortRaw;
             uniform sampler2D uLensShadingMap;
             uniform ivec2 uImageSize;
             uniform int uCfaPattern;
@@ -1495,6 +1729,9 @@ class GlesRawStacker(
             uniform float uWhiteLevel;
             uniform float uNoiseAlpha;
             uniform float uNoiseBeta;
+            uniform int uHdrMode;
+            uniform float uReferenceExposureScale;
+            uniform float uShortExposureScale;
 
             float lscGain(int bayerIndex, ivec2 samplePos) {
                 vec2 uv = (vec2(samplePos) + vec2(0.5)) / vec2(uImageSize);
@@ -1512,6 +1749,18 @@ class GlesRawStacker(
                 return clamp(max(raw - uBlackLevel[bayerIndex], 0.0) * lscGain(bayerIndex, p) / range, 0.0, 1.0);
             }
 
+            float referenceOutputNorm(ivec2 p, int bayerIndex) {
+                return clamp(referenceNorm(p, bayerIndex) * uReferenceExposureScale, 0.0, 1.0);
+            }
+
+            float shortRecoveryNorm(ivec2 p, int bayerIndex) {
+                p = clamp(p, ivec2(0), uImageSize - ivec2(1));
+                float raw = float(texelFetch(uShortRaw, p, 0).r);
+                float range = max(uWhiteLevel - uBlackLevel[bayerIndex], 1.0);
+                float norm = clamp(max(raw - uBlackLevel[bayerIndex], 0.0) * lscGain(bayerIndex, p) / range, 0.0, 1.0);
+                return clamp(norm * uShortExposureScale, 0.0, 1.0);
+            }
+
             vec4 readAccum(ivec2 p) {
                 p = clamp(p, ivec2(0), uImageSize - ivec2(1));
                 return texelFetch(uAccumulator, p, 0);
@@ -1520,7 +1769,7 @@ class GlesRawStacker(
             float meanAt(ivec2 p) {
                 int b = bayerIndexAt(uCfaPattern, p);
                 vec4 a = readAccum(p);
-                if (a.g <= 1e-5) return referenceNorm(p, b);
+                if (a.g <= (uHdrMode != 0 ? 0.02 : 1e-5)) return referenceOutputNorm(p, b);
                 return clamp(a.r / max(a.g, 1e-5), 0.0, 1.0);
             }
 
@@ -1535,7 +1784,16 @@ class GlesRawStacker(
                 ivec2 p = ivec2(gl_FragCoord.xy);
                 int bayerIndex = bayerIndexAt(uCfaPattern, p);
                 vec4 a = readAccum(p);
-                float fused = a.g > 1e-5 ? clamp(a.r / max(a.g, 1e-5), 0.0, 1.0) : referenceNorm(p, bayerIndex);
+                float reference = referenceOutputNorm(p, bayerIndex);
+                float fused = a.g > 1e-5 ? clamp(a.r / max(a.g, 1e-5), 0.0, 1.0) : reference;
+                float recoveryMix = 0.0;
+                if (uHdrMode != 0) {
+                    float normalConfidence = smoothstep(0.04, 0.35, a.g);
+                    float clipRatio = a.a / max(a.a + a.g, 1e-5);
+                    recoveryMix = smoothstep(0.35, 0.82, clipRatio);
+                    fused = mix(reference, fused, normalConfidence);
+                    fused = mix(fused, shortRecoveryNorm(p, bayerIndex), recoveryMix);
+                }
 
                 float mean = 0.0;
                 float mean2 = 0.0;
@@ -1543,11 +1801,12 @@ class GlesRawStacker(
                 for (int y = -2; y <= 2; ++y) {
                     for (int x = -2; x <= 2; ++x) {
                         ivec2 q = p + ivec2(x * 2, y * 2);
-                        if (q.x < 0 || q.y < 0 || q.x >= uImageSize.x || q.y >= uImageSize.y) continue;
-                        float v = meanAt(q);
-                        mean += v;
-                        mean2 += v * v;
-                        count += 1.0;
+                        if (q.x >= 0 && q.y >= 0 && q.x < uImageSize.x && q.y < uImageSize.y) {
+                            float v = meanAt(q);
+                            mean += v;
+                            mean2 += v * v;
+                            count += 1.0;
+                        }
                     }
                 }
                 mean /= max(count, 1.0);
@@ -1556,7 +1815,11 @@ class GlesRawStacker(
                 float noise = max(uNoiseAlpha * fused + uNoiseBeta, uNoiseBeta) / max(a.g, 1.0);
                 float wienerGain = max(variance - noise, 0.0) / max(variance, 1e-6);
                 float detailDeviation = abs(fused - mean);
-                fused = mix(fused, mean + wienerGain * (fused - mean), finalSmoothAmount(variance, noise, detailDeviation));
+                float smoothAmount = finalSmoothAmount(variance, noise, detailDeviation);
+                if (uHdrMode != 0) {
+                    smoothAmount *= 1.0 - 0.65 * recoveryMix;
+                }
+                fused = mix(fused, mean + wienerGain * (fused - mean), smoothAmount);
                 fused = clamp(fused, 0.0, 1.0);
 
                 uint raw = uint(floor(fused * 65535.0 + 0.5));

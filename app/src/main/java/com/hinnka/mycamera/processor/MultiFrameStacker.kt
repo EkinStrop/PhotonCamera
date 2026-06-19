@@ -19,6 +19,11 @@ data class RawStackResult(
     val fusedBayerUsesNativeAllocator: Boolean = false,
 )
 
+data class RawHdrStackFrame(
+    val image: SafeImage,
+    val exposureProduct: Double,
+)
+
 /**
  * Multi-Frame Stacker
  * 
@@ -239,6 +244,50 @@ object MultiFrameStacker {
                 LargeDirectBuffer.free(cpuFusedBayerBuffer)
             }
         }
+    }
+
+    @Synchronized
+    fun processHdrBurstRaw(
+        shortFrame: RawHdrStackFrame,
+        normalFrames: List<RawHdrStackFrame>,
+        cfaPattern: Int,
+        useGpuAcceleration: Boolean = true,
+        masterBlackLevel: FloatArray = floatArrayOf(0f, 0f, 0f, 0f),
+        whiteLevel: Int = 1023,
+        noiseModel: FloatArray = floatArrayOf(0f, 0f),
+        lensShading: FloatArray? = null,
+        lensShadingWidth: Int = 0,
+        lensShadingHeight: Int = 0,
+    ): RawStackResult? {
+        if (normalFrames.isEmpty()) {
+            shortFrame.image.close()
+            return null
+        }
+        val width = shortFrame.image.width
+        val height = shortFrame.image.height
+        PLog.d(
+            TAG,
+            "Starting RAW HDR stacking for short+${normalFrames.size} normal frames. " +
+                "Pattern=$cfaPattern GPU=$useGpuAcceleration BL=${masterBlackLevel.joinToString()} WL=$whiteLevel"
+        )
+        if (!useGpuAcceleration) {
+            PLog.w(TAG, "RAW HDR denoise stack requires GLES; GPU acceleration setting is ignored")
+        }
+        PLog.i(TAG, "Using GLES RAW HDR stacker")
+        return GlesRawStacker(
+            width = width,
+            height = height,
+            cfaPattern = cfaPattern,
+            blackLevel = masterBlackLevel,
+            whiteLevel = whiteLevel,
+            noiseModel = noiseModel,
+            lensShading = lensShading,
+            lensShadingWidth = lensShadingWidth,
+            lensShadingHeight = lensShadingHeight,
+        ).processHdr(
+            shortFrame = GlesRawStacker.HdrInputFrame(shortFrame.image, shortFrame.exposureProduct),
+            normalFrames = normalFrames.map { GlesRawStacker.HdrInputFrame(it.image, it.exposureProduct) },
+        )
     }
 
     private fun allocateFusedBayerBuffer(byteCount: Long, label: String): ByteBuffer? {

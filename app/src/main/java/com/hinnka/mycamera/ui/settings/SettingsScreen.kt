@@ -1601,7 +1601,12 @@ fun SettingsScreen(
                                 ).show()
                             }
                         },
-                        onRawExposureCompensationChange = { rawExposureCompensationUi = it },
+                        onRawExposureCompensationChange = {
+                            rawExposureCompensationUi = it
+                            if (it != 0f && rawAutoExposure) {
+                                viewModel.setRawAutoExposure(false)
+                            }
+                        },
                         onRawAutoExposureChange = {
                             if (it) {
                                 rawExposureCompensationUi = 0f
@@ -1613,8 +1618,18 @@ fun SettingsScreen(
                             }
                             viewModel.setRawAutoExposure(it)
                         },
-                        onRawHighlightsAdjustmentChange = { rawHighlightsAdjustmentUi = it },
-                        onRawShadowsAdjustmentChange = { rawShadowsAdjustmentUi = it },
+                        onRawHighlightsAdjustmentChange = {
+                            rawHighlightsAdjustmentUi = it
+                            if (it != 0f && rawAutoExposure) {
+                                viewModel.setRawAutoExposure(false)
+                            }
+                        },
+                        onRawShadowsAdjustmentChange = {
+                            rawShadowsAdjustmentUi = it
+                            if (it != 0f && rawAutoExposure) {
+                                viewModel.setRawAutoExposure(false)
+                            }
+                        },
                         onRawBlackPointCorrectionChange = { rawBlackPointCorrectionUi = it },
                         onRawWhitePointCorrectionChange = { rawWhitePointCorrectionUi = it },
                         onRawColorEngineChange = { viewModel.setRawColorEngine(it) },

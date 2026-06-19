@@ -2033,21 +2033,35 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun saveRawExposureCompensationValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawExposureCompensation.value = value
+        if (value != 0f) {
+            editRawAutoExposure.value = false
+        }
         persistRawEditMetadata(mediaData, onComplete)
     }
 
     fun saveRawAutoExposureValue(mediaData: MediaData, enabled: Boolean, onComplete: ((Boolean) -> Unit)? = null) {
         editRawAutoExposure.value = enabled
+        if (enabled) {
+            editRawExposureCompensation.value = 0f
+            editRawHighlightsAdjustment.value = 0f
+            editRawShadowsAdjustment.value = 0f
+        }
         persistRawEditMetadata(mediaData, onComplete)
     }
 
     fun saveRawHighlightsAdjustmentValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawHighlightsAdjustment.value = value
+        if (value != 0f) {
+            editRawAutoExposure.value = false
+        }
         persistRawEditMetadata(mediaData, onComplete)
     }
 
     fun saveRawShadowsAdjustmentValue(mediaData: MediaData, value: Float, onComplete: ((Boolean) -> Unit)? = null) {
         editRawShadowsAdjustment.value = value
+        if (value != 0f) {
+            editRawAutoExposure.value = false
+        }
         persistRawEditMetadata(mediaData, onComplete)
     }
 

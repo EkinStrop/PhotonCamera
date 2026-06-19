@@ -56,13 +56,11 @@ object MeteringSystem {
     data class ShadowsHighlightsParams(
         val highlights: Float,
         val shadows: Float,
-        val curveWhitePoint: Float,
     ) {
         companion object {
             val NEUTRAL = ShadowsHighlightsParams(
                 highlights = 0f,
                 shadows = 0f,
-                curveWhitePoint = RAW_CURVE_NEUTRAL_WHITE_POINT,
             )
         }
     }
