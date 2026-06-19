@@ -61,21 +61,16 @@ class LutImageProcessor {
     private var indexBuffer: ShortBuffer? = null
 
     private var bitmapDenoisePreconditionProgram = 0
-    private var bitmapDenoiseDecomposeProgram = 0
-    private var bitmapDenoiseSynthesizeProgram = 0
-    private var bitmapDenoiseReduceFirstProgram = 0
-    private var bitmapDenoiseReduceSecondProgram = 0
-    private var bitmapDenoiseBacktransformProgram = 0
+    private var bitmapDenoiseNlmInitProgram = 0
+    private var bitmapDenoiseNlmFusedAccuProgram = 0
+    private var bitmapDenoiseNlmFinishProgram = 0
     private var bitmapDenoisePassthroughProgram = 0
     private var bitmapChromaDenoiseProgram = 0
 
     private val bitmapDenoiseTexId = IntArray(2)
     private val bitmapDenoiseFboId = IntArray(2)
-    private val bitmapDenoiseDetailTexIds = IntArray(DenoiseProfileShaders.BANDS)
-    private var bitmapDenoiseReduceMBufferId = 0
-    private var bitmapDenoiseReduceRBufferId = 0
-    private var bitmapDenoiseReduceBufSize = 0
-    private var bitmapDenoiseReduceSize = 0
+    private var bitmapDenoiseNlmU2BufferId = 0
+    private var bitmapDenoiseNlmBufferPixels = 0
     private var bitmapDenoiseWidth = 0
     private var bitmapDenoiseHeight = 0
 
@@ -1089,20 +1084,18 @@ class LutImageProcessor {
     }
 
     private fun initBitmapDenoiseProfilePrograms() {
-        bitmapDenoisePreconditionProgram = compileComputeProgram(DenoiseProfileShaders.PRECONDITION_Y0U0V0, "BitmapDenoise_Precondition")
-        bitmapDenoiseDecomposeProgram = compileComputeProgram(DenoiseProfileShaders.DECOMPOSE, "BitmapDenoise_Decompose")
-        bitmapDenoiseSynthesizeProgram = compileComputeProgram(DenoiseProfileShaders.SYNTHESIZE, "BitmapDenoise_Synthesize")
-        bitmapDenoiseReduceFirstProgram = compileComputeProgram(DenoiseProfileShaders.REDUCE_FIRST, "BitmapDenoise_ReduceFirst")
-        bitmapDenoiseReduceSecondProgram = compileComputeProgram(DenoiseProfileShaders.REDUCE_SECOND, "BitmapDenoise_ReduceSecond")
-        bitmapDenoiseBacktransformProgram = compileComputeProgram(DenoiseProfileShaders.BACKTRANSFORM_Y0U0V0, "BitmapDenoise_Backtransform")
+        bitmapDenoisePreconditionProgram = compileComputeProgram(DenoiseProfileShaders.PRECONDITION_V2, "BitmapDenoise_PreconditionV2")
+        bitmapDenoiseNlmInitProgram = compileComputeProgram(DenoiseProfileShaders.INIT, "BitmapDenoise_NLM_Init")
+        bitmapDenoiseNlmFusedAccuProgram = compileComputeProgram(DenoiseProfileShaders.FUSED_ACCU, "BitmapDenoise_NLM_FusedAccu")
+        bitmapDenoiseNlmFinishProgram = compileComputeProgram(DenoiseProfileShaders.FINISH_V2, "BitmapDenoise_NLM_FinishV2")
         bitmapDenoisePassthroughProgram = createFragmentProgram(IMAGE_VERTEX_SHADER, TEXTURE_PASSTHROUGH_SHADER, "BitmapDenoise_Passthrough")
         bitmapChromaDenoiseProgram = createFragmentProgram(IMAGE_VERTEX_SHADER, ChromaDenoiseShaders.PASS_CHROMA_DENOISE, "BitmapChromaDenoise_BM3DPass0")
         PLog.d(
             TAG,
             "Bitmap denoiseprofile programs initialized: pre=$bitmapDenoisePreconditionProgram " +
-                "decompose=$bitmapDenoiseDecomposeProgram synth=$bitmapDenoiseSynthesizeProgram " +
-                "reduce1=$bitmapDenoiseReduceFirstProgram reduce2=$bitmapDenoiseReduceSecondProgram " +
-                "back=$bitmapDenoiseBacktransformProgram pass=$bitmapDenoisePassthroughProgram " +
+                "init=$bitmapDenoiseNlmInitProgram fusedAccu=$bitmapDenoiseNlmFusedAccuProgram " +
+                "finish=$bitmapDenoiseNlmFinishProgram " +
+                "pass=$bitmapDenoisePassthroughProgram " +
                 "chroma=$bitmapChromaDenoiseProgram"
         )
     }
@@ -1201,32 +1194,8 @@ class LutImageProcessor {
         }
 
         val params = buildBitmapDenoiseParams(width, height, strength, force)
-        dispatchBitmapDenoisePrecondition(sourceTextureId, bitmapDenoiseTexId[0], width, height, params)
-        var buf1 = bitmapDenoiseTexId[0]
-        var buf2 = bitmapDenoiseTexId[1]
-
-        for (scale in 0 until params.maxScale) {
-            dispatchBitmapDenoiseDecompose(buf1, buf2, bitmapDenoiseDetailTexIds[scale], width, height, scale)
-            val tmp = buf2
-            buf2 = buf1
-            buf1 = tmp
-        }
-
-        for (scale in params.maxScale - 1 downTo 0) {
-            val threshold = computeBitmapDenoiseThreshold(bitmapDenoiseDetailTexIds[scale], width, height, scale, params)
-            dispatchBitmapDenoiseSynthesize(buf1, bitmapDenoiseDetailTexIds[scale], buf2, width, height, threshold)
-            val tmp = buf2
-            buf2 = buf1
-            buf1 = tmp
-        }
-
-        val finalInput = if (buf1 == bitmapDenoiseTexId[1]) {
-            renderTexturePassthrough(buf1, bitmapDenoiseFboId[0], width, height)
-            bitmapDenoiseTexId[0]
-        } else {
-            buf1
-        }
-        dispatchBitmapDenoiseBacktransform(finalInput, bitmapDenoiseTexId[1], width, height, params)
+        dispatchBitmapDenoisePreconditionV2(sourceTextureId, bitmapDenoiseTexId[0], width, height, params)
+        dispatchBitmapDenoiseNlm(sourceTextureId, bitmapDenoiseTexId[0], bitmapDenoiseTexId[1], width, height, params)
         checkGlError("renderBitmapDenoiseProfile")
     }
 
@@ -1297,62 +1266,50 @@ class LutImageProcessor {
 
     private data class BitmapDenoiseParams(
         val strength: Float,
-        val maxScale: Int,
         val lumaForce: Float,
         val chromaForce: Float,
+        val patchRadius: Int,
+        val searchRadius: Int,
+        val norm: Float,
+        val centralPixelWeight: Float,
         val p: FloatArray,
         val wb: FloatArray,
         val aa: FloatArray,
         val bb: FloatArray,
-        val toY0U0V0: FloatArray,
-        val toRgb: FloatArray,
         val bias: Float,
         val scale: Float
     )
 
     private fun isBitmapDenoiseProfileReady(): Boolean {
         return bitmapDenoisePreconditionProgram != 0 &&
-            bitmapDenoiseDecomposeProgram != 0 &&
-            bitmapDenoiseSynthesizeProgram != 0 &&
-            bitmapDenoiseReduceFirstProgram != 0 &&
-            bitmapDenoiseReduceSecondProgram != 0 &&
-            bitmapDenoiseBacktransformProgram != 0 &&
+            bitmapDenoiseNlmInitProgram != 0 &&
+            bitmapDenoiseNlmFusedAccuProgram != 0 &&
+            bitmapDenoiseNlmFinishProgram != 0 &&
             bitmapDenoisePassthroughProgram != 0
     }
 
     private fun setupBitmapDenoiseResources(width: Int, height: Int) {
-        for (i in bitmapDenoiseDetailTexIds.indices) {
-            if (bitmapDenoiseDetailTexIds[i] != 0) GLES30.glDeleteTextures(1, intArrayOf(bitmapDenoiseDetailTexIds[i]), 0)
-            val t = IntArray(1)
-            GLES30.glGenTextures(1, t, 0)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t[0])
-            GLES30.glTexStorage2D(GLES30.GL_TEXTURE_2D, 1, GLES30.GL_RGBA16F, width, height)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-            bitmapDenoiseDetailTexIds[i] = t[0]
+        val pixelCount = width * height
+        if (
+            bitmapDenoiseNlmBufferPixels == pixelCount &&
+            bitmapDenoiseNlmU2BufferId != 0
+        ) {
+            return
         }
 
-        val groupsX = roundUp(width, DenoiseProfileShaders.REDUCE_FIRST_LOCAL_X) / DenoiseProfileShaders.REDUCE_FIRST_LOCAL_X
-        val groupsY = roundUp(height, DenoiseProfileShaders.REDUCE_FIRST_LOCAL_Y) / DenoiseProfileShaders.REDUCE_FIRST_LOCAL_Y
-        bitmapDenoiseReduceBufSize = groupsX * groupsY
-        bitmapDenoiseReduceSize = kotlin.math.min(
-            DenoiseProfileShaders.REDUCE_SIZE,
-            roundUp(bitmapDenoiseReduceBufSize, DenoiseProfileShaders.REDUCE_SECOND_LOCAL_X) / DenoiseProfileShaders.REDUCE_SECOND_LOCAL_X
-        ).coerceAtLeast(1)
+        if (bitmapDenoiseNlmU2BufferId != 0) {
+            GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseNlmU2BufferId), 0)
+            bitmapDenoiseNlmU2BufferId = 0
+        }
 
-        if (bitmapDenoiseReduceMBufferId != 0) GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseReduceMBufferId), 0)
-        if (bitmapDenoiseReduceRBufferId != 0) GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseReduceRBufferId), 0)
-        val buffers = IntArray(2)
-        GLES31.glGenBuffers(2, buffers, 0)
-        bitmapDenoiseReduceMBufferId = buffers[0]
-        bitmapDenoiseReduceRBufferId = buffers[1]
-        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, bitmapDenoiseReduceMBufferId)
-        GLES31.glBufferData(GLES31.GL_SHADER_STORAGE_BUFFER, bitmapDenoiseReduceBufSize * 4 * 4, null, GLES31.GL_DYNAMIC_DRAW)
-        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, bitmapDenoiseReduceRBufferId)
-        GLES31.glBufferData(GLES31.GL_SHADER_STORAGE_BUFFER, bitmapDenoiseReduceSize * 4 * 4, null, GLES31.GL_DYNAMIC_READ)
+        val buffers = IntArray(1)
+        GLES31.glGenBuffers(buffers.size, buffers, 0)
+        bitmapDenoiseNlmU2BufferId = buffers[0]
+
+        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, bitmapDenoiseNlmU2BufferId)
+        GLES31.glBufferData(GLES31.GL_SHADER_STORAGE_BUFFER, pixelCount * 4 * 4, null, GLES31.GL_DYNAMIC_DRAW)
         GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, 0)
+        bitmapDenoiseNlmBufferPixels = pixelCount
     }
 
     private fun buildBitmapDenoiseParams(
@@ -1367,130 +1324,99 @@ class LutImageProcessor {
         val shadows = max(0.1f - 0.1f * ln(a), 0.7f).coerceAtMost(1.8f)
         val bias = -max(5f + 0.5f * ln(a), 0.0f)
         val compensateP = 0.05f / 0.05f.pow(shadows)
-        val compensateStrength = 2.5f
         val strength = strengthValue.coerceAtLeast(1e-6f)
-        val wbBase = floatArrayOf(1f, 1f, 1f, 0f)
-        val (toY, toRgbBase) = computeBitmapY0U0V0Matrices(wbBase)
-        val toYScaled = FloatArray(9)
-        val toRgbScaled = FloatArray(9)
-        for (i in 0 until 9) {
-            toYScaled[i] = toY[i] / (strength * compensateStrength * scale)
-            toRgbScaled[i] = toRgbBase[i] * strength * compensateStrength * scale
-        }
+        val patchRadius = DenoiseProfileShaders.PATCH_RADIUS
+        val searchRadius = DenoiseProfileShaders.SEARCH_RADIUS
+        val patchWidth = 2 * patchRadius + 1
+        val norm = 0.045f / (patchWidth * patchWidth).toFloat()
+        val centralPixelWeight = 0.1f * scale
         return BitmapDenoiseParams(
             strength = strength,
-            maxScale = computeBitmapDenoiseMaxScale(width, height),
             lumaForce = force,
             chromaForce = force,
+            patchRadius = patchRadius,
+            searchRadius = searchRadius,
+            norm = norm,
+            centralPixelWeight = centralPixelWeight,
             p = floatArrayOf(shadows, shadows, shadows, 1.0f),
             wb = floatArrayOf(
-                strength * compensateStrength * scale,
-                strength * compensateStrength * scale,
-                strength * compensateStrength * scale,
+                strength * scale,
+                strength * scale,
+                strength * scale,
                 0.0f
             ),
             aa = floatArrayOf(a * compensateP, a * compensateP, a * compensateP, 1.0f),
             bb = floatArrayOf(b, b, b, 1.0f),
-            toY0U0V0 = toYScaled,
-            toRgb = toRgbScaled,
             bias = bias,
             scale = scale
         )
     }
 
-    private fun computeBitmapDenoiseMaxScale(width: Int, height: Int): Int {
-        val maxMaxScale = DenoiseProfileShaders.BANDS
-        val supp0 = kotlin.math.min((2 * (2 shl (maxMaxScale - 1)) + 1).toFloat(), max(width, height).toFloat() * 0.2f)
-        val i0 = ln((supp0 - 1.0f) * 0.5f) / ln(2.0f)
-        var maxScale = 0
-        while (maxScale < maxMaxScale) {
-            val supp = (2 * (2 shl maxScale) + 1).toFloat()
-            val iIn = ln((supp - 1.0f) * 0.5f) / ln(2.0f) - 1.0f
-            if (1.0f - (iIn + 0.5f) / i0 < 0.0f) break
-            maxScale++
-        }
-        return maxScale.coerceIn(1, DenoiseProfileShaders.BANDS)
-    }
-
-    private fun computeBitmapY0U0V0Matrices(wb: FloatArray): Pair<FloatArray, FloatArray> {
-        val toY = floatArrayOf(
-            1f / 3f, 1f / 3f, 1f / 3f,
-            0.5f, 0.0f, -0.5f,
-            0.25f, -0.5f, 0.25f
-        )
-        var sumInvWb = 1.0f / wb[0] + 1.0f / wb[1] + 1.0f / wb[2]
-        sumInvWb *= sqrt(3.0f)
-        toY[0] = sumInvWb / wb[0]
-        toY[1] = sumInvWb / wb[1]
-        toY[2] = sumInvWb / wb[2]
-        val stddevU0 = sqrt(0.25f * wb[0] * wb[0] + 0.25f * wb[2] * wb[2]).coerceAtLeast(1e-6f)
-        val stddevV0 = sqrt(0.0625f * wb[0] * wb[0] + 0.25f * wb[1] * wb[1] + 0.0625f * wb[2] * wb[2]).coerceAtLeast(1e-6f)
-        for (i in 3..5) toY[i] /= stddevU0
-        for (i in 6..8) toY[i] /= stddevV0
-        return toY to (invertBitmapMatrix3x3(toY) ?: floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f))
-    }
-
-    private fun invertBitmapMatrix3x3(m: FloatArray): FloatArray? {
-        val a = m[4] * m[8] - m[5] * m[7]
-        val b = -m[3] * m[8] + m[5] * m[6]
-        val c = m[3] * m[7] - m[4] * m[6]
-        val d = -m[1] * m[8] + m[2] * m[7]
-        val e = m[0] * m[8] - m[2] * m[6]
-        val f = -m[0] * m[7] + m[1] * m[6]
-        val g = m[1] * m[5] - m[2] * m[4]
-        val h = -m[0] * m[5] + m[2] * m[3]
-        val i = m[0] * m[4] - m[1] * m[3]
-        val det = m[0] * a + m[1] * b + m[2] * c
-        if (det == 0f) return null
-        val inv = 1.0f / det
-        return floatArrayOf(inv * a, inv * d, inv * g, inv * b, inv * e, inv * h, inv * c, inv * f, inv * i)
-    }
-
-    private fun matrix3ToGl(m: FloatArray): FloatArray {
-        return floatArrayOf(m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8])
-    }
-
-    private fun dispatchBitmapDenoisePrecondition(input: Int, output: Int, width: Int, height: Int, params: BitmapDenoiseParams) {
+    private fun dispatchBitmapDenoisePreconditionV2(input: Int, output: Int, width: Int, height: Int, params: BitmapDenoiseParams) {
         GLES31.glUseProgram(bitmapDenoisePreconditionProgram)
         bindComputeSampler(bitmapDenoisePreconditionProgram, "uInput", 0, input)
         GLES31.glBindImageTexture(1, output, 0, false, 0, GLES31.GL_WRITE_ONLY, GLES31.GL_RGBA16F)
         setBitmapDenoiseCommonUniforms(bitmapDenoisePreconditionProgram, width, height, params)
-        GLES31.glUniformMatrix3fv(GLES31.glGetUniformLocation(bitmapDenoisePreconditionProgram, "uToY0U0V0"), 1, false, matrix3ToGl(params.toY0U0V0), 0)
-        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise precondition")
+        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise NLM precondition")
     }
 
-    private fun dispatchBitmapDenoiseDecompose(input: Int, coarse: Int, detail: Int, width: Int, height: Int, scale: Int) {
-        GLES31.glUseProgram(bitmapDenoiseDecomposeProgram)
-        bindComputeSampler(bitmapDenoiseDecomposeProgram, "uInput", 0, input)
-        GLES31.glBindImageTexture(1, coarse, 0, false, 0, GLES31.GL_WRITE_ONLY, GLES31.GL_RGBA16F)
-        GLES31.glBindImageTexture(2, detail, 0, false, 0, GLES31.GL_WRITE_ONLY, GLES31.GL_RGBA16F)
-        GLES31.glUniform2i(GLES31.glGetUniformLocation(bitmapDenoiseDecomposeProgram, "uImageSize"), width, height)
-        GLES31.glUniform1i(GLES31.glGetUniformLocation(bitmapDenoiseDecomposeProgram, "uScale"), scale)
-        val varf = sqrt(2.0f + 2.0f * 4.0f * 4.0f + 6.0f * 6.0f) / 16.0f
-        val sigmaBand = varf.pow(scale)
-        GLES31.glUniform1f(GLES31.glGetUniformLocation(bitmapDenoiseDecomposeProgram, "uInvSigma2"), 1.0f / (sigmaBand * sigmaBand))
-        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise decompose $scale")
+    private fun dispatchBitmapDenoiseNlm(
+        originalTextureId: Int,
+        preconditionedTextureId: Int,
+        outputTextureId: Int,
+        width: Int,
+        height: Int,
+        params: BitmapDenoiseParams
+    ) {
+        dispatchBitmapDenoiseNlmInit(width, height)
+
+        for (qy in -params.searchRadius..0) {
+            for (qx in -params.searchRadius..params.searchRadius) {
+                dispatchBitmapDenoiseNlmFusedAccumulate(preconditionedTextureId, width, height, qx, qy, params)
+            }
+        }
+
+        dispatchBitmapDenoiseNlmFinish(originalTextureId, outputTextureId, width, height, params)
     }
 
-    private fun dispatchBitmapDenoiseSynthesize(coarse: Int, detail: Int, output: Int, width: Int, height: Int, threshold: FloatArray) {
-        GLES31.glUseProgram(bitmapDenoiseSynthesizeProgram)
-        bindComputeSampler(bitmapDenoiseSynthesizeProgram, "uCoarse", 0, coarse)
-        bindComputeSampler(bitmapDenoiseSynthesizeProgram, "uDetail", 1, detail)
-        GLES31.glBindImageTexture(2, output, 0, false, 0, GLES31.GL_WRITE_ONLY, GLES31.GL_RGBA16F)
-        GLES31.glUniform2i(GLES31.glGetUniformLocation(bitmapDenoiseSynthesizeProgram, "uImageSize"), width, height)
-        GLES31.glUniform4fv(GLES31.glGetUniformLocation(bitmapDenoiseSynthesizeProgram, "uThreshold"), 1, threshold, 0)
-        GLES31.glUniform4f(GLES31.glGetUniformLocation(bitmapDenoiseSynthesizeProgram, "uBoost"), 1f, 1f, 1f, 1f)
-        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise synthesize")
+    private fun dispatchBitmapDenoiseNlmInit(width: Int, height: Int) {
+        GLES31.glUseProgram(bitmapDenoiseNlmInitProgram)
+        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, bitmapDenoiseNlmU2BufferId)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(bitmapDenoiseNlmInitProgram, "uImageSize"), width, height)
+        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise NLM init")
+        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
     }
 
-    private fun dispatchBitmapDenoiseBacktransform(input: Int, output: Int, width: Int, height: Int, params: BitmapDenoiseParams) {
-        GLES31.glUseProgram(bitmapDenoiseBacktransformProgram)
-        bindComputeSampler(bitmapDenoiseBacktransformProgram, "uInput", 0, input)
+    private fun dispatchBitmapDenoiseNlmFusedAccumulate(
+        input: Int,
+        width: Int,
+        height: Int,
+        qx: Int,
+        qy: Int,
+        params: BitmapDenoiseParams
+    ) {
+        GLES31.glUseProgram(bitmapDenoiseNlmFusedAccuProgram)
+        bindComputeSampler(bitmapDenoiseNlmFusedAccuProgram, "uInput", 0, input)
+        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, bitmapDenoiseNlmU2BufferId)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(bitmapDenoiseNlmFusedAccuProgram, "uImageSize"), width, height)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(bitmapDenoiseNlmFusedAccuProgram, "uQ"), qx, qy)
+        GLES31.glUniform1f(GLES31.glGetUniformLocation(bitmapDenoiseNlmFusedAccuProgram, "uNorm"), params.norm)
+        GLES31.glUniform1f(
+            GLES31.glGetUniformLocation(bitmapDenoiseNlmFusedAccuProgram, "uCentralPixelWeight"),
+            params.centralPixelWeight
+        )
+        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise NLM fused accu q=($qx,$qy)")
+        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
+    }
+
+    private fun dispatchBitmapDenoiseNlmFinish(input: Int, output: Int, width: Int, height: Int, params: BitmapDenoiseParams) {
+        GLES31.glUseProgram(bitmapDenoiseNlmFinishProgram)
+        bindComputeSampler(bitmapDenoiseNlmFinishProgram, "uInput", 0, input)
+        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, bitmapDenoiseNlmU2BufferId)
         GLES31.glBindImageTexture(1, output, 0, false, 0, GLES31.GL_WRITE_ONLY, GLES31.GL_RGBA16F)
-        setBitmapDenoiseCommonUniforms(bitmapDenoiseBacktransformProgram, width, height, params)
-        GLES31.glUniform1f(GLES31.glGetUniformLocation(bitmapDenoiseBacktransformProgram, "uBias"), params.bias - 0.5f * ln(params.scale))
-        GLES31.glUniformMatrix3fv(GLES31.glGetUniformLocation(bitmapDenoiseBacktransformProgram, "uToRgb"), 1, false, matrix3ToGl(params.toRgb), 0)
-        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise backtransform")
+        setBitmapDenoiseCommonUniforms(bitmapDenoiseNlmFinishProgram, width, height, params)
+        GLES31.glUniform1f(GLES31.glGetUniformLocation(bitmapDenoiseNlmFinishProgram, "uBias"), params.bias - 0.5f * ln(params.scale))
+        dispatchBitmapDenoiseImage(width, height, "BitmapDenoise NLM finish")
     }
 
     private fun setBitmapDenoiseCommonUniforms(program: Int, width: Int, height: Int, params: BitmapDenoiseParams) {
@@ -1499,51 +1425,6 @@ class LutImageProcessor {
         GLES31.glUniform4fv(GLES31.glGetUniformLocation(program, "uP"), 1, params.p, 0)
         GLES31.glUniform4fv(GLES31.glGetUniformLocation(program, "uB"), 1, params.bb, 0)
         GLES31.glUniform4fv(GLES31.glGetUniformLocation(program, "uWb"), 1, params.wb, 0)
-    }
-
-    private fun computeBitmapDenoiseThreshold(textureId: Int, width: Int, height: Int, scale: Int, params: BitmapDenoiseParams): FloatArray {
-        val groupsX = roundUp(width, DenoiseProfileShaders.REDUCE_FIRST_LOCAL_X) / DenoiseProfileShaders.REDUCE_FIRST_LOCAL_X
-        val groupsY = roundUp(height, DenoiseProfileShaders.REDUCE_FIRST_LOCAL_Y) / DenoiseProfileShaders.REDUCE_FIRST_LOCAL_Y
-        GLES31.glUseProgram(bitmapDenoiseReduceFirstProgram)
-        bindComputeSampler(bitmapDenoiseReduceFirstProgram, "uInput", 0, textureId)
-        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, bitmapDenoiseReduceMBufferId)
-        GLES31.glUniform2i(GLES31.glGetUniformLocation(bitmapDenoiseReduceFirstProgram, "uImageSize"), width, height)
-        GLES31.glDispatchCompute(groupsX, groupsY, 1)
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT)
-        GLES31.glUseProgram(bitmapDenoiseReduceSecondProgram)
-        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 0, bitmapDenoiseReduceMBufferId)
-        GLES31.glBindBufferBase(GLES31.GL_SHADER_STORAGE_BUFFER, 1, bitmapDenoiseReduceRBufferId)
-        GLES31.glUniform1i(GLES31.glGetUniformLocation(bitmapDenoiseReduceSecondProgram, "uLength"), bitmapDenoiseReduceBufSize)
-        GLES31.glDispatchCompute(bitmapDenoiseReduceSize, 1, 1)
-        GLES31.glMemoryBarrier(GLES31.GL_SHADER_STORAGE_BARRIER_BIT or GLES31.GL_BUFFER_UPDATE_BARRIER_BIT)
-        val sumY2 = readBitmapDenoiseReduceResult(bitmapDenoiseReduceSize)
-        val npixels = (width * height).toFloat()
-        val varf = sqrt(2.0f + 2.0f * 4.0f * 4.0f + 6.0f * 6.0f) / 16.0f
-        val sb2 = varf.pow(scale) * varf.pow(scale)
-        val std0 = sqrt(max(1e-6f, sumY2[0] / (npixels - 1.0f) - sb2))
-        val std1 = sqrt(max(1e-6f, sumY2[1] / (npixels - 1.0f) - sb2))
-        val std2 = sqrt(max(1e-6f, sumY2[2] / (npixels - 1.0f) - sb2))
-        val adjY = 8.0f * params.lumaForce * params.lumaForce * 4.0f
-        val adjC = 8.0f * params.chromaForce * params.chromaForce * 4.0f
-        return floatArrayOf(adjY * sb2 / std0, adjC * sb2 / std1, adjC * sb2 / std2, 0.0f)
-    }
-
-    private fun readBitmapDenoiseReduceResult(reduceSize: Int): FloatArray {
-        val out = FloatArray(4)
-        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, bitmapDenoiseReduceRBufferId)
-        val mapped = GLES31.glMapBufferRange(GLES31.GL_SHADER_STORAGE_BUFFER, 0, reduceSize * 4 * 4, GLES31.GL_MAP_READ_BIT) as? ByteBuffer
-        if (mapped != null) {
-            mapped.order(ByteOrder.nativeOrder())
-            val floats = mapped.asFloatBuffer()
-            for (i in 0 until reduceSize) {
-                out[0] += floats.get(i * 4)
-                out[1] += floats.get(i * 4 + 1)
-                out[2] += floats.get(i * 4 + 2)
-            }
-            GLES31.glUnmapBuffer(GLES31.GL_SHADER_STORAGE_BUFFER)
-        }
-        GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, 0)
-        return out
     }
 
     private fun bindComputeSampler(program: Int, name: String, unit: Int, textureId: Int) {
@@ -1560,10 +1441,6 @@ class LutImageProcessor {
                 GLES31.GL_FRAMEBUFFER_BARRIER_BIT
         )
         checkGlError(tag)
-    }
-
-    private fun roundUp(value: Int, multiple: Int): Int {
-        return ((value + multiple - 1) / multiple) * multiple
     }
 
     /**
@@ -2214,23 +2091,20 @@ class LutImageProcessor {
         releaseReadbackBuffer()
 
         if (bitmapDenoisePreconditionProgram != 0) GLES31.glDeleteProgram(bitmapDenoisePreconditionProgram)
-        if (bitmapDenoiseDecomposeProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseDecomposeProgram)
-        if (bitmapDenoiseSynthesizeProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseSynthesizeProgram)
-        if (bitmapDenoiseReduceFirstProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseReduceFirstProgram)
-        if (bitmapDenoiseReduceSecondProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseReduceSecondProgram)
-        if (bitmapDenoiseBacktransformProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseBacktransformProgram)
+        if (bitmapDenoiseNlmInitProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseNlmInitProgram)
+        if (bitmapDenoiseNlmFusedAccuProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseNlmFusedAccuProgram)
+        if (bitmapDenoiseNlmFinishProgram != 0) GLES31.glDeleteProgram(bitmapDenoiseNlmFinishProgram)
         if (bitmapDenoisePassthroughProgram != 0) GLES30.glDeleteProgram(bitmapDenoisePassthroughProgram)
         if (bitmapChromaDenoiseProgram != 0) GLES30.glDeleteProgram(bitmapChromaDenoiseProgram)
         for (i in 0..1) {
             if (bitmapDenoiseTexId[i] != 0) GLES30.glDeleteTextures(1, intArrayOf(bitmapDenoiseTexId[i]), 0)
             if (bitmapDenoiseFboId[i] != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(bitmapDenoiseFboId[i]), 0)
         }
-        for (i in bitmapDenoiseDetailTexIds.indices) {
-            if (bitmapDenoiseDetailTexIds[i] != 0) GLES30.glDeleteTextures(1, intArrayOf(bitmapDenoiseDetailTexIds[i]), 0)
-            bitmapDenoiseDetailTexIds[i] = 0
+        if (bitmapDenoiseNlmU2BufferId != 0) {
+            GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseNlmU2BufferId), 0)
+            bitmapDenoiseNlmU2BufferId = 0
         }
-        if (bitmapDenoiseReduceMBufferId != 0) GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseReduceMBufferId), 0)
-        if (bitmapDenoiseReduceRBufferId != 0) GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseReduceRBufferId), 0)
+        bitmapDenoiseNlmBufferPixels = 0
 
         // 释放 HDF 资源
         if (hdfExtractBlurHProgram != 0) GLES30.glDeleteProgram(hdfExtractBlurHProgram)
