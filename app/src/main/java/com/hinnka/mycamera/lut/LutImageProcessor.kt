@@ -591,51 +591,6 @@ class LutImageProcessor {
         )
     }
 
-    private fun buildLchAdjustmentArrays(params: ColorRecipeParams?): Triple<FloatArray, FloatArray, FloatArray> {
-        if (params == null) {
-            return Triple(
-                FloatArray(LCH_COLOR_BAND_COUNT),
-                FloatArray(LCH_COLOR_BAND_COUNT),
-                FloatArray(LCH_COLOR_BAND_COUNT)
-            )
-        }
-        return Triple(
-            floatArrayOf(
-                params.skinHue,
-                params.redHue,
-                params.orangeHue,
-                params.yellowHue,
-                params.greenHue,
-                params.cyanHue,
-                params.blueHue,
-                params.purpleHue,
-                params.magentaHue,
-            ),
-            floatArrayOf(
-                params.skinChroma,
-                params.redChroma,
-                params.orangeChroma,
-                params.yellowChroma,
-                params.greenChroma,
-                params.cyanChroma,
-                params.blueChroma,
-                params.purpleChroma,
-                params.magentaChroma,
-            ),
-            floatArrayOf(
-                params.skinLightness,
-                params.redLightness,
-                params.orangeLightness,
-                params.yellowLightness,
-                params.greenLightness,
-                params.cyanLightness,
-                params.blueLightness,
-                params.purpleLightness,
-                params.magentaLightness,
-            )
-        )
-    }
-
     /**
      * 执行渲染操作（共享的渲染逻辑）
      */
@@ -674,7 +629,7 @@ class LutImageProcessor {
         val noise = effectiveRecipeParams?.noise ?: 0f
         val lowRes = effectiveRecipeParams?.lowRes ?: 0f
         val intensity = effectiveRecipeParams?.lutIntensity ?: 1f
-        val (lchHueAdjustments, lchChromaAdjustments, lchLightnessAdjustments) = buildLchAdjustmentArrays(effectiveRecipeParams)
+        val lchAdjustments = ColorRecipeGl.lchAdjustments(effectiveRecipeParams)
         val primaryCalibrationMatrix = CameraRawCalibrationMatrix.build(effectiveRecipeParams)
         val program = shaderProgram
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebufferId)
@@ -701,8 +656,11 @@ class LutImageProcessor {
         )
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutEnabled"), if (lutConfig != null) 1 else 0)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutMaskType"), lutMaskType)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutCurve"), lutConfig?.curve?.shaderId ?: 0)
-        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutColorSpace"), lutConfig?.colorSpace?.ordinal ?: 0)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uLutCurve"), LutShaderMappings.transferCurveId(lutConfig?.curve))
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(program, "uLutColorSpace"),
+            lutConfig?.colorSpace?.let(LutShaderMappings::colorSpaceId) ?: 0
+        )
 
         val inputColorSpaceId = if (inputColorSpace == ColorSpace.get(ColorSpace.Named.DISPLAY_P3)) 1 else 0
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uInputColorSpace"), inputColorSpaceId)
@@ -738,9 +696,12 @@ class LutImageProcessor {
                 GLES30.glGetUniformLocation(program, "uAspectRatio"),
                 width.toFloat() / Math.max(1, height).toFloat()
             )
-            GLES30.glUniform1fv(uLchHueAdjustmentsLoc, LCH_COLOR_BAND_COUNT, lchHueAdjustments, 0)
-            GLES30.glUniform1fv(uLchChromaAdjustmentsLoc, LCH_COLOR_BAND_COUNT, lchChromaAdjustments, 0)
-            GLES30.glUniform1fv(uLchLightnessAdjustmentsLoc, LCH_COLOR_BAND_COUNT, lchLightnessAdjustments, 0)
+            ColorRecipeGl.bindLchAdjustments(
+                uLchHueAdjustmentsLoc,
+                uLchChromaAdjustmentsLoc,
+                uLchLightnessAdjustmentsLoc,
+                lchAdjustments
+            )
             GLES30.glUniformMatrix3fv(uPrimaryCalibrationMatrixLoc, 1, false, primaryCalibrationMatrix, 0)
         }
 
@@ -751,17 +712,8 @@ class LutImageProcessor {
         val bluePts = effectiveRecipeParams?.blueCurvePoints
         val curveActive = !CurveUtils.isIdentity(masterPts, redPts, greenPts, bluePts)
         if (curveActive) {
-            if (curveTextureId == 0) {
-                val ids = IntArray(1); GLES30.glGenTextures(1, ids, 0); curveTextureId = ids[0]
-            }
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, curveTextureId)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
             val curveBuffer = CurveUtils.buildCurveTextureBuffer(masterPts, redPts, greenPts, bluePts)
-            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, 256, 1, 0,
-                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, curveBuffer)
+            curveTextureId = ColorRecipeGl.ensureCurveTextureUploaded(curveTextureId, curveBuffer)
         }
         GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (curveActive) curveTextureId else 0)
@@ -2278,7 +2230,6 @@ class LutImageProcessor {
         private const val TAG = "LutImageProcessor"
         private const val BITMAP_DENOISE_A = 0.008f
         private const val BITMAP_DENOISE_B = 0.0005f
-        private const val LCH_COLOR_BAND_COUNT = 9
 
         // 2D 图片版本的顶点着色器
         private val IMAGE_VERTEX_SHADER = """
@@ -2352,9 +2303,6 @@ class LutImageProcessor {
             // Primary Calibration
             uniform mat3 uPrimaryCalibrationMatrix;
             
-            uniform float uLchHueAdjustments[9];
-            uniform float uLchChromaAdjustments[9];
-            uniform float uLchLightnessAdjustments[9];
             uniform sampler2D uCurveTexture;
             uniform bool uCurveEnabled;
 
@@ -2378,58 +2326,10 @@ class LutImageProcessor {
                 return dot(color, weights);
             }
 
-            float log10(float x) { return log(x) * 0.4342944819; }
-            vec3 log10(vec3 x) { return log(x) * 0.4342944819; }
-
-            vec3 linearToSrgb(vec3 l) {
-                vec3 absL = abs(l);
-                vec3 result = mix(absL * 12.92, 1.055 * pow(absL, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, absL));
-                return sign(l) * result;
-            }
-
-            vec3 srgbToLinear(vec3 c) {
-                vec3 absC = abs(c);
-                vec3 result = mix(absC / 12.92, pow((absC + 0.055) / 1.055, vec3(2.4)), step(0.04045, absC));
-                return sign(c) * result;
-            }
-
-            vec3 hlgToLinear(vec3 e) {
-                float ha = 0.17883277;
-                float hb = 1.0 - 4.0 * ha;
-                float hc = 0.5 - ha * log(4.0 * ha);
-                vec3 low = e * e / 3.0;
-                vec3 high = (exp((e - hc) / ha) + hb) / 12.0;
-                return mix(low, high, step(vec3(0.5), e));
-            }
-
-            vec3 bt2020ToLinearSrgb(vec3 rgb) {
-                return mat3(
-                    1.660491, -0.124550, -0.018151,
-                    -0.587641, 1.132900, -0.100579,
-                    -0.072850, -0.008350, 1.118730
-                ) * rgb;
-            }
-
-            vec3 applyExposureInLinearSpace(vec3 srgbColor, float exposureEv) {
-                vec3 linearColor = srgbToLinear(max(srgbColor, vec3(0.0)));
-                linearColor *= exp2(exposureEv);
-                return linearToSrgb(linearColor);
-            }
-
-            float sanitizeFloat(float value) {
-                if (value != value) return 0.0;
-//                if (value > 1.0) return 1.0;
-//                if (value < 0.0) return 0.0;
-                return value;
-            }
-
-            vec3 sanitizeColor(vec3 color) {
-                return vec3(
-                    sanitizeFloat(color.r),
-                    sanitizeFloat(color.g),
-                    sanitizeFloat(color.b)
-                );
-            }
+            ${PreviewColorShaderModules.COLOR_TRANSFER_CORE}
+            ${PreviewColorShaderModules.HLG_TO_LINEAR}
+            ${PreviewColorShaderModules.EXPOSURE}
+            ${PreviewColorShaderModules.SANITIZE}
 
             vec3 prepareToneSample(vec3 sampleColor) {
                 vec3 prepared = sampleColor;
@@ -2467,50 +2367,7 @@ class LutImageProcessor {
 
             ${ShadowsHighlightsShader.GLSL}
 
-            float hash12(vec2 p) {
-                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-                p3 += dot(p3, p3.yzx + 33.33);
-                return fract((p3.x + p3.y) * p3.z);
-            }
-
-            float gaussianNoise(vec2 p) {
-                return (hash12(p) + hash12(p + 17.17) + hash12(p + 43.31) + hash12(p + 91.73) - 2.0) * 0.5;
-            }
-
-            vec3 applyDensityParticleGrain(vec3 srgbColor, vec2 uv, float amount) {
-                float grainAmount = pow(clamp(amount, 0.0, 1.0), 0.58);
-                vec3 linearColor = max(srgbToLinear(max(srgbColor, vec3(0.0))), vec3(1e-4));
-                vec3 density = -log10(linearColor);
-                vec3 densityMin = vec3(0.03);
-                vec3 densityMax = vec3(2.2) + densityMin;
-                vec3 development = clamp((density + densityMin) / densityMax, vec3(0.02), vec3(0.98));
-                float effectivePixelSizeUm = mix(5.2, 1.8, grainAmount);
-                float agxParticleAreaUm2 = 0.2;
-                vec3 particleScale = vec3(1.6, 1.6, 3.2);
-                vec3 particles = (effectivePixelSizeUm * effectivePixelSizeUm) / (agxParticleAreaUm2 * particleScale);
-                vec3 uniformity = vec3(0.97, 0.99, 0.97);
-                vec2 grainCoord = uv * mix(820.0, 1380.0, grainAmount);
-                float lumaGrain = gaussianNoise(grainCoord + vec2(11.0, 7.0));
-                vec2 dyeCoord = uv * mix(260.0, 420.0, grainAmount);
-                vec3 dyeCloud = vec3(
-                    gaussianNoise(dyeCoord + vec2(31.0, 53.0)),
-                    gaussianNoise(dyeCoord + vec2(71.0, 23.0)),
-                    gaussianNoise(dyeCoord + vec2(19.0, 97.0))
-                );
-                float clump = gaussianNoise(floor(uv * 180.0) + vec2(5.0, 19.0));
-                vec3 saturation = 1.0 - development * uniformity;
-                vec3 densityStd = densityMax * sqrt(max(development * (1.0 - development) * saturation, vec3(0.001)) / max(particles, vec3(1.0)));
-                float lumaDensityStd = dot(densityStd, vec3(0.333333));
-                float positiveLuma = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
-                float positiveHighlightMask = smoothstep(0.55, 0.92, positiveLuma);
-                float highlightGrainVisibility = mix(1.0, 0.32, positiveHighlightMask);
-                vec3 densityNoise = vec3(lumaGrain * lumaDensityStd * 2.7);
-                densityNoise += dyeCloud * densityStd * 0.28;
-                densityNoise += clump * grainAmount * vec3(0.013, 0.012, 0.016);
-                densityNoise *= highlightGrainVisibility;
-                density = max(density + densityNoise * grainAmount * 1.8, vec3(0.0));
-                return linearToSrgb(pow(vec3(10.0), -density));
-            }
+            ${PreviewColorShaderModules.FILM_GRAIN}
 
             float applyToneCurveToLuma(float luma, float toe, float shoulder, float pivot) {
                 float safeLuma = clamp(luma, 0.0, 1.0);
@@ -2552,295 +2409,18 @@ class LutImageProcessor {
                 return sanitizeColor(mix(vec3(curvedSignal), scaled, 0.96));
             }
 
-            vec3 linearRgbToOklab(vec3 c) {
-                vec3 lms = mat3(
-                    0.4122214708, 0.2119034982, 0.0883024619,
-                    0.5363325363, 0.6806995451, 0.2817188376,
-                    0.0514459929, 0.1073969566, 0.6299787005
-                ) * c;
-                vec3 lmsCbrt = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
-                return mat3(
-                    0.2104542553, 1.9779984951, 0.0259040371,
-                    0.7936177850, -2.4285922050, 0.7827717662,
-                    -0.0040720468, 0.4505937099, -0.8086757660
-                ) * lmsCbrt;
-            }
+            ${PreviewColorShaderModules.OKLAB}
 
-            vec3 oklabToLinearRgb(vec3 lab) {
-                vec3 lms = mat3(
-                    1.0, 1.0, 1.0,
-                    0.3963377774, -0.1055613458, -0.0894841775,
-                    0.2158037573, -0.0638541728, -1.2914855480
-                ) * lab;
-                vec3 lms3 = lms * lms * lms;
-                return mat3(
-                    4.0767416621, -1.2684380046, -0.0041960863,
-                    -3.3077115913, 2.6097574011, -0.7034186147,
-                    0.2309699292, -0.3413193965, 1.7076147010
-                ) * lms3;
-            }
+            ${PreviewColorShaderModules.LCH_CLASSIFIERS}
 
-            vec3 linearRgbToCieLab(vec3 linearRgb) {
-                vec3 xyz = mat3(
-                    0.4124564, 0.2126729, 0.0193339,
-                    0.3575761, 0.7151522, 0.1191920,
-                    0.1804375, 0.0721750, 0.9503041
-                ) * clamp(linearRgb, 0.0, 1.0);
-                xyz /= vec3(0.95047, 1.0, 1.08883);
-                vec3 f = mix(7.787037 * xyz + vec3(16.0 / 116.0), pow(max(xyz, vec3(0.0)), vec3(1.0 / 3.0)), step(vec3(0.008856), xyz));
-                return vec3(116.0 * f.y - 16.0, 500.0 * (f.x - f.y), 200.0 * (f.y - f.z));
-            }
+            ${PreviewColorShaderModules.LUT_MASK}
+            ${PreviewColorShaderModules.OKLCH_DENSITY}
 
-            float wrapAngle(float angle) {
-                return mod(angle + PI, 2.0 * PI) - PI;
-            }
+            ${PreviewColorShaderModules.LCH_MIXER}
 
-            float colorBandWeight(float hue, float center, float chroma) {
-                float dist = abs(wrapAngle(hue - center));
-                float hueWeight = 1.0 - smoothstep(radians(18.0), radians(42.0), dist);
-                float chromaWeight = smoothstep(0.02, 0.08, chroma);
-                return hueWeight * chromaWeight;
-            }
-
-            float fullCoverageBandWeight(float hue, float center, float chroma) {
-                float dist = abs(wrapAngle(hue - center));
-                // Use smoothstep for a more natural bell-curve falloff. 
-                // 85 degrees ensures coverage for wider gaps in Oklab hue space (e.g. Blue-Cyan).
-                float hueWeight = smoothstep(radians(85.0), 0.0, dist);
-                float chromaWeight = smoothstep(0.005, 0.03, chroma);
-                return hueWeight * chromaWeight;
-            }
-
-            float rtRange(float value, float minValue, float maxValue) {
-                return step(minValue, value) * (1.0 - step(maxValue, value));
-            }
-
-            float rtSkinCase(float l, float h, float c, float lMin, float lMax, float hMin, float hMax, float cMin, float cMax, float weight) {
-                return rtRange(l, lMin, lMax) * rtRange(h, hMin, hMax) * rtRange(c, cMin, cMax) * weight;
-            }
-
-            float skinBandWeight(vec3 linearColor) {
-                // Direct port of RawTherapee Color::SkinSat ranges in CIELAB LCh.
-                // Weights only rank RT's real / extended / transition categories.
-                vec3 lab = linearRgbToCieLab(linearColor);
-                float l = lab.x;
-                float h = atan(lab.z, lab.y);
-                float c = length(lab.yz);
-                float core = 1.0;
-                float extended = 0.67;
-                float transition = 0.33;
-                float w = 0.0;
-
-                w = max(w, rtSkinCase(l, h, c, 85.0, 100.0, 0.73, 1.23, 8.0, 22.0, core));
-                w = max(w, rtSkinCase(l, h, c, 92.0, 100.0, 0.80, 1.65, 7.0, 15.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 92.0, 100.0, -0.10, 1.65, 7.0, 18.0, transition));
-                w = max(w, rtSkinCase(l, h, c, 85.0, 92.0, 0.70, 1.40, 7.0, 34.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 85.0, 92.0, 0.00, 1.65, 7.0, 43.0, transition));
-
-                w = max(w, rtSkinCase(l, h, c, 70.0, 85.0, 0.40, 1.29, 8.0, 50.0, core));
-                w = max(w, rtSkinCase(l, h, c, 70.0, 85.0, -0.18, 1.50, 7.0, 56.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 70.0, 85.0, -0.18, 1.65, 7.0, 63.0, transition));
-
-                w = max(w, rtSkinCase(l, h, c, 52.0, 70.0, 0.30, 1.37, 11.0, 47.0, core));
-                w = max(w, rtSkinCase(l, h, c, 52.0, 70.0, -0.18, 1.50, 7.0, 56.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 52.0, 70.0, -0.18, 1.65, 7.0, 63.0, transition));
-
-                w = max(w, rtSkinCase(l, h, c, 35.0, 52.0, 0.30, 1.27, 13.0, 44.0, core));
-                w = max(w, rtSkinCase(l, h, c, 35.0, 52.0, -0.18, 1.50, 7.0, 56.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 35.0, 52.0, -0.18, 1.65, 7.0, 63.0, transition));
-
-                w = max(w, rtSkinCase(l, h, c, 20.0, 35.0, 0.30, 1.22, 7.0, 40.0, core));
-                w = max(w, rtSkinCase(l, h, c, 20.0, 35.0, -0.18, 1.50, 7.0, 56.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 20.0, 35.0, -0.18, 1.65, 7.0, 63.0, transition));
-
-                w = max(w, rtSkinCase(l, h, c, 10.0, 20.0, -0.20, 1.05, 8.0, 28.0, core));
-                w = max(w, rtSkinCase(l, h, c, 10.0, 20.0, -0.18, 1.00, 7.0, 40.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 10.0, 20.0, -0.18, 1.60, 7.0, 50.0, transition));
-
-                w = max(w, rtSkinCase(l, h, c, 0.0, 10.0, -0.18, 1.00, 8.0, 28.0, core));
-                w = max(w, rtSkinCase(l, h, c, 0.0, 10.0, -0.18, 1.00, 7.0, 40.0, extended));
-                w = max(w, rtSkinCase(l, h, c, 0.0, 10.0, -0.18, 1.60, 7.0, 50.0, transition));
-                return w;
-            }
-
-            float skyBandWeight(vec3 linearColor) {
-                vec3 lab = linearRgbToCieLab(linearColor);
-                float l = lab.x;
-                float h = atan(lab.z, lab.y);
-                float c = length(lab.yz);
-                float rtWaveletSkyHue = rtRange(h, -2.60, -1.30);
-                float chromaGate = smoothstep(7.0, 18.0, c);
-                float lightnessGate = smoothstep(18.0, 45.0, l);
-                return rtWaveletSkyHue * chromaGate * lightnessGate;
-            }
-
-            float lutMaskWeight(int maskType, vec3 linearColor) {
-                if (maskType == 1) {
-                    return skinBandWeight(linearColor);
-                }
-                if (maskType == 2) {
-                    return skyBandWeight(linearColor);
-                }
-                return 1.0;
-            }
-
-            vec3 applyOklchDensity(vec3 srgbColor, float density) {
-                if (abs(density) < 0.0001) {
-                    return srgbColor;
-                }
-
-                vec3 linearColor = srgbToLinear(max(srgbColor, vec3(0.0)));
-                vec3 lab = linearRgbToOklab(linearColor);
-                float chroma = length(lab.yz);
-                float hue = atan(lab.z, lab.y);
-                const float CHROMA_BIAS = 0.35;
-                float densityScale = max(0.0, 1.0 + density * CHROMA_BIAS);
-                float newChroma = chroma * densityScale;
-                const float DENSITY_K = 1.85;
-                float newLightness = clamp(lab.x * exp(-DENSITY_K * density * chroma), 0.0, 1.0);
-                vec3 denseLab = vec3(newLightness, cos(hue) * newChroma, sin(hue) * newChroma);
-                vec3 denseLinear = max(oklabToLinearRgb(denseLab), vec3(0.0));
-                return linearToSrgb(denseLinear);
-            }
-
-            vec3 applyLchColorMixer(vec3 srgbColor) {
-                vec3 linearColor = srgbToLinear(max(srgbColor, vec3(0.0)));
-                vec3 lab = linearRgbToOklab(linearColor);
-                float chroma = length(lab.yz);
-                float hue = atan(lab.z, lab.y);
-                if (hue < 0.0) hue += 2.0 * PI;
-
-                // Optimized centers mapping LR colors to Oklab hue angles
-                float centers[8] = float[](
-                    radians(29.0),  // Red
-                    radians(52.0),  // Orange
-                    radians(86.0),  // Yellow
-                    radians(144.0), // Green
-                    radians(196.0), // Aqua/Cyan
-                    radians(263.0), // Blue
-                    radians(304.0), // Purple
-                    radians(341.0)  // Magenta
-                );
-
-                float hueShift = 0.0;
-                float chromaScale = 1.0;
-                float lightnessShift = 0.0;
-                float bandWeights[8];
-                float totalBandWeight = 0.0;
-
-                for (int i = 0; i < 8; i++) {
-                    float weight = fullCoverageBandWeight(hue, centers[i], chroma);
-                    bandWeights[i] = weight;
-                    totalBandWeight += weight;
-                }
-
-                if (totalBandWeight > 0.0001) {
-                    for (int i = 0; i < 8; i++) {
-                        float weight = bandWeights[i] / totalBandWeight;
-                        // Reduce hue range to +/- 20 degrees for professional results
-                        hueShift += uLchHueAdjustments[i + 1] * weight * radians(20.0);
-                        chromaScale += uLchChromaAdjustments[i + 1] * weight;
-                        lightnessShift += uLchLightnessAdjustments[i + 1] * weight * 0.15;
-                    }
-
-                    // Restore the chroma fade-out that was lost during normalization
-                    // This prevents harsh banding (断层) when colors transition to neutral
-                    float commonChromaWeight = smoothstep(0.005, 0.03, chroma);
-                    hueShift *= commonChromaWeight;
-                    chromaScale = mix(1.0, chromaScale, commonChromaWeight);
-                    lightnessShift *= commonChromaWeight;
-                }
-
-                float skinWeight = skinBandWeight(linearColor);
-                if (skinWeight > 0.0001) {
-                    hueShift += uLchHueAdjustments[0] * skinWeight * radians(10.0);
-                    chromaScale += uLchChromaAdjustments[0] * skinWeight;
-                    lightnessShift += uLchLightnessAdjustments[0] * skinWeight * 0.08;
-                }
-
-                if (abs(hueShift) < 0.0001 && abs(chromaScale - 1.0) < 0.0001 && abs(lightnessShift) < 0.0001) {
-                    return srgbColor;
-                }
-
-                float newHue = hue + hueShift;
-                float newChroma = max(0.0, chroma * max(0.0, chromaScale));
-                float newLightness = clamp(lab.x + lightnessShift, 0.0, 1.0);
-                vec3 mixedLab = vec3(newLightness, cos(newHue) * newChroma, sin(newHue) * newChroma);
-                vec3 mixedLinear = max(oklabToLinearRgb(mixedLab), vec3(0.0));
-                return linearToSrgb(mixedLinear);
-            }
-
-            vec3 applyPrimaryCalibration(vec3 color) {
-                vec3 linearColor = srgbToLinear(max(color, vec3(0.0)));
-                vec3 calibratedLinear = max(uPrimaryCalibrationMatrix * linearColor, vec3(0.0));
-                return linearToSrgb(calibratedLinear);
-            }
-
-            vec3 applyLutCurve(vec3 l, int curveType) {
-                if (curveType == 0) { // sRGB
-                    return linearToSrgb(l);
-                }
-                if (curveType == 1) return l; // LINEAR
-                if (curveType == 2) { // V-Log
-                    return mix(5.6 * l + 0.125, 0.241514 * log10(l + 0.00873) + 0.598206, step(0.01, l));
-                }
-                if (curveType == 3) { // S-Log3
-                    return mix((l * (171.2102946929 - 95.0) / 0.01125 + 95.0) / 1023.0, (420.0 + log10((l + 0.01) / (0.18 + 0.01)) * 261.5) / 1023.0, step(0.01125, l));
-                }
-                if (curveType == 4) { // F-Log2
-                    return mix(8.799461 * l + 0.092864, 0.245281 * log10(5.555556 * l + 0.064829) + 0.384316, step(0.00089, l));
-                }
-                if (curveType == 5) { // LogC4
-                    return mix(8.80302 * l + 0.158957, 0.21524584 * log10(2231.8263 * l + 64.0) - 0.29590839, step(-0.018057, l));
-                }
-                if (curveType == 6) { // AppleLog
-                    return mix(mix(vec3(0.0), 47.28711236 * pow(l + 0.05641088, vec3(2.0)), step(-0.05641088, l)), 0.08550479 * (log(l + 0.00964052) / log(2.0)) + 0.69336945, step(0.01, l));
-                }
-                if (curveType == 7) { // HLG
-                    float ha = 0.17883277;
-                    float hb = 1.0 - 4.0 * ha;
-                    float hc = 0.5 - ha * log(4.0 * ha);
-                    return mix(sqrt(3.0 * l), ha * log(12.0 * l - hb) + hc, step(1.0 / 12.0, l));
-                }
-                if (curveType == 8) { // ACEScct
-                    return mix(10.540237 * l + 0.072905536, 0.18955931 * log10(max(l, vec3(1e-6))) + 0.5547945, step(0.0078125, l));
-                }
-                if (curveType == 9) { // Log3G10
-                    return mix(15.1927 * l + 0.151927, 0.224282 * log10(155.975327 * l + 2.55975327), step(-0.01, l));
-                }
-                return l;
-            }
-
-            vec3 applyLutColorSpace(vec3 rgb, int colorSpace) {
-                if (colorSpace == 0) return rgb; // sRGB
-                
-                // Matrices for Linear sRGB to target color space (aligned with ColorSpace.kt)
-                if (colorSpace == 1) { // DCI-P3 (Bradford adapted)
-                    return mat3(0.875905, 0.035332, 0.016382, 0.122070, 0.964542, 0.063767, 0.002025, 0.000126, 0.919851) * rgb;
-                }
-                if (colorSpace == 2) { // BT2020
-                    return mat3(0.627404, 0.069097, 0.016391, 0.329283, 0.919540, 0.088013, 0.043313, 0.011362, 0.895595) * rgb;
-                }
-                if (colorSpace == 3) { // ARRI4
-                    return mat3(0.565837, 0.088626, 0.017750, 0.340331, 0.809347, 0.109448, 0.093832, 0.102028, 0.872802) * rgb;
-                }
-                if (colorSpace == 4) { // AppleLog2
-                    return mat3(0.608104, 0.062316, 0.031133, 0.259353, 0.804609, 0.133756, 0.132543, 0.133076, 0.835112) * rgb;
-                }
-                if (colorSpace == 5) { // S-Gamut3.Cine
-                    return mat3(0.645679, 0.087530, 0.036957, 0.259115, 0.759700, 0.129281, 0.095206, 0.152770, 0.833762) * rgb;
-                }
-                if (colorSpace == 6) { // ACES_AP1
-                    return mat3(0.613083, 0.070004, 0.020491, 0.341167, 0.918063, 0.106764, 0.045750, 0.011934, 0.872745) * rgb;
-                }
-                if (colorSpace == 7) { // V-Gamut
-                    return mat3(0.585196, 0.078589, 0.022794, 0.322642, 0.819627, 0.114217, 0.092162, 0.101784, 0.862989) * rgb;
-                }
-                if (colorSpace == 9) { // REDWideGamutRGB
-                    return mat3(0.541973, 0.076993, 0.058875, 0.360148, 0.767969, 0.273495, 0.097891, 0.155019, 0.667533) * rgb;
-                }
-                return rgb;
-            }
+            ${PreviewColorShaderModules.PRIMARY_CALIBRATION}
+            ${PreviewColorShaderModules.EXTENDED_LUT_CURVES}
+            ${PreviewColorShaderModules.LUT_COLOR_SPACE}
             
             // 辅助函数：高斯权重 (预计算 sigma^2 的倒数以提升性能)
             float gaussian(float x, float invSigmaSq2) {
