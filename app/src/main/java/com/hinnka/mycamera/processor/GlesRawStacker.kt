@@ -74,6 +74,9 @@ class GlesRawStacker(
     private var clearAccumulatorProgram = 0
     private var accumulateProgram = 0
     private var normalizeProgram = 0
+    private var hdrRecoveryMaskProgram = 0
+    private var hdrRecoveryDilateProgram = 0
+    private var hdrRecoveryFeatherProgram = 0
     private var pgtmStatsProgram = 0
 
     private var renderFbo = 0
@@ -90,6 +93,9 @@ class GlesRawStacker(
     private var kernelTexture = 0
     private var robustnessTexture = 0
     private var tileMaskTexture = 0
+    private var hdrRecoveryOrigMaskTexture = 0
+    private var hdrRecoveryMaskTexture = 0
+    private var hdrRecoveryScratchTexture = 0
     private var accumulatorTexture = 0
     private var accumulatorScratchTexture = 0
     private var currentAccumulatorTexture = 0
@@ -278,6 +284,8 @@ class GlesRawStacker(
                 GlesGpuScheduler.waitForGpuCheckpoint(TAG, "hdr normal frame $frameIndex accumulation")
             }
 
+            computeHdrRecoveryMask()
+            GlesGpuScheduler.yieldToUiRenderer()
             normalizeOutput(
                 hdrMode = true,
                 referenceExposureScale = referenceOutputScale,
@@ -394,6 +402,21 @@ class GlesRawStacker(
             HDR_SHORT_GLOBAL_ALIGN_COMPUTE_SHADER,
             "raw_hdr_short_global_align",
         )
+        hdrRecoveryMaskProgram = linkGraphicsProgram(
+            FULLSCREEN_VERTEX_SHADER,
+            HDR_RECOVERY_MASK_FRAGMENT_SHADER,
+            "raw_hdr_recovery_mask",
+        )
+        hdrRecoveryDilateProgram = linkGraphicsProgram(
+            FULLSCREEN_VERTEX_SHADER,
+            HDR_RECOVERY_DILATE_FRAGMENT_SHADER,
+            "raw_hdr_recovery_dilate",
+        )
+        hdrRecoveryFeatherProgram = linkGraphicsProgram(
+            FULLSCREEN_VERTEX_SHADER,
+            HDR_RECOVERY_FEATHER_FRAGMENT_SHADER,
+            "raw_hdr_recovery_feather",
+        )
         pgtmStatsProgram = linkComputeProgram(PGTM_STATS_COMPUTE_SHADER, "raw_hdr_pgtm_stats")
     }
 
@@ -412,6 +435,9 @@ class GlesRawStacker(
         kernelTexture = createTexture2D(planeWidth, planeHeight, GLES30.GL_RGBA16F, GLES30.GL_NEAREST)
         robustnessTexture = createTexture2D(planeWidth, planeHeight, GLES30.GL_R32F, GLES30.GL_NEAREST)
         tileMaskTexture = createTexture2D(gridWidth, gridHeight, GLES30.GL_R16F, GLES30.GL_LINEAR)
+        hdrRecoveryOrigMaskTexture = createTexture2D(planeWidth, planeHeight, GLES30.GL_RGBA16F, GLES30.GL_NEAREST)
+        hdrRecoveryMaskTexture = createTexture2D(planeWidth, planeHeight, GLES30.GL_R16F, GLES30.GL_NEAREST)
+        hdrRecoveryScratchTexture = createTexture2D(planeWidth, planeHeight, GLES30.GL_R16F, GLES30.GL_NEAREST)
         accumulatorTexture = createTexture2D(width, height, GLES30.GL_RGBA16F, GLES30.GL_NEAREST)
         accumulatorScratchTexture = createTexture2D(width, height, GLES30.GL_RGBA16F, GLES30.GL_NEAREST)
         currentAccumulatorTexture = accumulatorTexture
@@ -860,6 +886,45 @@ class GlesRawStacker(
         currentAccumulatorTexture = outputAccumulator
     }
 
+    private fun computeHdrRecoveryMask() {
+        computeInitialHdrRecoveryMask()
+        filterHdrRecoveryMask(
+            program = hdrRecoveryDilateProgram,
+            input = hdrRecoveryOrigMaskTexture,
+            output = hdrRecoveryScratchTexture,
+            label = "computeHdrRecoveryMask dilate",
+        )
+        filterHdrRecoveryMask(
+            program = hdrRecoveryFeatherProgram,
+            input = hdrRecoveryScratchTexture,
+            output = hdrRecoveryMaskTexture,
+            label = "computeHdrRecoveryMask feather",
+        )
+    }
+
+    private fun computeInitialHdrRecoveryMask() {
+        bindFramebufferOutput(hdrRecoveryOrigMaskTexture, "computeHdrRecoveryMask initial")
+        GLES30.glViewport(0, 0, planeWidth, planeHeight)
+        GLES30.glUseProgram(hdrRecoveryMaskProgram)
+        bindTexture(hdrRecoveryMaskProgram, "uAccumulator", 0, currentAccumulatorTexture)
+        bindTexture(hdrRecoveryMaskProgram, "uReferenceRaw", 1, refRaw)
+        setCommonUniforms(hdrRecoveryMaskProgram)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(hdrRecoveryMaskProgram, "uImageSize"), width, height)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(hdrRecoveryMaskProgram, "uPlaneSize"), planeWidth, planeHeight)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        finishFramebufferPass("computeHdrRecoveryMask initial")
+    }
+
+    private fun filterHdrRecoveryMask(program: Int, input: Int, output: Int, label: String) {
+        bindFramebufferOutput(output, label)
+        GLES30.glViewport(0, 0, planeWidth, planeHeight)
+        GLES30.glUseProgram(program)
+        bindTexture(program, "uMask", 0, input)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(program, "uPlaneSize"), planeWidth, planeHeight)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        finishFramebufferPass(label)
+    }
+
     private fun normalizeOutput(
         hdrMode: Boolean = false,
         referenceExposureScale: Float = 1.0f,
@@ -873,8 +938,11 @@ class GlesRawStacker(
         bindTexture(normalizeProgram, "uShortRaw", 2, hdrShortRaw)
         bindTexture(normalizeProgram, "uLensShadingMap", 3, lensShadingTexture)
         bindTexture(normalizeProgram, "uShortGlobalAlignment", 4, hdrShortAlignmentTexture)
+        bindTexture(normalizeProgram, "uHdrRecoveryMask", 5, hdrRecoveryMaskTexture)
+        bindTexture(normalizeProgram, "uHdrRecoveryOrigMask", 6, hdrRecoveryOrigMaskTexture)
         setCommonUniforms(normalizeProgram)
         GLES31.glUniform2i(GLES31.glGetUniformLocation(normalizeProgram, "uImageSize"), width, height)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(normalizeProgram, "uPlaneSize"), planeWidth, planeHeight)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(normalizeProgram, "uHdrMode"), if (hdrMode) 1 else 0)
         GLES31.glUniform1f(
             GLES31.glGetUniformLocation(normalizeProgram, "uReferenceExposureScale"),
@@ -2111,6 +2179,130 @@ class GlesRawStacker(
             }
         """.trimIndent()
 
+        private val HDR_RECOVERY_MASK_FRAGMENT_SHADER = """
+            #version 300 es
+            $RAW_COMMON
+            in vec2 vTexCoord;
+            out vec4 fragColor;
+            uniform sampler2D uAccumulator;
+            uniform highp usampler2D uReferenceRaw;
+            uniform ivec2 uImageSize;
+            uniform ivec2 uPlaneSize;
+            uniform int uCfaPattern;
+            uniform float uBlackLevel[4];
+            uniform float uWhiteLevel;
+
+            ivec2 clampRaw(ivec2 p) {
+                return clamp(p, ivec2(0), uImageSize - ivec2(1));
+            }
+
+            float sensorNorm(usampler2D tex, ivec2 p) {
+                p = clampRaw(p);
+                int bayerIndex = bayerIndexAt(uCfaPattern, p);
+                float raw = float(texelFetch(tex, p, 0).r);
+                float range = max(uWhiteLevel - uBlackLevel[bayerIndex], 1.0);
+                return clamp(max(raw - uBlackLevel[bayerIndex], 0.0) / range, 0.0, 1.0);
+            }
+
+            float referenceBlockMax(ivec2 base) {
+                float m = 0.0;
+                for (int y = 0; y <= 1; ++y) {
+                    for (int x = 0; x <= 1; ++x) {
+                        m = max(m, sensorNorm(uReferenceRaw, base + ivec2(x, y)));
+                    }
+                }
+                return m;
+            }
+
+            float blockClipRatioMax(ivec2 base) {
+                float m = 0.0;
+                for (int y = 0; y <= 1; ++y) {
+                    for (int x = 0; x <= 1; ++x) {
+                        ivec2 p = clampRaw(base + ivec2(x, y));
+                        vec4 a = texelFetch(uAccumulator, p, 0);
+                        m = max(m, a.a / max(a.a + a.g, 1e-5));
+                    }
+                }
+                return m;
+            }
+
+            float referenceAroundMax(ivec2 base) {
+                float m = 0.0;
+                for (int y = -1; y <= 2; ++y) {
+                    for (int x = -1; x <= 2; ++x) {
+                        m = max(m, sensorNorm(uReferenceRaw, base + ivec2(x, y)));
+                    }
+                }
+                return m;
+            }
+
+            void main() {
+                const float saturationThreshold = 0.990;
+                ivec2 block = clamp(ivec2(gl_FragCoord.xy), ivec2(0), uPlaneSize - ivec2(1));
+                ivec2 base = block * 2;
+                float refMax = referenceBlockMax(base);
+                float clipRatio = blockClipRatioMax(base);
+                float aroundMax = referenceAroundMax(base);
+
+                float saturatedAround = step(saturationThreshold, aroundMax);
+                float accumulatedClip = step(0.50, clipRatio) * step(0.900, refMax);
+                float sourceMask = max(saturatedAround, accumulatedClip);
+                float saturationPush = clamp((aroundMax - saturationThreshold) / (1.0 - saturationThreshold), 0.0, 1.0);
+                fragColor = vec4(sourceMask, saturationPush, 0.0, 1.0);
+            }
+        """.trimIndent()
+
+        private val HDR_RECOVERY_DILATE_FRAGMENT_SHADER = """
+            #version 300 es
+            precision highp float;
+            precision highp int;
+            uniform sampler2D uMask;
+            uniform ivec2 uPlaneSize;
+            out float fragColor;
+
+            float maskAt(ivec2 p) {
+                p = clamp(p, ivec2(0), uPlaneSize - ivec2(1));
+                return texelFetch(uMask, p, 0).r;
+            }
+
+            void main() {
+                ivec2 p = ivec2(gl_FragCoord.xy);
+                float m = 0.0;
+                for (int y = -1; y <= 1; ++y) {
+                    for (int x = -1; x <= 1; ++x) {
+                        m = max(m, maskAt(p + ivec2(x, y)));
+                    }
+                }
+                fragColor = clamp(m, 0.0, 1.0);
+            }
+        """.trimIndent()
+
+        private val HDR_RECOVERY_FEATHER_FRAGMENT_SHADER = """
+            #version 300 es
+            precision highp float;
+            precision highp int;
+            uniform sampler2D uMask;
+            uniform ivec2 uPlaneSize;
+            out float fragColor;
+
+            float maskAt(ivec2 p) {
+                p = clamp(p, ivec2(0), uPlaneSize - ivec2(1));
+                return texelFetch(uMask, p, 0).r;
+            }
+
+            void main() {
+                ivec2 p = ivec2(gl_FragCoord.xy);
+                float center = maskAt(p);
+                float sum = center * 4.0;
+                sum += (maskAt(p + ivec2(1, 0)) + maskAt(p + ivec2(-1, 0)) +
+                    maskAt(p + ivec2(0, 1)) + maskAt(p + ivec2(0, -1))) * 2.0;
+                sum += maskAt(p + ivec2(1, 1)) + maskAt(p + ivec2(-1, 1)) +
+                    maskAt(p + ivec2(1, -1)) + maskAt(p + ivec2(-1, -1));
+                float feather = sum / 16.0;
+                fragColor = clamp(feather, 0.0, 1.0);
+            }
+        """.trimIndent()
+
         private val PGTM_STATS_COMPUTE_SHADER = """
             #version 310 es
             $RAW_COMMON
@@ -2278,7 +2470,10 @@ class GlesRawStacker(
             uniform highp usampler2D uShortRaw;
             uniform sampler2D uLensShadingMap;
             uniform sampler2D uShortGlobalAlignment;
+            uniform sampler2D uHdrRecoveryMask;
+            uniform sampler2D uHdrRecoveryOrigMask;
             uniform ivec2 uImageSize;
+            uniform ivec2 uPlaneSize;
             uniform int uCfaPattern;
             uniform float uBlackLevel[4];
             uniform float uWhiteLevel;
@@ -2329,47 +2524,14 @@ class GlesRawStacker(
                 return clamp(norm * uShortExposureScale, 0.0, 1.0);
             }
 
-            float shortSensorNorm(ivec2 p) {
-                p = shortAlignedPos(p);
-                int bayerIndex = bayerIndexAt(uCfaPattern, p);
-                p = clamp(p, ivec2(0), uImageSize - ivec2(1));
-                float raw = float(texelFetch(uShortRaw, p, 0).r);
-                float range = max(uWhiteLevel - uBlackLevel[bayerIndex], 1.0);
-                return clamp(max(raw - uBlackLevel[bayerIndex], 0.0) / range, 0.0, 1.0);
+            float hdrRecoveryMaskAt(ivec2 p) {
+                ivec2 block = clamp(p / 2, ivec2(0), uPlaneSize - ivec2(1));
+                return clamp(texelFetch(uHdrRecoveryMask, block, 0).r, 0.0, 1.0);
             }
 
-            float referenceTileSensorMax(ivec2 p) {
-                ivec2 base = p - ivec2(p.x & 1, p.y & 1);
-                float m = 0.0;
-                for (int y = 0; y <= 1; ++y) {
-                    for (int x = 0; x <= 1; ++x) {
-                        m = max(m, referenceSensorNorm(base + ivec2(x, y)));
-                    }
-                }
-                return m;
-            }
-
-            float referenceTileSensorMean(ivec2 p) {
-                ivec2 base = p - ivec2(p.x & 1, p.y & 1);
-                float sum = 0.0;
-                for (int y = 0; y <= 1; ++y) {
-                    for (int x = 0; x <= 1; ++x) {
-                        sum += referenceSensorNorm(base + ivec2(x, y));
-                    }
-                }
-                return sum * 0.25;
-            }
-
-            float highlightEdgeProtect(float pixel, float tileMax) {
-                return smoothstep(0.30, 0.10, tileMax - pixel);
-            }
-
-            float directRecoveryMask(float pixel, float tile, float tileMean, float shortSensor) {
-                float pixelClip = smoothstep(0.90, 0.985, pixel);
-                float tileMeanGate = smoothstep(0.68, 0.88, tileMean);
-                float tileClip = smoothstep(0.91, 0.995, tile) * tileMeanGate * highlightEdgeProtect(pixel, tile);
-                float shortValid = 1.0 - smoothstep(0.985, 0.999, shortSensor);
-                return clamp(max(pixelClip, 0.68 * tileClip) * shortValid, 0.0, 1.0);
+            vec2 hdrRecoveryOrigMaskAt(ivec2 p) {
+                ivec2 block = clamp(p / 2, ivec2(0), uPlaneSize - ivec2(1));
+                return clamp(texelFetch(uHdrRecoveryOrigMask, block, 0).rg, vec2(0.0), vec2(1.0));
             }
 
             vec4 readAccum(ivec2 p) {
@@ -2400,23 +2562,16 @@ class GlesRawStacker(
                 float recoveryMix = 0.0;
                 if (uHdrMode != 0) {
                     float normalConfidence = smoothstep(0.04, 0.35, a.g);
-                    float clipRatio = a.a / max(a.a + a.g, 1e-5);
-                    float referencePixel = referenceSensorNorm(p);
-                    float referenceTile = referenceTileSensorMax(p);
-                    float refTileMean = referenceTileSensorMean(p);
-                    float shortSensor = shortSensorNorm(p);
-                    float highlightGate = smoothstep(0.62, 0.86, referencePixel) *
-                        smoothstep(0.66, 0.86, refTileMean) *
-                        highlightEdgeProtect(referencePixel, referenceTile);
-                    float clipRatioMask = smoothstep(0.22, 0.70, clipRatio) * highlightGate;
-                    recoveryMix = max(clipRatioMask, directRecoveryMask(
-                        referencePixel,
-                        referenceTile,
-                        refTileMean,
-                        shortSensor
-                    ));
+                    recoveryMix = hdrRecoveryMaskAt(p);
+                    vec2 origRecovery = hdrRecoveryOrigMaskAt(p);
+                    if (origRecovery.r > 0.5) {
+                        recoveryMix += (1.0 - recoveryMix) * origRecovery.g;
+                    }
+                    recoveryMix = clamp(recoveryMix, 0.0, 1.0);
                     fused = mix(reference, fused, normalConfidence);
-                    fused = mix(fused, shortRecoveryNorm(p, bayerIndex), recoveryMix);
+                    if (recoveryMix > 0.0001) {
+                        fused = mix(fused, shortRecoveryNorm(p, bayerIndex), recoveryMix);
+                    }
                 }
 
                 float mean = 0.0;
