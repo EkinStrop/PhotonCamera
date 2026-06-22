@@ -5,7 +5,6 @@ class UnifiedGainmapProducer(
         EmbeddedGainmapProducer(),
         GpuReferenceGainmapProducer(),
         HlgGainmapProducer(),
-        RawGainmapProducer(),
         EstimatedSdrGainmapProducer(),
     )
 ) : GainmapProducer {

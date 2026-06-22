@@ -74,7 +74,9 @@ class GpuReferenceGainmapProducer : GainmapProducer {
     ): GainmapResult? {
         val width = (sdrBase.width / DOWNSAMPLE).coerceAtLeast(1)
         val height = (sdrBase.height / DOWNSAMPLE).coerceAtLeast(1)
-        val fullHdrRatio = source.displayHdrSdrRatio.takeIf { it > 1f } ?: config.defaultFullHdrRatio
+        val fullHdrRatio = (source.displayHdrSdrRatio.takeIf { it > 1f } ?: config.defaultFullHdrRatio)
+            .coerceAtLeast(config.minFullHdrRatio)
+            .coerceAtMost(config.maxGainRatio)
 
         val sdrUpload = prepareUploadBitmap(sdrBase)
         val hdrUpload = hdrReference?.let { prepareUploadBitmap(it) }
@@ -156,6 +158,25 @@ class GpuReferenceGainmapProducer : GainmapProducer {
         GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uMaxGainRatio"), config.maxGainRatio)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uStrength"), strength)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(computeProgram, "uHasHdrReference"), if (config.requiresHdrReference) 1 else 0)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uBaseSceneLift"), config.baseSceneLift)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uGlobalSceneLift"), config.globalSceneLift)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uShoulderSceneLift"), config.shoulderSceneLift)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uGlobalStart"), config.globalStart)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uGlobalEnd"), config.globalEnd)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uGlobalPower"), config.globalPower)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uShoulderStart"), config.shoulderStart)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uShoulderEnd"), config.shoulderEnd)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uShoulderPower"), config.shoulderPower)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uSaturationPenalty"), config.saturationPenalty)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceTonalStart"), config.referenceTonalStart)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceTonalEnd"), config.referenceTonalEnd)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceHdrStart"), config.referenceHdrStart)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceHdrEnd"), config.referenceHdrEnd)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceDeltaStart"), config.referenceDeltaStart)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceDeltaEnd"), config.referenceDeltaEnd)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceHdrWeight"), config.referenceHdrWeight)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceDeltaWeight"), config.referenceDeltaWeight)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(computeProgram, "uReferenceExtraScale"), config.referenceExtraScale)
         drawQuad(computeProgram)
         checkGlError("renderComputePass")
     }
@@ -381,7 +402,24 @@ class GpuReferenceGainmapProducer : GainmapProducer {
 
     private fun configFor(sourceKind: SourceKind): Config? {
         return when (sourceKind) {
-            SourceKind.RAW -> Config(maxGainRatio = 4.5f, defaultFullHdrRatio = 1.35f, requiresHdrReference = true)
+            SourceKind.RAW -> Config(
+                maxGainRatio = 4.5f,
+                defaultFullHdrRatio = 1.55f,
+                minFullHdrRatio = 1.5f,
+                requiresHdrReference = true,
+                baseSceneLift = 0.045f,
+                globalSceneLift = 0.48f,
+                shoulderSceneLift = 0.40f,
+                globalEnd = 0.90f,
+                shoulderStart = 0.26f,
+                shoulderPower = 1.20f,
+                referenceTonalStart = 0.03f,
+                referenceTonalEnd = 0.90f,
+                referenceHdrStart = 0.42f,
+                referenceHdrEnd = 1.65f,
+                referenceDeltaEnd = 0.20f,
+                referenceExtraScale = 1.05f,
+            )
             SourceKind.HLG_CAPTURE -> Config(maxGainRatio = 3.5f, defaultFullHdrRatio = 1.45f, requiresHdrReference = true)
             SourceKind.SDR_BITMAP -> Config(
                 maxGainRatio = 4.0f,
@@ -396,8 +434,28 @@ class GpuReferenceGainmapProducer : GainmapProducer {
         val minGainRatio: Float = 1.0f,
         val maxGainRatio: Float,
         val defaultFullHdrRatio: Float,
+        val minFullHdrRatio: Float = 1.0f,
         val minDisplayRatioForHdrTransition: Float = 1.0f,
         val requiresHdrReference: Boolean,
+        val baseSceneLift: Float = 0.035f,
+        val globalSceneLift: Float = 0.4f,
+        val shoulderSceneLift: Float = 0.34f,
+        val globalStart: Float = 0.02f,
+        val globalEnd: Float = 0.96f,
+        val globalPower: Float = 0.82f,
+        val shoulderStart: Float = 0.34f,
+        val shoulderEnd: Float = 1.0f,
+        val shoulderPower: Float = 1.35f,
+        val saturationPenalty: Float = 0.10f,
+        val referenceTonalStart: Float = 0.05f,
+        val referenceTonalEnd: Float = 0.98f,
+        val referenceHdrStart: Float = 0.65f,
+        val referenceHdrEnd: Float = 2.0f,
+        val referenceDeltaStart: Float = 0.01f,
+        val referenceDeltaEnd: Float = 0.28f,
+        val referenceHdrWeight: Float = 0.35f,
+        val referenceDeltaWeight: Float = 0.65f,
+        val referenceExtraScale: Float = 0.82f,
     )
 
     private data class RenderTarget(
@@ -454,6 +512,25 @@ class GpuReferenceGainmapProducer : GainmapProducer {
             uniform float uMaxGainRatio;
             uniform float uStrength;
             uniform int uHasHdrReference;
+            uniform float uBaseSceneLift;
+            uniform float uGlobalSceneLift;
+            uniform float uShoulderSceneLift;
+            uniform float uGlobalStart;
+            uniform float uGlobalEnd;
+            uniform float uGlobalPower;
+            uniform float uShoulderStart;
+            uniform float uShoulderEnd;
+            uniform float uShoulderPower;
+            uniform float uSaturationPenalty;
+            uniform float uReferenceTonalStart;
+            uniform float uReferenceTonalEnd;
+            uniform float uReferenceHdrStart;
+            uniform float uReferenceHdrEnd;
+            uniform float uReferenceDeltaStart;
+            uniform float uReferenceDeltaEnd;
+            uniform float uReferenceHdrWeight;
+            uniform float uReferenceDeltaWeight;
+            uniform float uReferenceExtraScale;
 
             float srgbToLinear(float value) {
                 return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4);
@@ -488,10 +565,10 @@ class GpuReferenceGainmapProducer : GainmapProducer {
 
                 float displayHeadroom = clamp(uFullHdrRatio, 1.1, uMaxGainRatio);
                 float tonalPosition = max(sdrLuma * 0.72 + maxChannel * 0.28, 0.0);
-                float globalRamp = pow(gainmapSmoothstep(0.02, 0.96, tonalPosition), 0.82);
-                float shoulderRamp = pow(gainmapSmoothstep(0.34, 1.0, maxChannel), 1.35);
-                float chromaPenalty = 1.0 - saturation * 0.10;
-                float lift = (0.035 + 0.4 * globalRamp + 0.34 * shoulderRamp) * chromaPenalty;
+                float globalRamp = pow(gainmapSmoothstep(uGlobalStart, uGlobalEnd, tonalPosition), uGlobalPower);
+                float shoulderRamp = pow(gainmapSmoothstep(uShoulderStart, uShoulderEnd, maxChannel), uShoulderPower);
+                float chromaPenalty = 1.0 - saturation * uSaturationPenalty;
+                float lift = (uBaseSceneLift + uGlobalSceneLift * globalRamp + uShoulderSceneLift * shoulderRamp) * chromaPenalty;
                 float toneRatio = clamp(1.0 + (displayHeadroom - 1.0) * lift, 1.0, uMaxGainRatio);
 
                 float targetRatio = toneRatio;
@@ -501,12 +578,15 @@ class GpuReferenceGainmapProducer : GainmapProducer {
                     float hdrDisplayLuma = displayLuma(hdrSceneLuma, uFullHdrRatio);
                     float referenceRatio = clamp(hdrDisplayLuma / max(sdrLuma, 0.0001), uMinGainRatio, uMaxGainRatio);
                     float referenceWeight = clamp(
-                        gainmapSmoothstep(0.05, 0.98, sdrLuma * 0.70 + maxChannel * 0.30) *
-                        (0.35 * gainmapSmoothstep(0.65, 2.0, hdrSceneLuma) + 0.65 * gainmapSmoothstep(0.01, 0.28, hdrDisplayLuma - sdrLuma)),
+                        gainmapSmoothstep(uReferenceTonalStart, uReferenceTonalEnd, sdrLuma * 0.70 + maxChannel * 0.30) *
+                        (
+                            uReferenceHdrWeight * gainmapSmoothstep(uReferenceHdrStart, uReferenceHdrEnd, hdrSceneLuma) +
+                            uReferenceDeltaWeight * gainmapSmoothstep(uReferenceDeltaStart, uReferenceDeltaEnd, hdrDisplayLuma - sdrLuma)
+                        ),
                         0.0,
                         1.0
                     );
-                    targetRatio = toneRatio + max(referenceRatio - toneRatio, 0.0) * referenceWeight * 0.82;
+                    targetRatio = toneRatio + max(referenceRatio - toneRatio, 0.0) * referenceWeight * uReferenceExtraScale;
                 }
                 targetRatio = clamp(targetRatio, uMinGainRatio, uMaxGainRatio);
                 float normalizedStrength = clamp(uStrength, 0.25, 2.0);

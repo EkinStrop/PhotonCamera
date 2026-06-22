@@ -4,11 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
+import android.graphics.Gainmap
 import android.os.Build
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.data.UserPreferencesRepository
 import com.hinnka.mycamera.frame.FrameManager
 import com.hinnka.mycamera.frame.FrameRenderer
+import com.hinnka.mycamera.frame.FrameTemplate
+import com.hinnka.mycamera.hdr.GainmapResult
 import com.hinnka.mycamera.hdr.GainmapSourceSet
 import com.hinnka.mycamera.hdr.HlgImageProcessor
 import com.hinnka.mycamera.hdr.HdrBuffer
@@ -49,6 +52,16 @@ class PhotoProcessor(
 ) {
     private val hlgImageProcessor = HlgImageProcessor()
     private val colorCorrectionPipelineResolver = ColorCorrectionPipelineResolver(lutManager)
+
+    data class HdrFrameOutput(
+        val bitmap: Bitmap,
+        val gainmapResult: GainmapResult?,
+    )
+
+    private data class ResolvedFrame(
+        val template: FrameTemplate,
+        val metadata: MediaMetadata,
+    )
 
     private suspend fun shouldDecodeHlgInput(metadata: MediaMetadata): Boolean {
         val isHlg = metadata.dynamicRangeProfile == "HLG10"
@@ -137,14 +150,15 @@ class PhotoProcessor(
                             sharpening = finalSharpening,
                             noiseReduction = finalNoiseReduction,
                             chromaNoiseReduction = finalChromaNoiseReduction,
-                            useComputationalAperture = true
+                            useComputationalAperture = true,
+                            applyFrameWatermark = false
                         )
                         val hdrReferenceBitmap = hlgImageProcessor.createHdrReferenceFromRawSidecar(
                             buffer = hdrData.buffer,
                             width = hdrData.width,
                             height = hdrData.height
                         ).let {
-                            applyFrame(applyCrop(it, metadata, "hlg_sidecar_hdr"), metadata)
+                            applyCrop(it, metadata, "hlg_sidecar_hdr")
                         }
                         PLog.d(
                             "PhotoProcessor",
@@ -184,7 +198,8 @@ class PhotoProcessor(
                                     height = metadata.height
                                 )
                             }
-                            var sdrBitmap = source!!.sdrBase
+                            val hlgSource = source ?: return null
+                            var sdrBitmap = hlgSource.sdrBase
                             val sdrPostElapsed = measureTimeMillis {
                                 sdrBitmap = lutImageProcessor.applyLutStack(
                                     sdrBitmap,
@@ -197,11 +212,10 @@ class PhotoProcessor(
                                     finalDenoiseAlgorithm
                                 )
                                 sdrBitmap = applyCrop(sdrBitmap, metadata, "hlg_sdr")
-                                sdrBitmap = applyFrame(sdrBitmap, metadata)
                             }
 
-                            val hdrReferenceBitmap = source!!.hdrReference?.bitmap?.let {
-                                applyFrame(applyCrop(it, metadata, "hlg_hdr"), metadata)
+                            val hdrReferenceBitmap = hlgSource.hdrReference?.bitmap?.let {
+                                applyCrop(it, metadata, "hlg_hdr")
                             }
                             PLog.d(
                                 "PhotoProcessor",
@@ -213,7 +227,7 @@ class PhotoProcessor(
                                 sdrBase = sdrBitmap,
                                 hdrReference = hdrReferenceBitmap?.let { HdrBuffer(it, "hlg_bt2020_linear") },
                                 sourceKind = SourceKind.HLG_CAPTURE,
-                                confidence = source!!.confidence,
+                                confidence = hlgSource.confidence,
                                 displayHdrSdrRatio = readDisplayHdrSdrRatio()
                             )
                         } finally {
@@ -263,10 +277,11 @@ class PhotoProcessor(
                         sharpening = finalSharpening,
                         noiseReduction = finalNoiseReduction,
                         chromaNoiseReduction = finalChromaNoiseReduction,
-                        useComputationalAperture = true
+                        useComputationalAperture = true,
+                        applyFrameWatermark = false
                     )
                     source.sdrBase.recycle()
-                    source = source!!.copy(sdrBase = sdrBitmap)
+                    source = source.copy(sdrBase = sdrBitmap)
                 }
             }
         }
@@ -291,7 +306,8 @@ class PhotoProcessor(
                 sharpening = sharpening,
                 noiseReduction = noiseReduction,
                 chromaNoiseReduction = chromaNoiseReduction,
-                useComputationalAperture = true
+                useComputationalAperture = true,
+                applyFrameWatermark = false
             )
             return GainmapSourceSet(
                 sdrBase = sdrBitmap,
@@ -370,8 +386,7 @@ class PhotoProcessor(
         )
 
         sdrBitmap = applyCrop(sdrBitmap, metadata, "raw_sdr")
-        sdrBitmap = applyFrame(sdrBitmap, metadata)
-        hdrReferenceBitmap = hdrReferenceBitmap?.let { applyFrame(applyCrop(it, metadata, "raw_hdr"), metadata) }
+        hdrReferenceBitmap = hdrReferenceBitmap?.let { applyCrop(it, metadata, "raw_hdr") }
 
         GainmapSourceSet(
             sdrBase = sdrBitmap,
@@ -680,6 +695,7 @@ class PhotoProcessor(
         noiseReduction: Float = 0f,
         chromaNoiseReduction: Float = 0f,
         useComputationalAperture: Boolean = false,
+        applyFrameWatermark: Boolean = true,
     ): Bitmap = withContext(Dispatchers.IO) {
         var result = input
         val finalSharpening = metadata.sharpening ?: (if (metadata.isImported) 0f else sharpening)
@@ -716,9 +732,30 @@ class PhotoProcessor(
         )
 
         result = applyCrop(result, metadata, "bitmap")
-        result = applyFrame(result, metadata)
+        if (applyFrameWatermark) {
+            result = applyFrame(result, metadata)
+        }
 
         result
+    }
+
+    suspend fun applyFrameForHdrOutput(
+        input: Bitmap,
+        metadata: MediaMetadata,
+        gainmapResult: GainmapResult?,
+    ): HdrFrameOutput = withContext(Dispatchers.IO) {
+        val resolvedFrame = resolveFrame(input, metadata) ?: return@withContext HdrFrameOutput(input, gainmapResult)
+        val framedBitmap = frameRenderer.render(input, resolvedFrame.template, resolvedFrame.metadata)
+        if (framedBitmap === input) {
+            return@withContext HdrFrameOutput(input, gainmapResult)
+        }
+
+        val framedGainmapResult = frameGainmapResult(
+            input = input,
+            template = resolvedFrame.template,
+            gainmapResult = gainmapResult
+        )
+        HdrFrameOutput(framedBitmap, framedGainmapResult)
     }
 
 
@@ -802,29 +839,58 @@ class PhotoProcessor(
         input: Bitmap,
         metadata: MediaMetadata,
     ): Bitmap {
-        var result = input
-        // 2. 应用边框水印
-        if (metadata.frameId != null) {
-            val template = frameManager.loadTemplate(metadata.frameId)
-            if (template != null) {
-                val customProperties = frameManager.loadCustomProperties(metadata.frameId)
-                val finalMetadata = metadata.copy(
-                    deviceModel = metadata.deviceModel ?: Build.MODEL,
-                    brand = metadata.brand ?: Build.MANUFACTURER.replaceFirstChar { it.uppercase() },
-                    dateTaken = metadata.dateTaken ?: metadata.dateTaken ?: System.currentTimeMillis(),
-                    width = if (metadata.width > 0) metadata.width else result.width,
-                    height = if (metadata.height > 0) metadata.height else result.height,
-                    customProperties = metadata.customProperties.ifEmpty { customProperties }
-                )
+        val resolvedFrame = resolveFrame(input, metadata) ?: return input
+        return frameRenderer.render(input, resolvedFrame.template, resolvedFrame.metadata)
+    }
 
-                val framedResult = frameRenderer.render(
-                    result,
-                    template,
-                    finalMetadata,
-                )
-                result = framedResult
-            }
+    private suspend fun resolveFrame(
+        input: Bitmap,
+        metadata: MediaMetadata,
+    ): ResolvedFrame? {
+        val frameId = metadata.frameId ?: return null
+        val template = frameManager.loadTemplate(frameId) ?: return null
+        val customProperties = frameManager.loadCustomProperties(frameId)
+        val finalMetadata = metadata.copy(
+            deviceModel = metadata.deviceModel ?: Build.MODEL,
+            brand = metadata.brand ?: Build.MANUFACTURER.replaceFirstChar { it.uppercase() },
+            dateTaken = metadata.dateTaken ?: System.currentTimeMillis(),
+            width = if (metadata.width > 0) metadata.width else input.width,
+            height = if (metadata.height > 0) metadata.height else input.height,
+            customProperties = metadata.customProperties.ifEmpty { customProperties }
+        )
+        return ResolvedFrame(template, finalMetadata)
+    }
+
+    private fun frameGainmapResult(
+        input: Bitmap,
+        template: FrameTemplate,
+        gainmapResult: GainmapResult?,
+    ): GainmapResult? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || gainmapResult == null) {
+            return gainmapResult
         }
-        return result
+
+        val sourceGainmap = gainmapResult.gainmap
+        val sourceContents = sourceGainmap.getGainmapContents()
+        val framedContents = frameRenderer.renderGainmapContents(input, sourceContents, template)
+        if (framedContents === sourceContents) {
+            return gainmapResult
+        }
+
+        return gainmapResult.copy(
+            gainmap = copyGainmapWithContents(sourceGainmap, framedContents)
+        )
+    }
+
+    private fun copyGainmapWithContents(source: Gainmap, contents: Bitmap): Gainmap {
+        val copy = Gainmap(contents)
+        source.getRatioMin().also { copy.setRatioMin(it[0], it[1], it[2]) }
+        source.getRatioMax().also { copy.setRatioMax(it[0], it[1], it[2]) }
+        source.getGamma().also { copy.setGamma(it[0], it[1], it[2]) }
+        source.getEpsilonSdr().also { copy.setEpsilonSdr(it[0], it[1], it[2]) }
+        source.getEpsilonHdr().also { copy.setEpsilonHdr(it[0], it[1], it[2]) }
+        copy.setMinDisplayRatioForHdrTransition(source.getMinDisplayRatioForHdrTransition())
+        copy.setDisplayRatioForFullHdr(source.getDisplayRatioForFullHdr())
+        return copy
     }
 }

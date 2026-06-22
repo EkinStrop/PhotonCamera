@@ -537,10 +537,21 @@ object GalleryManager {
             if (preparedGainmapResult != null) {
                 PLog.d(TAG, "buildDetailHdrCache reused prepared gainmap for $photoId")
             }
-            FileOutputStream(tempFile).use { outputStream ->
-                if (!writeFinalJpeg(ultraHdrSource.sdrBase, outputStream, quality, gainmapResult)) {
-                    tempFile.delete()
-                    return@withContext false
+            val hdrOutput = photoProcessor.applyFrameForHdrOutput(
+                input = ultraHdrSource.sdrBase,
+                metadata = resolvedMetadata,
+                gainmapResult = gainmapResult
+            )
+            try {
+                FileOutputStream(tempFile).use { outputStream ->
+                    if (!writeFinalJpeg(hdrOutput.bitmap, outputStream, quality, hdrOutput.gainmapResult)) {
+                        tempFile.delete()
+                        return@withContext false
+                    }
+                }
+            } finally {
+                if (hdrOutput.bitmap !== ultraHdrSource.sdrBase && !hdrOutput.bitmap.isRecycled) {
+                    hdrOutput.bitmap.recycle()
                 }
             }
 
@@ -552,7 +563,7 @@ object GalleryManager {
             _detailHdrReadyEvents.tryEmit(photoId)
             PLog.d(
                 TAG,
-                "buildDetailHdrCache success: $photoId, source=${ultraHdrSource.sourceKind}, gainmap=${gainmapResult != null}"
+                "buildDetailHdrCache success: $photoId, source=${ultraHdrSource.sourceKind}, gainmap=${hdrOutput.gainmapResult != null}"
             )
             true
         } catch (e: Exception) {
@@ -809,6 +820,16 @@ object GalleryManager {
                     "processedBitmap = ${processedBitmap.colorSpace?.name}, ultraHdrSource=${ultraHdrSource?.sourceKind}, gainmap=${gainmapResult != null}"
                 )
 
+                val hdrOutput = sourceBitmap?.let {
+                    photoProcessor.applyFrameForHdrOutput(
+                        input = it,
+                        metadata = metadata,
+                        gainmapResult = gainmapResult
+                    )
+                }
+                val outputBitmap = hdrOutput?.bitmap ?: processedBitmap
+                val outputGainmapResult = hdrOutput?.gainmapResult ?: gainmapResult
+
                 val videoFile = File(getPhotoDir(context, id), VIDEO_FILE)
                 val isLivePhoto = videoFile.exists()
 
@@ -829,17 +850,17 @@ object GalleryManager {
                     val heicExported = exportEncodedPhotoToMediaStore(
                         context = context,
                         id = id,
-                        bitmap = processedBitmap,
+                        bitmap = outputBitmap,
                         metadata = metadata,
                         photoQuality = photoQuality,
                         baseFilename = baseFilename,
                         extension = HeicExportEncoder.EXTENSION,
                         mimeType = HeicExportEncoder.MIME_TYPE,
-                        gainmapResult = gainmapResult,
+                        gainmapResult = outputGainmapResult,
                         destination = exportDestination
                     )
                     if (heicExported) {
-                        processedBitmap.recycle()
+                        outputBitmap.recycle()
                         return@withContext true
                     }
                     PLog.w(TAG, "HEIC export unavailable or failed, falling back to JPEG for photo $id")
@@ -849,10 +870,10 @@ object GalleryManager {
                 val exportWriteElapsed = measureTimeMillis {
                     FileOutputStream(tempExportFile).use { outputStream ->
                         writeFinalJpeg(
-                            bitmap = processedBitmap,
+                            bitmap = outputBitmap,
                             outputStream = outputStream,
                             quality = photoQuality,
-                            gainmapResult = if (isLivePhoto) null else gainmapResult
+                            gainmapResult = if (isLivePhoto) null else outputGainmapResult
                         )
                     }
                 }
@@ -860,8 +881,8 @@ object GalleryManager {
 
                 ExifWriter.writeExif(
                     tempExportFile, metadata.toCaptureInfo().copy(
-                        imageWidth = processedBitmap.width,
-                        imageHeight = processedBitmap.height
+                        imageWidth = outputBitmap.width,
+                        imageHeight = outputBitmap.height
                     )
                 )
 
@@ -983,9 +1004,15 @@ object GalleryManager {
                     }
                     PLog.d(TAG, "Exported URI saved: $uri for photo $id")
 
+                    if (outputBitmap !== processedBitmap && !outputBitmap.isRecycled) {
+                        outputBitmap.recycle()
+                    }
                     return@withContext true
                 }
 
+                if (outputBitmap !== processedBitmap && !outputBitmap.isRecycled) {
+                    outputBitmap.recycle()
+                }
                 processedBitmap.recycle()
             } catch (e: Exception) {
                 PLog.e(TAG, "Failed to export photo", e)

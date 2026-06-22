@@ -14,6 +14,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import androidx.core.graphics.createBitmap
 import com.hinnka.mycamera.utils.PLog
+import kotlin.math.roundToInt
 
 
 /**
@@ -39,6 +40,13 @@ class FrameRenderer(
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val photoShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val photoClipPath = Path()
+    private val gainmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    private data class FrameGeometry(
+        val outputWidth: Int,
+        val outputHeight: Int,
+        val photoRect: RectF,
+    )
 
     /**
      * 渲染带边框的照片
@@ -251,6 +259,133 @@ class FrameRenderer(
             }
         }
 
+        return output
+    }
+
+    fun renderGainmapContents(
+        originalBitmap: Bitmap,
+        gainmapContents: Bitmap,
+        template: FrameTemplate,
+    ): Bitmap {
+        if (gainmapContents.isRecycled || originalBitmap.width <= 0 || originalBitmap.height <= 0) {
+            return gainmapContents
+        }
+
+        if (template.layout.position == FramePosition.IMAGE) {
+            return renderImageFrameGainmapContents(originalBitmap, gainmapContents, template.layout)
+        }
+
+        val geometry = calculateFrameGeometry(originalBitmap, template.layout) ?: return gainmapContents
+        if (
+            geometry.outputWidth == originalBitmap.width &&
+            geometry.outputHeight == originalBitmap.height &&
+            geometry.photoRect.left == 0f &&
+            geometry.photoRect.top == 0f
+        ) {
+            return gainmapContents
+        }
+
+        return renderGainmapIntoPhotoRect(
+            originalBitmap = originalBitmap,
+            gainmapContents = gainmapContents,
+            outputWidth = geometry.outputWidth,
+            outputHeight = geometry.outputHeight,
+            photoRect = geometry.photoRect
+        )
+    }
+
+    private fun calculateFrameGeometry(
+        originalBitmap: Bitmap,
+        layout: FrameLayout,
+    ): FrameGeometry? {
+        val expectedHeight = originalBitmap.height * 0.08f
+        val scale = expectedHeight / dpToPx(80)
+        val frameHeight = (dpToPx(layout.heightDp) * scale).toInt()
+        val borderWidth = (dpToPx(layout.borderWidthDp) * scale).toInt()
+
+        val outputWidth: Int
+        val outputHeight: Int
+        val photoLeft: Float
+        val photoTop: Float
+
+        when (layout.position) {
+            FramePosition.BOTTOM -> {
+                outputWidth = originalBitmap.width
+                outputHeight = originalBitmap.height + frameHeight
+                photoLeft = 0f
+                photoTop = 0f
+            }
+
+            FramePosition.TOP -> {
+                outputWidth = originalBitmap.width
+                outputHeight = originalBitmap.height + frameHeight
+                photoLeft = 0f
+                photoTop = frameHeight.toFloat()
+            }
+
+            FramePosition.BOTH -> {
+                outputWidth = originalBitmap.width + borderWidth * 2
+                outputHeight = originalBitmap.height + frameHeight * 2
+                photoLeft = borderWidth.toFloat()
+                photoTop = frameHeight.toFloat()
+            }
+
+            FramePosition.OVERLAY -> {
+                outputWidth = originalBitmap.width
+                outputHeight = originalBitmap.height
+                photoLeft = 0f
+                photoTop = 0f
+            }
+
+            FramePosition.BORDER -> {
+                outputWidth = originalBitmap.width + borderWidth * 2
+                outputHeight = originalBitmap.height + frameHeight + borderWidth
+                photoLeft = borderWidth.toFloat()
+                photoTop = borderWidth.toFloat()
+            }
+
+            FramePosition.IMAGE -> return null
+        }
+
+        if (outputWidth <= 0 || outputHeight <= 0) return null
+        return FrameGeometry(
+            outputWidth = outputWidth,
+            outputHeight = outputHeight,
+            photoRect = RectF(
+                photoLeft,
+                photoTop,
+                photoLeft + originalBitmap.width,
+                photoTop + originalBitmap.height
+            )
+        )
+    }
+
+    private fun renderGainmapIntoPhotoRect(
+        originalBitmap: Bitmap,
+        gainmapContents: Bitmap,
+        outputWidth: Int,
+        outputHeight: Int,
+        photoRect: RectF,
+    ): Bitmap {
+        val gainmapWidthScale = gainmapContents.width.toFloat() / originalBitmap.width.toFloat()
+        val gainmapHeightScale = gainmapContents.height.toFloat() / originalBitmap.height.toFloat()
+        val outputGainmapWidth = (outputWidth * gainmapWidthScale).roundToInt().coerceAtLeast(1)
+        val outputGainmapHeight = (outputHeight * gainmapHeightScale).roundToInt().coerceAtLeast(1)
+        val output = createNeutralGainmapBitmap(
+            width = outputGainmapWidth,
+            height = outputGainmapHeight,
+            source = gainmapContents
+        )
+        val canvas = Canvas(output)
+        val outputScaleX = outputGainmapWidth.toFloat() / outputWidth.toFloat()
+        val outputScaleY = outputGainmapHeight.toFloat() / outputHeight.toFloat()
+        val destination = RectF(
+            photoRect.left * outputScaleX,
+            photoRect.top * outputScaleY,
+            photoRect.right * outputScaleX,
+            photoRect.bottom * outputScaleY
+        )
+        canvas.drawBitmap(gainmapContents, null, destination, gainmapPaint)
         return output
     }
 
@@ -928,7 +1063,77 @@ class FrameRenderer(
      * @return 合成后的图片
      */
     private fun renderImageFrame(originalBitmap: Bitmap, layout: FrameLayout): Bitmap {
-        // 加载边框图片（使用 BitmapFactory 直接解码，避免 Drawable 缓存问题）
+        val frameBitmap = loadImageFrameBitmap(originalBitmap, layout) ?: return originalBitmap
+
+        // 检测透明区域的边界
+        val transparentBounds = detectTransparentBounds(frameBitmap)
+        if (transparentBounds.width() <= 0 || transparentBounds.height() <= 0) {
+            PLog.e(TAG, "No transparent area detected in frame image")
+            frameBitmap.recycle()
+            return originalBitmap
+        }
+
+        PLog.d(TAG, "Transparent bounds: $transparentBounds, frame size: ${frameBitmap.width}x${frameBitmap.height}")
+
+        // 保持模板图片原始尺寸，将原图按 centerCrop 方式填满透明区域，避免出现黑边。
+        val output = createBitmap(frameBitmap.width, frameBitmap.height)
+        val canvas = Canvas(output)
+
+        drawBitmapCenterCrop(
+            canvas = canvas,
+            bitmap = originalBitmap,
+            destination = RectF(transparentBounds)
+        )
+
+        // 再绘制边框图片（透明区域会显示下面的照片）
+        canvas.drawBitmap(frameBitmap, 0f, 0f, null)
+        frameBitmap.recycle()
+
+        return output
+    }
+
+    private fun renderImageFrameGainmapContents(
+        originalBitmap: Bitmap,
+        gainmapContents: Bitmap,
+        layout: FrameLayout
+    ): Bitmap {
+        val frameBitmap = loadImageFrameBitmap(originalBitmap, layout) ?: return gainmapContents
+        try {
+            val transparentBounds = detectTransparentBounds(frameBitmap)
+            if (transparentBounds.width() <= 0 || transparentBounds.height() <= 0) {
+                PLog.e(TAG, "No transparent area detected in frame image gainmap")
+                return gainmapContents
+            }
+
+            val output = createNeutralGainmapBitmap(
+                width = (frameBitmap.width * gainmapContents.width.toFloat() / originalBitmap.width.toFloat())
+                    .roundToInt()
+                    .coerceAtLeast(1),
+                height = (frameBitmap.height * gainmapContents.height.toFloat() / originalBitmap.height.toFloat())
+                    .roundToInt()
+                    .coerceAtLeast(1),
+                source = gainmapContents
+            )
+            val canvas = Canvas(output)
+            val outputScaleX = output.width.toFloat() / frameBitmap.width.toFloat()
+            val outputScaleY = output.height.toFloat() / frameBitmap.height.toFloat()
+            drawBitmapCenterCrop(
+                canvas = canvas,
+                bitmap = gainmapContents,
+                destination = RectF(
+                    transparentBounds.left * outputScaleX,
+                    transparentBounds.top * outputScaleY,
+                    transparentBounds.right * outputScaleX,
+                    transparentBounds.bottom * outputScaleY
+                )
+            )
+            return output
+        } finally {
+            frameBitmap.recycle()
+        }
+    }
+
+    private fun loadImageFrameBitmap(originalBitmap: Bitmap, layout: FrameLayout): Bitmap? {
         var frameBitmap = try {
             val options = BitmapFactory.Options().apply {
                 inMutable = true
@@ -941,7 +1146,7 @@ class FrameRenderer(
                     BitmapFactory.decodeFile(layout.imagePath, options)
                         ?: run {
                             PLog.e(TAG, "Frame image file not found: ${layout.imagePath}")
-                            return originalBitmap
+                            return null
                         }
                 }
 
@@ -949,23 +1154,23 @@ class FrameRenderer(
                     val resId = context.resources.getIdentifier(layout.imageResName, "drawable", context.packageName)
                     if (resId == 0) {
                         PLog.e(TAG, "Frame image resource not found: ${layout.imageResName}")
-                        return originalBitmap
+                        return null
                     }
                     BitmapFactory.decodeResource(context.resources, resId, options)
                         ?: run {
                             PLog.e(TAG, "Failed to decode frame image resource: ${layout.imageResName}")
-                            return originalBitmap
+                            return null
                         }
                 }
 
                 else -> {
                     PLog.e(TAG, "No image source specified for IMAGE frame")
-                    return originalBitmap
+                    return null
                 }
             }
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to load frame image", e)
-            return originalBitmap
+            return null
         }
 
         // 检查方向是否匹配，如果不匹配则旋转边框
@@ -993,31 +1198,14 @@ class FrameRenderer(
             }
         }
 
-        // 检测透明区域的边界
-        val transparentBounds = detectTransparentBounds(frameBitmap)
-        if (transparentBounds.width() <= 0 || transparentBounds.height() <= 0) {
-            PLog.e(TAG, "No transparent area detected in frame image")
-            frameBitmap.recycle()
-            return originalBitmap
+        return frameBitmap
+    }
+
+    private fun createNeutralGainmapBitmap(width: Int, height: Int, source: Bitmap): Bitmap {
+        val config = source.config?.takeUnless { it == Bitmap.Config.HARDWARE } ?: Bitmap.Config.ALPHA_8
+        return Bitmap.createBitmap(width, height, config).also {
+            it.eraseColor(Color.TRANSPARENT)
         }
-
-        PLog.d(TAG, "Transparent bounds: $transparentBounds, frame size: ${frameBitmap.width}x${frameBitmap.height}")
-
-        // 保持模板图片原始尺寸，将原图按 centerCrop 方式填满透明区域，避免出现黑边。
-        val output = createBitmap(frameBitmap.width, frameBitmap.height)
-        val canvas = Canvas(output)
-
-        drawBitmapCenterCrop(
-            canvas = canvas,
-            bitmap = originalBitmap,
-            destination = RectF(transparentBounds)
-        )
-
-        // 再绘制边框图片（透明区域会显示下面的照片）
-        canvas.drawBitmap(frameBitmap, 0f, 0f, null)
-        frameBitmap.recycle()
-
-        return output
     }
 
     private fun drawBitmapCenterCrop(
