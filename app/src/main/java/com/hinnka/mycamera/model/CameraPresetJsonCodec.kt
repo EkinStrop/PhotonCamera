@@ -50,7 +50,9 @@ internal object CameraPresetJsonCodec {
             useMFSR = obj.boolean("useMFSR", false),
             frameId = obj.stringOrNull("frameId"),
             rawDcpId = obj.stringOrNull("rawDcpId"),
-            rawRenderingEngine = parseRawColorEngine(obj.stringOrNull("rawColorEngine")),
+            rawRenderingEngine = parseRawRenderingEngine(
+                obj.stringOrNull("rawRenderingEngine") ?: obj.stringOrNull("rawColorEngine")
+            ),
             rawSpectralFilmStock = obj.stringOrNull("rawSpectralFilmStock"),
             rawSpectralFilmPrint = obj.stringOrNull("rawSpectralFilmPrint"),
             rawDROMode = parseDroMode(obj.stringOrNull("rawDROMode")),
@@ -58,14 +60,14 @@ internal object CameraPresetJsonCodec {
             rawBaselineLutId = obj.stringOrNull("rawBaselineLutId"),
             phantomBaselineLutId = obj.stringOrNull("phantomBaselineLutId"),
             isBuiltIn = obj.boolean("isBuiltIn", false)
-        ).withoutLegacyHdf()
+        ).normalizedForPersistence()
     }
 
     private fun parseAspectRatio(value: String?): String {
         return value?.let { AspectRatio.valueOfOrNull(it)?.name } ?: AspectRatio.RATIO_4_3.name
     }
 
-    private fun parseRawColorEngine(value: String?): String {
+    private fun parseRawRenderingEngine(value: String?): String {
         return RawRenderingEngine.fromPersistedName(value).name
     }
 

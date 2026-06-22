@@ -10,6 +10,53 @@ import org.junit.Test
 
 class CameraPresetJsonCodecTest {
     @Test
+    fun fromJson_readsCurrentRawRenderingEngineField() {
+        val source = CameraPreset(
+            id = "preset_current_raw_engine",
+            name = "Current RAW Engine",
+            lutId = null,
+            colorRecipe = ColorRecipeParams.DEFAULT,
+            effects = EffectParams.DEFAULT,
+            useRaw = true,
+            rawRenderingEngine = RawRenderingEngine.Spektrafilm.name,
+            rawSpectralFilmStock = "kodak_gold_200",
+            rawSpectralFilmPrint = "kodak_2383",
+            rawDROMode = "DR400"
+        )
+
+        val preset = CameraPreset.fromJson(source.toJson())
+
+        requireNotNull(preset)
+        assertEquals(RawRenderingEngine.Spektrafilm.name, preset.rawRenderingEngine)
+        assertEquals("kodak_gold_200", preset.rawSpectralFilmStock)
+        assertEquals("kodak_2383", preset.rawSpectralFilmPrint)
+        assertEquals("DR400", preset.rawDROMode)
+        assertTrue(preset.useRaw)
+    }
+
+    @Test
+    fun fromJson_resolvesRawAndMfsrConflict() {
+        val preset = CameraPreset.fromJson(
+            """
+            {
+              "id": "preset_raw_mfsr_conflict",
+              "name": "RAW MFSR Conflict",
+              "lutId": "standard",
+              "useRaw": true,
+              "useMFNR": false,
+              "useMFSR": true,
+              "colorRecipe": {},
+              "effects": {}
+            }
+            """.trimIndent()
+        )
+
+        requireNotNull(preset)
+        assertTrue(preset.useRaw)
+        assertFalse(preset.useMFSR)
+    }
+
+    @Test
     fun listFromJson_ignoresUnknownFieldsAndUsesCurrentDefaults() {
         val presets = CameraPreset.listFromJson(
             """

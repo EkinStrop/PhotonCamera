@@ -34,13 +34,26 @@ data class CameraPreset(
     // 是否为内置预设
     val isBuiltIn: Boolean = false
 ) {
-    fun toJson(): String = gson.toJson(withoutLegacyHdf())
+    fun toJson(): String = gson.toJson(normalizedForPersistence())
 
     fun withoutLegacyHdf(): CameraPreset {
         return copy(
             colorRecipe = colorRecipe.copy(halation = 0f),
             effects = effects.copy(hdf = 0f)
         )
+    }
+
+    fun withSupportedCaptureCombination(): CameraPreset {
+        val resolvedUseMFSR = useMFSR && !useRaw && !useMFNR
+        return if (resolvedUseMFSR == useMFSR) {
+            this
+        } else {
+            copy(useMFSR = resolvedUseMFSR)
+        }
+    }
+
+    fun normalizedForPersistence(): CameraPreset {
+        return withSupportedCaptureCombination().withoutLegacyHdf()
     }
 
     companion object {
@@ -158,6 +171,6 @@ data class CameraPreset(
 
         fun listFromJson(json: String): List<CameraPreset> = CameraPresetJsonCodec.listFromJson(json)
 
-        fun listToJson(list: List<CameraPreset>): String = gson.toJson(list.map { it.withoutLegacyHdf() })
+        fun listToJson(list: List<CameraPreset>): String = gson.toJson(list.map { it.normalizedForPersistence() })
     }
 }

@@ -162,6 +162,44 @@ private data class PresetMatchSnapshot(
             rawBaselineLutId == preset.rawBaselineLutId &&
             phantomBaselineLutId == preset.phantomBaselineLutId
     }
+
+    fun mismatchSummary(preset: com.hinnka.mycamera.model.CameraPreset): String {
+        val presetRawRenderingEngine = RawRenderingEngine.fromPersistedName(preset.rawRenderingEngine)
+        val differences = buildList {
+            if (lutId != preset.lutId) add("lutId current=$lutId preset=${preset.lutId}")
+            if (!colorRecipe.isSameAs(preset.colorRecipe)) add("colorRecipe differs")
+            if (effects != preset.effects) add("effects current=$effects preset=${preset.effects}")
+            if (aspectRatio != preset.aspectRatio) add("aspectRatio current=$aspectRatio preset=${preset.aspectRatio}")
+            if (useRaw != preset.useRaw) add("useRaw current=$useRaw preset=${preset.useRaw}")
+            if (useMFNR != preset.useMFNR) add("useMFNR current=$useMFNR preset=${preset.useMFNR}")
+            if (useHdrComposition != preset.useHdrComposition) {
+                add("useHdrComposition current=$useHdrComposition preset=${preset.useHdrComposition}")
+            }
+            if (useMFSR != preset.useMFSR) add("useMFSR current=$useMFSR preset=${preset.useMFSR}")
+            if (frameId != preset.frameId) add("frameId current=$frameId preset=${preset.frameId}")
+            if (rawDcpId != preset.rawDcpId) add("rawDcpId current=$rawDcpId preset=${preset.rawDcpId}")
+            if (rawRenderingEngine != presetRawRenderingEngine) {
+                add("rawRenderingEngine current=$rawRenderingEngine preset=$presetRawRenderingEngine")
+            }
+            if (rawSpectralFilmStock != preset.rawSpectralFilmStock) {
+                add("rawSpectralFilmStock current=$rawSpectralFilmStock preset=${preset.rawSpectralFilmStock}")
+            }
+            if (rawSpectralFilmPrint != preset.rawSpectralFilmPrint) {
+                add("rawSpectralFilmPrint current=$rawSpectralFilmPrint preset=${preset.rawSpectralFilmPrint}")
+            }
+            if (rawDROMode != preset.rawDROMode) add("rawDROMode current=$rawDROMode preset=${preset.rawDROMode}")
+            if (jpgBaselineLutId != preset.jpgBaselineLutId) {
+                add("jpgBaselineLutId current=$jpgBaselineLutId preset=${preset.jpgBaselineLutId}")
+            }
+            if (rawBaselineLutId != preset.rawBaselineLutId) {
+                add("rawBaselineLutId current=$rawBaselineLutId preset=${preset.rawBaselineLutId}")
+            }
+            if (phantomBaselineLutId != preset.phantomBaselineLutId) {
+                add("phantomBaselineLutId current=$phantomBaselineLutId preset=${preset.phantomBaselineLutId}")
+            }
+        }
+        return differences.joinToString("; ").ifEmpty { "unknown" }
+    }
 }
 
 private data class ActivePresetMatchState(
@@ -398,14 +436,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun applyPreset(preset: com.hinnka.mycamera.model.CameraPreset?) {
         viewModelScope.launch {
+            val resolvedPreset = preset?.withSupportedCaptureCombination()
             isApplyingPreset = true
             try {
                 PLog.d(
                     TAG,
-                    "Applying preset id=${preset?.id}, aspectRatio=${preset?.aspectRatio}, frameId=${preset?.frameId}"
+                    "Applying preset id=${resolvedPreset?.id}, aspectRatio=${resolvedPreset?.aspectRatio}, " +
+                        "frameId=${resolvedPreset?.frameId}"
                 )
                 applyCameraFeatureUpdate(
-                    preset.toCameraFeatureUpdate().copy(activePresetId = SettingValue(preset?.id)),
+                    resolvedPreset.toCameraFeatureUpdate().copy(activePresetId = SettingValue(resolvedPreset?.id)),
                     clearActivePresetOnMismatch = false
                 )
             } finally {
@@ -595,15 +635,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun savePreset(preset: com.hinnka.mycamera.model.CameraPreset) {
         viewModelScope.launch {
+            val resolvedPreset = preset.normalizedForPersistence()
             val currentList = customPresets.value.toMutableList()
-            val index = currentList.indexOfFirst { it.id == preset.id }
+            val index = currentList.indexOfFirst { it.id == resolvedPreset.id }
             if (index >= 0) {
-                currentList[index] = preset
+                currentList[index] = resolvedPreset
             } else {
-                currentList.add(preset)
+                currentList.add(resolvedPreset)
             }
             userPreferencesRepository.saveCustomPresets(currentList)
-            applyPreset(preset)
+            applyPreset(resolvedPreset)
         }
     }
 
@@ -661,7 +702,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         val snapshot = currentPresetMatchSnapshot()
         if (!snapshot.matches(preset)) {
-            PLog.d(TAG, "Active preset [$presetId] no longer matches current settings; showing default preset")
+            PLog.d(
+                TAG,
+                "Active preset [$presetId] no longer matches current settings; " +
+                    "mismatch=${snapshot.mismatchSummary(preset)}; showing default preset"
+            )
             userPreferencesRepository.saveActivePresetId(null)
         }
     }
@@ -676,7 +721,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         val snapshot = matchState.toPresetMatchSnapshot()
         if (!snapshot.matches(preset)) {
-            PLog.d(TAG, "Active preset [$presetId] no longer matches current settings; showing default preset")
+            PLog.d(
+                TAG,
+                "Active preset [$presetId] no longer matches current settings; " +
+                    "mismatch=${snapshot.mismatchSummary(preset)}; showing default preset"
+            )
             userPreferencesRepository.saveActivePresetId(null)
         }
     }
