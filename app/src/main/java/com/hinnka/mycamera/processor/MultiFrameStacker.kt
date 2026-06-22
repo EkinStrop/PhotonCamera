@@ -7,6 +7,7 @@ import java.nio.ByteBuffer
 import androidx.core.graphics.createBitmap
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.model.SafeImage
+import com.hinnka.mycamera.raw.DngProfileGainTableMap
 import com.hinnka.mycamera.utils.BitmapUtils
 import com.hinnka.mycamera.utils.LargeDirectBuffer
 
@@ -17,6 +18,7 @@ data class RawStackResult(
     val isNormalizedSensorData: Boolean,
     val blackLevel: FloatArray = floatArrayOf(0f, 0f, 0f, 0f),
     val fusedBayerUsesNativeAllocator: Boolean = false,
+    val profileGainTableMap: DngProfileGainTableMap? = null,
 )
 
 data class RawHdrStackFrame(

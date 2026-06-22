@@ -2658,22 +2658,8 @@ object GalleryManager {
                             "outputDomain=short, normalReference=${normalReferenceCandidate.exposureProduct}, " +
                             "short=${shortCandidate.exposureProduct}"
                 )
-                val rawHdrProfileGainTableMap = DngProfileGainTableMap.forHdrRawBuffer(
-                    rawBuffer = fusedBayerBuffer,
-                    width = stackResult.width,
-                    height = stackResult.height,
-                    cfaPattern = stackCfaPattern,
-                    baselineExposureEv = rawHdrBaselineExposureEv,
-                    blackLevel = stackResult.blackLevel,
-                    whiteLevel = if (stackResult.isNormalizedSensorData) 65535 else rawMetadata.whiteLevel.toInt(),
-                )
-                rawHdrProfileGainTableMap?.let {
-                    PLog.d(
-                        TAG,
-                        "RAW HDR DNG ProfileGainTableMap2: grid=${it.mapPointsH}x${it.mapPointsV} " +
-                            "points=${it.mapPointsN} baselineEv=$rawHdrBaselineExposureEv"
-                    )
-                }
+                val rawHdrProfileGainTableMap = stackResult.profileGainTableMap
+                    ?: DngProfileGainTableMap.forHdrBaselineExposure(rawHdrBaselineExposureEv)
                 val dngWritten = try {
                     trySaveStackedRawDng(
                         context = context,

@@ -27,12 +27,19 @@ data class DngProfileGainTableMap(
             mapSpacingV > 0.0 &&
             mapSpacingH > 0.0 &&
             mapInputWeights.size == MAP_INPUT_WEIGHT_COUNT &&
+            mapInputWeights.all { it.isFinite() } &&
             gamma in MIN_GAMMA..MAX_GAMMA &&
             gains.size == mapPointsV * mapPointsH * mapPointsN &&
-            gains.all { it.isFinite() && it >= 0f }
+            gains.all { it.isFinite() && it in MIN_GAIN_VALUE..MAX_GAIN_VALUE }
 
     fun encodeProfileGainTableMap2(byteOrder: ByteOrder): ByteArray {
         require(isValid) { "Invalid ProfileGainTableMap2" }
+        val gainMin = gains.minOrNull()
+            ?.coerceIn(MIN_GAIN_VALUE, MAX_GAIN_VALUE)
+            ?: 1f
+        val gainMax = gains.maxOrNull()
+            ?.coerceIn(gainMin, MAX_GAIN_VALUE)
+            ?: gainMin
         val buffer = ByteBuffer
             .allocate(PROFILE_GAIN_TABLE_MAP2_HEADER_BYTES + gains.size * FLOAT_BYTES)
             .order(byteOrder)
@@ -48,8 +55,8 @@ data class DngProfileGainTableMap(
         }
         buffer.putInt(DATA_TYPE_FLOAT32)
         buffer.putFloat(gamma)
-        buffer.putFloat(0f)
-        buffer.putFloat(0f)
+        buffer.putFloat(gainMin)
+        buffer.putFloat(gainMax)
         gains.forEach { buffer.putFloat(it) }
         return buffer.array()
     }
@@ -105,8 +112,10 @@ data class DngProfileGainTableMap(
         private const val DATA_TYPE_UINT16 = 1
         private const val DATA_TYPE_FLOAT16 = 2
         private const val DATA_TYPE_FLOAT32 = 3
-        private const val MIN_GAMMA = 0.25f
-        private const val MAX_GAMMA = 4.0f
+        private const val MIN_GAMMA = 0.125f
+        private const val MAX_GAMMA = 8.0f
+        private const val MIN_GAIN_VALUE = 0.000244140625f
+        private const val MAX_GAIN_VALUE = 4096.0f
         private const val HDR_PGTM_DEFAULT_TABLE_POINTS = 257
 
         fun forHdrBaselineExposure(
@@ -114,26 +123,6 @@ data class DngProfileGainTableMap(
             tablePointCount: Int = HDR_PGTM_DEFAULT_TABLE_POINTS,
         ): DngProfileGainTableMap? = DngHdrProfileGainTableGenerator.forHdrBaselineExposure(
             baselineExposureEv = baselineExposureEv,
-            tablePointCount = tablePointCount
-        )
-
-        fun forHdrRawBuffer(
-            rawBuffer: ByteBuffer,
-            width: Int,
-            height: Int,
-            cfaPattern: Int,
-            baselineExposureEv: Float,
-            blackLevel: FloatArray = floatArrayOf(0f, 0f, 0f, 0f),
-            whiteLevel: Int = 65535,
-            tablePointCount: Int = HDR_PGTM_DEFAULT_TABLE_POINTS,
-        ): DngProfileGainTableMap? = DngHdrProfileGainTableGenerator.forHdrRawBuffer(
-            rawBuffer = rawBuffer,
-            width = width,
-            height = height,
-            cfaPattern = cfaPattern,
-            baselineExposureEv = baselineExposureEv,
-            blackLevel = blackLevel,
-            whiteLevel = whiteLevel,
             tablePointCount = tablePointCount
         )
 
@@ -237,9 +226,12 @@ data class DngProfileGainTableMap(
             val mapPointsN = buffer.int
             val inputWeights = FloatArray(MAP_INPUT_WEIGHT_COUNT) { buffer.float }
             val dataType = buffer.int
-            val gamma = buffer.float.coerceIn(MIN_GAMMA, MAX_GAMMA)
+            val gamma = buffer.float
             val gainMin = buffer.float
             val gainMax = buffer.float
+            if (!gamma.isFinite() || gamma !in MIN_GAMMA..MAX_GAMMA) return null
+            if (!gainMin.isFinite() || gainMin < MIN_GAIN_VALUE) return null
+            if (!gainMax.isFinite() || gainMax > MAX_GAIN_VALUE || gainMax < gainMin) return null
             val count = checkedGainCount(mapPointsV, mapPointsH, mapPointsN) ?: return null
             val bytesPerGain = when (dataType) {
                 DATA_TYPE_UINT8 -> 1
@@ -263,7 +255,9 @@ data class DngProfileGainTableMap(
 
                     DATA_TYPE_FLOAT16 -> Half.toFloat(buffer.short)
                     else -> buffer.float
-                }.takeIf { value -> value.isFinite() && value >= 0f } ?: 1f
+                }.takeIf { value ->
+                    value.isFinite() && value in MIN_GAIN_VALUE..MAX_GAIN_VALUE
+                } ?: 1f
             }
             return DngProfileGainTableMap(
                 mapPointsV = mapPointsV,
