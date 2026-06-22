@@ -131,6 +131,7 @@ class Camera2Controller(private val context: Context) {
     // 缓存拍照所需的设备和 Reader，供状态机回调使用
     private var pendingCaptureDevice: CameraDevice? = null
     private var pendingCaptureReader: ImageReader? = null
+    private var pendingCaptureBaseExposureResult: CaptureResult? = null
     // ---------------------
 
     private var cameraDevice: CameraDevice? = null
@@ -610,12 +611,14 @@ class Camera2Controller(private val context: Context) {
     private fun runCaptureSequence() {
         val device = pendingCaptureDevice
         val reader = pendingCaptureReader
+        val baseExposureResult = pendingCaptureBaseExposureResult
         if (device != null && reader != null) {
-            performCapture(device, reader)
+            performCapture(device, reader, baseExposureResult)
         }
         // 清理缓存的数据
         pendingCaptureDevice = null
         pendingCaptureReader = null
+        pendingCaptureBaseExposureResult = null
     }
 
     /**
@@ -4000,6 +4003,7 @@ class Camera2Controller(private val context: Context) {
         val device = cameraDevice ?: return
         val reader = imageReader ?: return
 
+        val baseExposureResult = lastCaptureResult
         // 关键修复：每次拍照前重置拍摄结果
         lastCaptureResult = null
 
@@ -4027,13 +4031,14 @@ class Camera2Controller(private val context: Context) {
                 // 缓存拍照所需的参数，供状态机使用
                 pendingCaptureDevice = device
                 pendingCaptureReader = reader
+                pendingCaptureBaseExposureResult = baseExposureResult
 
                 PLog.d(TAG, "启动状态机拍照流程")
                 runPrecaptureSequence()
             } else {
                 // 其他情况（手动曝光、手电筒模式、不使用闪光灯）：直接拍照
                 PLog.d(TAG, "直接拍照")
-                performCapture(device, reader)
+                performCapture(device, reader, baseExposureResult)
             }
 
         } catch (e: Exception) {
@@ -4062,13 +4067,15 @@ class Camera2Controller(private val context: Context) {
             onHdrBracketCaptureFailed?.invoke()
             return
         }
+        val baseExposureResult = lastCaptureResult
         lastCaptureResult = null
         performHdrBracketCapture(
             device = device,
             reader = reader,
             session = session,
             zeroEvFrameCount = zeroEvFrameCount ?: resolveHdrBracketZeroEvFrameCount(_state.value),
-            playShutterSound = true
+            playShutterSound = true,
+            baseExposureResult = baseExposureResult
         )
     }
 
@@ -4077,7 +4084,8 @@ class Camera2Controller(private val context: Context) {
         reader: ImageReader,
         session: CameraCaptureSession,
         zeroEvFrameCount: Int,
-        playShutterSound: Boolean
+        playShutterSound: Boolean,
+        baseExposureResult: CaptureResult?
     ) {
         val isRawCapture = isRawCaptureReader(reader)
         val normalizedZeroEvFrameCount = zeroEvFrameCount.coerceIn(
@@ -4100,9 +4108,11 @@ class Camera2Controller(private val context: Context) {
                 onPlayShutterSound?.invoke()
             }
             val currentState = _state.value
-            val manualBaseExposure = resolveHdrBracketManualBaseExposure(currentState)
+            val manualBaseExposure = resolveHdrBracketManualBaseExposure(currentState, baseExposureResult)
+            logHdrBracketBaseExposure(currentState, baseExposureResult, manualBaseExposure)
             val requests = evOffsets.mapIndexed { index, evOffset ->
                 device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                    setTag(index)
                     addTarget(reader.surface)
                     applyBaseCameraSettings(
                         builder = this,
@@ -4139,6 +4149,7 @@ class Camera2Controller(private val context: Context) {
                 ) {
                     processOrBufferCaptureResult(result)
                     lastCaptureResult = result
+                    logHdrBracketActualExposure(request, result)
                 }
 
                 override fun onCaptureSequenceCompleted(
@@ -4201,23 +4212,55 @@ class Camera2Controller(private val context: Context) {
     /**
      * 执行实际的拍照操作
      */
-    private fun resolveHdrBracketManualBaseExposure(state: CameraState): Pair<Int, Long>? {
+    private fun resolveHdrBracketManualBaseExposure(
+        state: CameraState,
+        baseExposureResult: CaptureResult?
+    ): Pair<Int, Long>? {
         if (!isManualSensorSupported || !availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF)) {
             return null
         }
-        val result = lastCaptureResult
         val baseIso = if (state.isAutoExposure) {
-            result?.get(CaptureResult.SENSOR_SENSITIVITY)
+            baseExposureResult?.get(CaptureResult.SENSOR_SENSITIVITY)
         } else {
             state.iso
         } ?: return null
         val baseShutter = if (state.isAutoExposure) {
-            result?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+            baseExposureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
         } else {
             state.shutterSpeed
         } ?: return null
         if (baseIso <= 0 || baseShutter <= 0L) return null
         return Pair(baseIso, baseShutter)
+    }
+
+    private fun logHdrBracketBaseExposure(
+        state: CameraState,
+        baseExposureResult: CaptureResult?,
+        manualBaseExposure: Pair<Int, Long>?
+    ) {
+        val resultIso = baseExposureResult?.get(CaptureResult.SENSOR_SENSITIVITY)
+        val resultShutter = baseExposureResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        val resultCompensation = baseExposureResult?.get(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)
+        PLog.d(
+            TAG,
+            "HDR bracket base exposure: auto=${state.isAutoExposure}, " +
+                    "userComp=${state.exposureCompensation}, userBias=${state.exposureBias}, " +
+                    "resultIso=$resultIso, resultShutter=$resultShutter, resultComp=$resultCompensation, " +
+                    "manualBase=${manualBaseExposure?.first}/${manualBaseExposure?.second}"
+        )
+    }
+
+    private fun logHdrBracketActualExposure(request: CaptureRequest, result: CaptureResult) {
+        val requestIndex = request.tag as? Int
+        val actualIso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+        val actualShutter = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        val actualCompensation = result.get(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)
+        val aeMode = result.get(CaptureResult.CONTROL_AE_MODE)
+        PLog.d(
+            TAG,
+            "HDR bracket result[$requestIndex]: ISO=$actualIso, shutter=$actualShutter, " +
+                    "aeComp=$actualCompensation, aeMode=$aeMode"
+        )
     }
 
     private fun applyHdrBracketExposure(
@@ -4321,7 +4364,11 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun performCapture(device: CameraDevice, reader: ImageReader) {
+    private fun performCapture(
+        device: CameraDevice,
+        reader: ImageReader,
+        baseExposureResult: CaptureResult? = lastCaptureResult
+    ) {
         try {
             val isRawCapture = isRawCaptureReader(reader)
             val currentState = _state.value
@@ -4338,7 +4385,8 @@ class Camera2Controller(private val context: Context) {
                     reader = reader,
                     session = session,
                     zeroEvFrameCount = resolveHdrBracketZeroEvFrameCount(currentState),
-                    playShutterSound = false
+                    playShutterSound = false,
+                    baseExposureResult = baseExposureResult
                 )
                 return
             }
@@ -4505,6 +4553,7 @@ class Camera2Controller(private val context: Context) {
         internalCaptureState = STATE_PREVIEW
         pendingCaptureDevice = null
         pendingCaptureReader = null
+        pendingCaptureBaseExposureResult = null
 
         // 关键修复：检查相机和会话是否仍然有效
         val device = cameraDevice
@@ -4538,10 +4587,10 @@ class Camera2Controller(private val context: Context) {
     /**
      * 构建 CaptureInfo
      *
-     * 从 TotalCaptureResult 和 CameraCharacteristics 提取拍摄信息
+     * 从 CaptureResult 和 CameraCharacteristics 提取拍摄信息
      */
     fun rebuildCaptureInfo(
-        result: TotalCaptureResult?,
+        result: CaptureResult?,
         imageWidth: Int,
         imageHeight: Int,
         latitude: Double? = null,
@@ -4567,7 +4616,7 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to get camera characteristics for EXIF", e)
         }
 
-        // 从 TotalCaptureResult 获取曝光信息
+        // 从 CaptureResult 获取曝光信息
         val exposureTime = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: _state.value.shutterSpeed
         val iso = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: _state.value.iso
         val whiteBalance = result?.get(CaptureResult.CONTROL_AWB_MODE) ?: _state.value.awbTemperature
@@ -4814,7 +4863,7 @@ class Camera2Controller(private val context: Context) {
 
             // 构建 CaptureInfo
             val captureInfo = rebuildCaptureInfo(
-                result = if (effectiveResult is TotalCaptureResult) effectiveResult else result,
+                result = effectiveResult ?: result,
                 imageWidth = width,
                 imageHeight = height,
                 latitude = _state.value.latitude,

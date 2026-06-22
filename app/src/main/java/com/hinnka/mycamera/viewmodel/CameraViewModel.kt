@@ -4830,10 +4830,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val useSuperRes = false
             val superResScale = 1.0f
             val captureMode = if (zeroEvFrameCount > 1) "hdr_mfnr" else "hdr_bracket"
+            val metadataCaptureInfo = rebuildHdrMetadataCaptureInfo(
+                fallback = captureInfo,
+                captureResult = orderedCaptureResults.getOrNull(HDR_BRACKET_ZERO_INDEX),
+                image = baseImage,
+                characteristics = characteristics
+            )
             val metadata = buildPhotoMetadata(
                 width = (baseImage.width.toFloat() * superResScale).roundToInt(),
                 height = (baseImage.height.toFloat() * superResScale).roundToInt(),
-                captureInfo = captureInfo,
+                captureInfo = metadataCaptureInfo,
                 sharpeningValue = sharpeningValue,
                 noiseReductionValue = noiseReductionValue,
                 chromaNoiseReductionValue = chromaNoiseReductionValue,
@@ -4854,7 +4860,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
             val aspectRatio = metadata.ratio ?: state.value.aspectRatio
             val useGpuAccelerationValue = useGpuAcceleration.firstOrNull() ?: DeviceUtil.defaultGpuAcceleration
-            val colorSpace = android.graphics.ColorSpace.get(captureInfo.colorSpace)
+            val colorSpace = android.graphics.ColorSpace.get(metadataCaptureInfo.colorSpace)
             imagesHandedToGallery = true
             viewModelScope.launch(Dispatchers.IO) {
                 var fusedBitmap: Bitmap? = null
@@ -4958,6 +4964,46 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return exposureTime.toDouble() * iso.toDouble() * postRawBoost
     }
 
+    private fun rebuildHdrMetadataCaptureInfo(
+        fallback: CaptureInfo,
+        captureResult: CaptureResult?,
+        image: SafeImage,
+        characteristics: CameraCharacteristics?
+    ): CaptureInfo {
+        if (captureResult == null) {
+            PLog.w(TAG, "HDR metadata capture result missing; falling back to callback CaptureInfo")
+            return fallback.copy(
+                imageWidth = image.width,
+                imageHeight = image.height
+            )
+        }
+        val rebuilt = cameraController.rebuildCaptureInfo(
+            result = captureResult,
+            imageWidth = image.width,
+            imageHeight = image.height,
+            latitude = fallback.latitude,
+            longitude = fallback.longitude,
+            effectiveCharacteristics = characteristics
+        )
+        PLog.d(
+            TAG,
+            "HDR metadata exposure: ISO=${rebuilt.iso}, shutter=${rebuilt.exposureTime}, " +
+                    "aeComp=${captureResult.get(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)}"
+        )
+        return rebuilt
+    }
+
+    private fun selectRawHdrMetadataFrameIndex(
+        captureResults: List<CaptureResult?>,
+        frameCount: Int
+    ): Int {
+        val measuredProducts = captureResults.mapIndexedNotNull { index, result ->
+            result?.let { captureExposureProduct(it) }?.let { product -> index to product }
+        }
+        val selected = measuredProducts.maxByOrNull { it.second }?.first
+        return selected ?: if (frameCount > 1) 1 else 0
+    }
+
     private suspend fun processRawHdrBracket(
         images: List<SafeImage>,
         captureResults: List<CaptureResult?>,
@@ -4983,10 +5029,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val photoQualityValue = photoQuality.firstOrNull() ?: 95
             val captureMode = if (zeroEvFrameCount > 1) "raw_hdr_mfnr" else "raw_hdr_bracket"
             val baseImage = images.first()
+            val metadataFrameIndex = selectRawHdrMetadataFrameIndex(captureResults, images.size)
+            val metadataImage = images.getOrNull(metadataFrameIndex) ?: baseImage
+            val metadataCaptureInfo = rebuildHdrMetadataCaptureInfo(
+                fallback = captureInfo,
+                captureResult = captureResults.getOrNull(metadataFrameIndex),
+                image = metadataImage,
+                characteristics = characteristics
+            )
+            PLog.d(TAG, "RAW HDR metadata frame index=$metadataFrameIndex")
             val metadata = buildPhotoMetadata(
                 width = baseImage.width,
                 height = baseImage.height,
-                captureInfo = captureInfo,
+                captureInfo = metadataCaptureInfo,
                 sharpeningValue = sharpeningValue,
                 noiseReductionValue = noiseReductionValue,
                 chromaNoiseReductionValue = chromaNoiseReductionValue,
