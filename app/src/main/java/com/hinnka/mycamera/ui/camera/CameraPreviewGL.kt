@@ -49,12 +49,14 @@ fun CameraPreviewGL(
     colorRecipeParams: ColorRecipeParams,
     focusPoint: Pair<Float, Float>?,
     focusPointSource: FocusPointSource = FocusPointSource.MANUAL,
+    isFocusLocked: Boolean = false,
     isFocusing: Boolean,
     focusSuccess: Boolean?,
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: () -> Unit,
     onTap: (Float, Float, Int, Int) -> Unit,
+    onLongPress: (Float, Float, Int, Int) -> Unit,
     onHistogramUpdated: ((IntArray) -> Unit)? = null,
     onMeteringUpdated: ((Double, Double) -> Unit)? = null,
     onHighlightPointUpdated: ((Float, Float) -> Unit)? = null,
@@ -75,6 +77,8 @@ fun CameraPreviewGL(
     val lifecycleOwner = LocalLifecycleOwner.current
     var glSurfaceViewRef by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var resumeGeneration by remember { mutableIntStateOf(0) }
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -142,9 +146,14 @@ fun CameraPreviewGL(
                     viewHeight = size.height
                 }
                 .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        onTap(offset.x, offset.y, viewWidth, viewHeight)
-                    }
+                    detectTapGestures(
+                        onLongPress = { offset ->
+                            currentOnLongPress(offset.x, offset.y, viewWidth, viewHeight)
+                        },
+                        onTap = { offset ->
+                            currentOnTap(offset.x, offset.y, viewWidth, viewHeight)
+                        }
+                    )
                 }
         ) {
             // GLSurfaceView 用于相机预览
@@ -265,6 +274,7 @@ fun CameraPreviewGL(
             FocusIndicator(
                 position = focusPoint,
                 source = focusPointSource,
+                isFocusLocked = isFocusLocked,
                 isFocusing = isFocusing,
                 focusSuccess = focusSuccess,
                 modifier = Modifier.fillMaxSize()

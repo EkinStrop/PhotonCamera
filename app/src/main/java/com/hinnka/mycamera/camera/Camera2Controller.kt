@@ -430,13 +430,17 @@ class Camera2Controller(private val context: Context) {
                         aiFocusFallbackFrames = 0
                         _state.value = _state.value.copy(isFocusing = false, focusSuccess = true)
                         // 只在首次锁定时记录一次，后续 AF 狩猎重新锁定不再覆盖
-                        if (!isFocusLockedWaitingForSceneChange) recordFocusLockExposure(result)
+                        if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
+                            recordFocusLockExposure(result)
+                        }
                     }
 
                     CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> {
                         aiFocusFallbackFrames = 0
                         _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
-                        if (!isFocusLockedWaitingForSceneChange) recordFocusLockExposure(result)
+                        if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
+                            recordFocusLockExposure(result)
+                        }
                     }
                 }
                 if (_state.value.isFocusing &&
@@ -447,7 +451,9 @@ class Camera2Controller(private val context: Context) {
                     if (aiFocusFallbackFrames == 0) {
                         PLog.d(TAG, "AI focus fallback complete")
                         _state.value = _state.value.copy(isFocusing = false, focusSuccess = true)
-                        if (!isFocusLockedWaitingForSceneChange) recordFocusLockExposure(result)
+                        if (!_state.value.isFocusLocked && !isFocusLockedWaitingForSceneChange) {
+                            recordFocusLockExposure(result)
+                        }
                     }
                 }
             }
@@ -3061,6 +3067,10 @@ class Camera2Controller(private val context: Context) {
         builder.set(CaptureRequest.CONTROL_AE_REGIONS, null)
     }
 
+    private fun clearCustomAfRegions(builder: CaptureRequest.Builder) {
+        builder.set(CaptureRequest.CONTROL_AF_REGIONS, null)
+    }
+
     /**
      * 将色温转换为最接近的预设 AWB 模式
      *
@@ -3311,7 +3321,8 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(
             isAutoFocus = auto,
             isHyperfocalFocusEnabled = false,
-            hyperfocalDistanceMeters = 0f
+            hyperfocalDistanceMeters = 0f,
+            isFocusLocked = false
         )
         previewRequestBuilder?.apply {
             applyFocusSettings(this, _state.value)
@@ -3331,7 +3342,8 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(
             focusDistance = clampedDistance,
             isHyperfocalFocusEnabled = false,
-            hyperfocalDistanceMeters = 0f
+            hyperfocalDistanceMeters = 0f,
+            isFocusLocked = false
         )
 
         if (!_state.value.isAutoFocus) {
@@ -3389,7 +3401,8 @@ class Camera2Controller(private val context: Context) {
             isAutoFocus = false,
             focusDistance = clampedFocusDistance,
             isHyperfocalFocusEnabled = true,
-            hyperfocalDistanceMeters = result.distanceMeters
+            hyperfocalDistanceMeters = result.distanceMeters,
+            isFocusLocked = false
         )
 
         if (updatePreview) {
@@ -3420,7 +3433,8 @@ class Camera2Controller(private val context: Context) {
             isAutoFocus = restoreAutoFocus,
             focusDistance = restoreFocusDistance,
             isHyperfocalFocusEnabled = false,
-            hyperfocalDistanceMeters = 0f
+            hyperfocalDistanceMeters = 0f,
+            isFocusLocked = false
         )
 
         if (updatePreview) {
@@ -3519,14 +3533,25 @@ class Camera2Controller(private val context: Context) {
             val afMode = resolveAutoFocusMode(_state.value.captureMode)
             set(CaptureRequest.CONTROL_AF_MODE, afMode)
             _state.value = _state.value.copy(currentAfMode = afMode)
+            clearCustomAfRegions(this)
             applyMeteringRegions()
             updatePreview()
         }
-        _state.value = _state.value.copy(focusPoint = null, isFocusing = false, focusSuccess = null)
+        _state.value = _state.value.copy(
+            focusPoint = null,
+            isFocusLocked = false,
+            isFocusing = false,
+            focusSuccess = null
+        )
     }
 
     fun cancelSubjectFocus(reason: String) {
         PLog.d(TAG, "Cancel subject focus: $reason")
+        restoreContinuousAf()
+    }
+
+    fun unlockFocus() {
+        PLog.d(TAG, "Unlock focus")
         restoreContinuousAf()
     }
 
@@ -3546,6 +3571,7 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(
             focusPoint = null,
             focusPointSource = FocusPointSource.MANUAL,
+            isFocusLocked = false,
             isFocusing = false,
             focusSuccess = null
         )
@@ -3559,10 +3585,22 @@ class Camera2Controller(private val context: Context) {
         focusOnNormalizedPoint(x / viewWidth, y / viewHeight, FocusPointSource.MANUAL)
     }
 
+    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
+        if (viewWidth <= 0 || viewHeight <= 0) return
+        PLog.d(TAG, "Lock focus on point: x=$x y=$y w=$viewWidth h=$viewHeight")
+        focusOnNormalizedPoint(
+            normX = x / viewWidth,
+            normY = y / viewHeight,
+            source = FocusPointSource.MANUAL,
+            lockFocus = true
+        )
+    }
+
     fun focusOnNormalizedPoint(
         normX: Float,
         normY: Float,
         source: FocusPointSource = FocusPointSource.AI,
+        lockFocus: Boolean = false,
     ) {
         val openCameraId = getCurrentOpenCameraId()
         if (openCameraId.isEmpty()) return
@@ -3585,6 +3623,7 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(
                 focusPoint = Pair(normalizedX, normalizedY),
                 focusPointSource = source,
+                isFocusLocked = lockFocus,
                 isFocusing = true,
                 focusSuccess = null
             )
@@ -3636,7 +3675,6 @@ class Camera2Controller(private val context: Context) {
                         MeteringMode.SPOT -> 0.03f
                         MeteringMode.CENTER_WEIGHTED -> 0.2f
                         MeteringMode.HIGHLIGHT_PRIORITY -> 0.08f
-                        else -> 0.1f
                     }
                     val aeSize = (activeRect.width() * aeSizeFraction).toInt()
                     val aeRect = android.graphics.Rect(

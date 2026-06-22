@@ -283,6 +283,7 @@ data class CameraState(
     val minimumFocusDistance: Float = 0f, // 最小对焦距离
     val focusPoint: Pair<Float, Float>? = null, // normalized coordinates (0-1)
     val focusPointSource: FocusPointSource = FocusPointSource.MANUAL,
+    val isFocusLocked: Boolean = false,
     val isFocusing: Boolean = false,
     val focusSuccess: Boolean? = null,
     val currentAfMode: Int? = null, // 当前的 AF 模式

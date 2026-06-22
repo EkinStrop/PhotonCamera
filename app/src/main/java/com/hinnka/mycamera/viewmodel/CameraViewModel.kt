@@ -2713,6 +2713,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.focusOnPoint(x, y, viewWidth, viewHeight)
     }
 
+    fun lockFocusOnPoint(x: Float, y: Float, viewWidth: Int, viewHeight: Int) {
+        cameraController.lockFocusOnPoint(x, y, viewWidth, viewHeight)
+    }
+
+    fun unlockFocus() {
+        cameraController.unlockFocus()
+    }
+
     fun toggleFlash() {
         cameraController.setFlashMode(
             when (state.value.flashMode) {

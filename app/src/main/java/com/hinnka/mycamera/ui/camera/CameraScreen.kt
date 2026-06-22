@@ -906,6 +906,7 @@ fun CameraScreen(
                         colorRecipeParams = previewRecipeParamsOverride ?: mergedRecipeParams,
                         focusPoint = state.focusPoint,
                         focusPointSource = state.focusPointSource,
+                        isFocusLocked = state.isFocusLocked,
                         isFocusing = state.isFocusing,
                         focusSuccess = state.focusSuccess,
                         meteringMode = state.meteringMode,
@@ -918,12 +919,19 @@ fun CameraScreen(
                             cameraOpened = false
                         },
                         onTap = { x, y, w, h ->
-                            // 如果 LUT 面板打开，点击预览区域关闭面板
+                            if (state.isFocusLocked) {
+                                viewModel.unlockFocus()
+                            } else if (activePanel != ActivePanel.NONE) {
+                                activePanel = ActivePanel.NONE
+                            } else {
+                                viewModel.focusOnPoint(x, y, w, h)
+                            }
+                        },
+                        onLongPress = { x, y, w, h ->
                             if (activePanel != ActivePanel.NONE) {
                                 activePanel = ActivePanel.NONE
                             } else {
-                                // 否则执行对焦
-                                viewModel.focusOnPoint(x, y, w, h)
+                                viewModel.lockFocusOnPoint(x, y, w, h)
                             }
                         },
                         onHistogramUpdated = { viewModel.handleHistogramUpdate(it) },
