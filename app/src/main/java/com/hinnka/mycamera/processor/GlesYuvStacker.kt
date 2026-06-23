@@ -107,6 +107,7 @@ class GlesYuvStacker(
     private var tileMaskProgram = 0
     private var accumulateProgram = 0
     private var normalizeProgram = 0
+    private var readbackResolveProgram = 0
     private var alignedFrameOutputProgram = 0
     private var mertensWeightProgram = 0
     private var mertensNormalizeProgram = 0
@@ -149,14 +150,16 @@ class GlesYuvStacker(
     private var hdrHighTexture = 0
     private var hdrLowTexture = 0
     private var outputTexture = 0
+    private var readbackTexture = 0
 
     private var gridWidth = 0
     private var gridHeight = 0
     private val renderOutputWidth = outputWidth
     private val renderOutputHeight = outputHeight
     private val normalizedRotation = normalizeRotation(rotation)
-    private val gpuOutputWidth = renderOutputWidth
-    private val gpuOutputHeight = renderOutputHeight
+    private val cpuRotateReadback = normalizedRotation == 90 || normalizedRotation == 270
+    private val gpuOutputWidth = if (cpuRotateReadback) renderOutputHeight else renderOutputWidth
+    private val gpuOutputHeight = if (cpuRotateReadback) renderOutputWidth else renderOutputHeight
     private val highPrecisionInput = inputFormat == ImageFormat.YCBCR_P010
     private val lumaInternalFormat = if (highPrecisionInput) GLES30.GL_R16F else GLES30.GL_R8
     private val chromaInternalFormat = if (highPrecisionInput) GLES30.GL_RG16F else GLES30.GL_RG8
@@ -452,6 +455,7 @@ class GlesYuvStacker(
         tileMaskProgram = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, TILE_MASK_FRAGMENT_SHADER, "tile_mask")
         accumulateProgram = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, ACCUMULATE_FRAGMENT_SHADER, "accumulate")
         normalizeProgram = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, NORMALIZE_FRAGMENT_SHADER, "normalize")
+        readbackResolveProgram = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, READBACK_RESOLVE_FRAGMENT_SHADER, "readback_resolve")
         p010LumaProgram = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, P010_LUMA_FRAGMENT_SHADER, "p010_luma")
         p010ChromaProgram = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, P010_CHROMA_FRAGMENT_SHADER, "p010_chroma")
         planarChroma8Program = linkGraphicsProgram(FULLSCREEN_VERTEX_SHADER, PLANAR_CHROMA_8_FRAGMENT_SHADER, "planar_chroma_8")
@@ -494,6 +498,9 @@ class GlesYuvStacker(
         accumulatorScratchTexture = createTexture2D(width, height, GLES30.GL_RGBA16F, GLES30.GL_NEAREST)
         currentAccumulatorTexture = accumulatorTexture
         outputTexture = createTexture2D(gpuOutputWidth, gpuOutputHeight, GLES30.GL_RGBA8, GLES30.GL_NEAREST)
+        if (cpuRotateReadback) {
+            readbackTexture = createTexture2D(renderOutputWidth, renderOutputHeight, GLES30.GL_RGBA8, GLES30.GL_NEAREST)
+        }
 
         renderFbo = createFramebuffer()
         readbackFbo = createFramebuffer()
@@ -1161,8 +1168,9 @@ class GlesYuvStacker(
         GLES31.glUniform1f(GLES31.glGetUniformLocation(normalizeProgram, "uNoiseBeta"), NOISE_BETA)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(normalizeProgram, "uIsP010"), if (highPrecisionInput) 1 else 0)
         GLES31.glUniform1i(GLES31.glGetUniformLocation(normalizeProgram, "uApplyDenoise"), if (applyDenoise) 1 else 0)
-        GLES31.glUniform1i(GLES31.glGetUniformLocation(normalizeProgram, "uDirectSource"), 0)
-        GLES31.glUniform2i(GLES31.glGetUniformLocation(normalizeProgram, "uDirectOffset"), 0, 0)
+        val directOffset = computeDirectSourceOffset()
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(normalizeProgram, "uDirectSource"), if (cpuRotateReadback) 1 else 0)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(normalizeProgram, "uDirectOffset"), directOffset[0], directOffset[1])
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         finishFramebufferPass(label)
     }
@@ -1193,8 +1201,9 @@ class GlesYuvStacker(
             transform[4],
             transform[5],
         )
-        GLES31.glUniform1i(GLES31.glGetUniformLocation(alignedFrameOutputProgram, "uDirectSource"), 0)
-        GLES31.glUniform2i(GLES31.glGetUniformLocation(alignedFrameOutputProgram, "uDirectOffset"), 0, 0)
+        val directOffset = computeDirectSourceOffset()
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(alignedFrameOutputProgram, "uDirectSource"), if (cpuRotateReadback) 1 else 0)
+        GLES31.glUniform2i(GLES31.glGetUniformLocation(alignedFrameOutputProgram, "uDirectOffset"), directOffset[0], directOffset[1])
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
         finishFramebufferPass(label)
     }
@@ -1506,16 +1515,19 @@ class GlesYuvStacker(
             return null
         }
 
-        val bufferByteCount = gpuOutputWidth.toLong() * gpuOutputHeight.toLong() * 4L
+        val readTexture = resolveReadbackTexture()
+        val readWidth = renderOutputWidth
+        val readHeight = renderOutputHeight
+        val bufferByteCount = readWidth.toLong() * readHeight.toLong() * 4L
         val buffer = LargeDirectBuffer.allocate(bufferByteCount, "GLES YUV stack readback") ?: return null
         try {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, readbackFbo)
-            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, outputTexture, 0)
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, readTexture, 0)
             GLES30.glReadBuffer(GLES30.GL_COLOR_ATTACHMENT0)
             checkFramebuffer("readOutputBitmap")
             GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 1)
-            GLES30.glViewport(0, 0, gpuOutputWidth, gpuOutputHeight)
-            GLES30.glReadPixels(0, 0, gpuOutputWidth, gpuOutputHeight, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
+            GLES30.glViewport(0, 0, readWidth, readHeight)
+            GLES30.glReadPixels(0, 0, readWidth, readHeight, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             buffer.position(0)
             bitmap.copyPixelsFromBuffer(buffer)
@@ -1524,6 +1536,25 @@ class GlesYuvStacker(
             LargeDirectBuffer.free(buffer)
         }
         return bitmap
+    }
+
+    private fun resolveReadbackTexture(): Int {
+        if (!cpuRotateReadback) {
+            return outputTexture
+        }
+        bindFramebufferOutput(readbackTexture, "resolveReadbackRotation")
+        GLES30.glViewport(0, 0, renderOutputWidth, renderOutputHeight)
+        GLES30.glUseProgram(readbackResolveProgram)
+        bindTexture(readbackResolveProgram, "uInputTexture", 0, outputTexture)
+        GLES31.glUniform2i(
+            GLES31.glGetUniformLocation(readbackResolveProgram, "uInputSize"),
+            gpuOutputWidth,
+            gpuOutputHeight,
+        )
+        GLES31.glUniform1i(GLES31.glGetUniformLocation(readbackResolveProgram, "uRotation"), normalizedRotation)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+        finishFramebufferPass("resolveReadbackRotation")
+        return readbackTexture
     }
 
     private fun createTexture2D(
@@ -1674,7 +1705,37 @@ class GlesYuvStacker(
     }
 
     private fun computeRenderTransform(): FloatArray {
-        return computeNormalizeTransform()
+        if (!cpuRotateReadback) {
+            return computeNormalizeTransform()
+        }
+        val offset = computeDirectSourceOffset()
+        val offsetX = offset[0].toFloat()
+        val offsetY = offset[1].toFloat()
+        return floatArrayOf(
+            1.0f, 0.0f, offsetX,
+            0.0f, 1.0f, offsetY,
+        )
+    }
+
+    private fun computeDirectSourceOffset(): IntArray {
+        if (!cpuRotateReadback) {
+            return intArrayOf(0, 0)
+        }
+        val rotatedWidth = if (normalizedRotation == 90 || normalizedRotation == 270) height else width
+        val rotatedHeight = if (normalizedRotation == 90 || normalizedRotation == 270) width else height
+        val cropX = ((rotatedWidth - outputWidth).coerceAtLeast(0) / 4) * 2
+        val cropY = ((rotatedHeight - outputHeight).coerceAtLeast(0) / 4) * 2
+        return when (normalizedRotation) {
+            90 -> intArrayOf(
+                cropY,
+                height - cropX - gpuOutputHeight,
+            )
+            270 -> intArrayOf(
+                width - cropY - gpuOutputWidth,
+                cropX,
+            )
+            else -> intArrayOf(0, 0)
+        }
     }
 
     companion object {
@@ -2601,6 +2662,28 @@ class GlesYuvStacker(
             uniform sampler2D uInputTexture;
             void main() {
                 fragColor = vec4(clamp(texture(uInputTexture, vTexCoord).rgb, 0.0, 1.0), 1.0);
+            }
+        """.trimIndent()
+
+        private val READBACK_RESOLVE_FRAGMENT_SHADER = """
+            #version 300 es
+            precision highp float;
+            precision highp int;
+            uniform sampler2D uInputTexture;
+            uniform ivec2 uInputSize;
+            uniform int uRotation;
+            out vec4 fragColor;
+
+            void main() {
+                ivec2 dst = ivec2(gl_FragCoord.xy);
+                ivec2 src;
+                if (uRotation == 90) {
+                    src = ivec2(dst.y, uInputSize.y - 1 - dst.x);
+                } else {
+                    src = ivec2(uInputSize.x - 1 - dst.y, dst.x);
+                }
+                src = clamp(src, ivec2(0), uInputSize - ivec2(1));
+                fragColor = texelFetch(uInputTexture, src, 0);
             }
         """.trimIndent()
 
