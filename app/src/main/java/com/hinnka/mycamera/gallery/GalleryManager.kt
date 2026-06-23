@@ -129,6 +129,14 @@ object GalleryManager {
         val hasAudio: Boolean?
     )
 
+    data class PhotoDirectoryRecoveryResult(
+        val scannedCount: Int,
+        val restoredCount: Int,
+        val skippedExistingCount: Int,
+        val skippedUnsupportedCount: Int,
+        val failedCount: Int
+    )
+
     data class HdrSidecarData(
         val buffer: ByteBuffer,
         val width: Int,
@@ -3583,6 +3591,15 @@ object GalleryManager {
     private suspend fun saveMetadataInternal(context: Context, photoId: String, metadata: MediaMetadata): Boolean {
         getPhotoDir(context, photoId, true)
         return GalleryMediaStore.saveMetadata(context, photoId, metadata)
+    }
+
+    /**
+     * 扫描 App 私有照片目录，将文件存在但数据库缺失的记录补回图库数据库。
+     *
+     * 这是开发期维护入口：不覆盖已有数据库记录，只为缺失的 photoId 重建最小可用元数据。
+     */
+    suspend fun recoverPrivatePhotoDirectoryToDatabase(context: Context): PhotoDirectoryRecoveryResult {
+        return PrivatePhotoDirectoryRecovery.recover(context)
     }
 
     /**
