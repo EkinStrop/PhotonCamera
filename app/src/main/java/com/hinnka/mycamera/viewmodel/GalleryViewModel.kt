@@ -2260,29 +2260,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * 获取指定照片的完整转换器（LUT + 边框）
+     * 获取指定照片的缩略图转换器（LUT + 边框）
      */
     fun getPhotoTransformation(photo: MediaData): PhotoTransformation? {
         if (photo.isVideo) return null
         val metadata = photo.metadata ?: return null
 
-        // 使用照片自己的 metadata 中保存的处理参数，如果没有则使用全局设置
-        // 导入的照片默认不应用处理（除非用户编辑过）
-        val photoSharpening =
-            metadata.sharpening ?: (if (metadata.isImported) 0f else sharpening.value)
-        val photoNoiseReduction =
-            metadata.noiseReduction ?: (if (metadata.isImported) 0f else noiseReduction.value)
-        val photoChromaNoiseReduction =
-            metadata.chromaNoiseReduction
-                ?: (if (metadata.isImported) 0f else chromaNoiseReduction.value)
+        // 缩略图不跑锐化/降噪，避免小图在 GL bitmap 后处理后出现异常纯色输出。
 
         return PhotoTransformation(
             context = getApplication<Application>(),
             metadata = metadata,
             photoProcessor = contentRepository.photoProcessor,
-            sharpening = photoSharpening,
-            noiseReduction = photoNoiseReduction,
-            chromaNoiseReduction = photoChromaNoiseReduction
         )
     }
 
